@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Personal Finance Dashboard</title>
+
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+    
+
+    <aside class="sidebar">
+
+        <h2>Finance</h2>
+
+        <nav>
+            <a href="#">Dashboard</a>
+            <a href="#">Transaction</a>
+            <a href="#">Investment</a>
+            <a href="#">Categories</a>
+            <a href="#">Settings</a>
+        </nav>
+    
+    </aside>
+
+    <main>
+
+        <header>
+            <h1>Finance Dashboard</h1>
+        </header>
+
+        <section>
+            <h2>Ringkasan Keuangan</h2>
+
+            <div class="summary-cards">
+                <div class="card">
+                    <p>Saldo</p>
+                    <h3 id="saldo">0</h3>
+
+                </div>
+
+                <div class="card">
+                    <p>Pemasukan</p>
+                    <h3 id="pemasukan">0</h3>
+                </div>
+
+                <div class="card">
+                    <p>Pengeluaran</p>
+                    <h3 id="pengeluaran">0</h3>
+                </div>
+            </div>
+        </section>
+
+        <section>
+            <h2>Tambah Transaksi</h2>
+
+            <form id="transactionForm">
+
+                <input 
+                type="text"
+                id="namaTransaksi"
+                placeholder="Nama Transaksi">
+
+                <input 
+                type="number"
+                id="nominal"
+                placeholder="Nominal"
+                >
+
+                <select id="tipe">
+                    <option value="income">Pemasukan</option>
+                    <option value="expense">Pengeluaran</option>
+                </select>
+
+                <button type="submit">
+                    Tambah Transaksi
+                </button>
+            </form>
+        </section>
+
+        <section>
+            <h2>Riwayat Transaksi</h2>
+
+            <div id="transactionList"></div>
+        </section>
+    </main>
+
+    <script src="script.js"></script>
+    
+</body>
+</html>
