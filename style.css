@@ -101,3 +101,68 @@ header h1 {
     border: 1px solid #e2e8f0;
     border-radius: 14px;
 }
+
+.income {
+    color: #10b981;
+    border-left: 4px solid #10b981;
+}
+
+.expense {
+    color: #f43f5e;
+    border-left: 4px solid #f43f5e;
+}
+
+.income,
+.expense {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 16px 20px;
+    margin-bottom: 12px;
+    background-color: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+}
+
+.income p,
+.expense p {
+    margin: 0;
+}
+
+.income p:first-child,
+.expense p:first-child {
+    font-weight: 600;
+    margin-bottom: 4px;
+}
+
+.category {
+    display: inline-block;
+    margin-bottom: 4px;
+    font-size: 12px;
+    padding: 4px 8px;
+    border-radius: 6px;
+    background-color: #f1f5f9;
+    color: #64748b;
+}
+
+.income button,
+.expense button {
+    border: none;
+    padding: 7px 12px;
+    border-radius: 7px;
+    cursor: pointer;
+    background-color: #f1f5f9;
+}
+
+.income-text {
+    color: #10b981;
+}
+
+.expense-text {
+    color: #f43f5e;
+}
+
+.income button:hover,
+.expense button:hover {
+    background-color: #e2e8f0;
+}

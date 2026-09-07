@@ -78,28 +78,48 @@
         <section>
             <h2>Tambah Transaksi</h2>
 
+            <button type="button" id="cancelEdit">Batal Edit</button>
+
             <form id="transactionForm">
 
+                <p id="formError"></p>
                 <input 
-                type="text"
-                id="namaTransaksi"
-                placeholder="Nama Transaksi">
+                    type="text"
+                    id="namaTransaksi"
+                    placeholder="Nama Transaksi">
 
                 <input 
-                type="number"
-                id="nominal"
-                placeholder="Nominal"
+                    type="number"
+                    id="nominal"
+                    ="Nominal"
                 >
 
-                <select id="tipe">
-                    <option value="income">Pemasukan</option>
-                    <option value="expense">Pengeluaran</option>
+                <select id="tipeTransaksi">
+                    <option value="pemasukan">Pemasukan</option>
+                    <option value="pengeluaran">Pengeluaran</option>
+                </select>
+
+                <select id="kategoriTransaksi">
+                    <option value="makanan">Makanan</option>
+                    <option value="transportasi">Transportasi</option>
+                    <option value="tagihan">Tagihan</option>
+                    <option value="lainnya">Lainnya</option>
                 </select>
 
                 <button type="submit">
                     Tambah Transaksi
                 </button>
+
             </form>
+
+            <select id="filterKategori">
+                <option value="semua">Semua Kategori</option>
+                <option value="makanan">Makanan</option>
+                <option value="transportasi">Transportasi</option>
+                <option value="tagihan">Tagihan</option>
+                <option value="lainnya">Lainnya</option>
+            </select>
+
         </section>
 
         <section>
@@ -109,7 +129,7 @@
         </section>
     </main>
 
-    <script src="script.js"></script>
+    <script src="app.js"></script>
     
 </body>
 </html>
