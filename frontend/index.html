@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Dashboard Keuangan</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <div class="app">
+
+    <!-- 1. HEADER -->
+    <header class="app-header">
+      <div class="greeting">
+        <h1 class="greeting-text" id="greeting-text">Halo, Rizqi</h1>
+        <p class="subtitle">Kelola keuanganmu dengan lebih baik hari ini.</p>
+      </div>
+      <div class="header-actions">
+        <button type="button" class="icon-btn" id="btn-notification" aria-label="Notifikasi">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
+            <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+          </svg>
+          <span class="icon-btn-dot" id="notification-dot" hidden></span>
+        </button>
+        <button type="button" class="icon-btn" id="btn-settings" aria-label="Pengaturan">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="3" />
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82A1.65 1.65 0 0 0 3 12.55H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- 2. FINANCIAL SUMMARY -->
+    <section class="summary" aria-label="Ringkasan keuangan">
+      <div class="summary-primary">
+        <div class="summary-main">
+          <span class="summary-label">Sisa Uang</span>
+          <span class="summary-value" id="balance-value">Rp0</span>
+        </div>
+        <div class="summary-grid">
+          <div class="summary-item summary-item--income">
+            <span class="summary-item-icon" aria-hidden="true">↓</span>
+            <div class="summary-item-text">
+              <span class="summary-item-label">Pemasukan</span>
+              <span class="summary-item-value" id="income-value">Rp0</span>
+            </div>
+          </div>
+          <div class="summary-item summary-item--expense">
+            <span class="summary-item-icon" aria-hidden="true">↑</span>
+            <div class="summary-item-text">
+              <span class="summary-item-label">Pengeluaran</span>
+              <span class="summary-item-value" id="expense-value">Rp0</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="summary-goals" id="goals-card">
+        <div class="goals-header">
+          <span class="goals-icon" aria-hidden="true">🎯</span>
+          <h3 class="goals-title">Goals Keuangan</h3>
+        </div>
+        <div class="goals-body" id="goals-body">
+          <!-- Diisi otomatis oleh js/app.js melalui renderGoals() -->
+        </div>
+      </div>
+
+    </section>
+
+    <!-- 3 & 4. PERIOD + CATEGORY FILTER -->
+    <section class="filters" aria-label="Filter periode dan kategori">
+      <div class="filter-group" id="period-filter" role="group" aria-label="Filter periode">
+        <button type="button" class="filter-chip is-active" data-period="today">Hari Ini</button>
+        <button type="button" class="filter-chip" data-period="week">Minggu Ini</button>
+        <button type="button" class="filter-chip" data-period="month">Bulan Ini</button>
+        <button type="button" class="filter-chip" data-period="custom">Custom</button>
+      </div>
+      <div class="filter-group filter-group--category" id="category-filter" role="group" aria-label="Filter kategori">
+        <button type="button" class="filter-chip filter-chip--category is-active" data-category="all">Semua Kategori</button>
+        <button type="button" class="filter-chip filter-chip--category" data-category="makanan">Makanan</button>
+        <button type="button" class="filter-chip filter-chip--category" data-category="bensin">Bensin</button>
+        <button type="button" class="filter-chip filter-chip--category" data-category="belanja">Belanja</button>
+        <button type="button" class="filter-chip filter-chip--category" data-category="tagihan">Tagihan</button>
+        <button type="button" class="filter-chip filter-chip--category" data-category="hiburan">Hiburan</button>
+      </div>
+    </section>
+
+    <!-- 5. CATEGORY ANALYSIS -->
+    <section class="category-analysis" aria-label="Analisis kategori">
+      <h2 class="section-title">Analisis Kategori</h2>
+      <div class="category-card" id="category-analysis-card">
+        <!-- Diisi otomatis oleh js/app.js melalui renderCategoryAnalysis() -->
+      </div>
+    </section>
+
+    <!-- 6. SPENDING CHART -->
+    <section class="spending-chart" aria-label="Grafik pengeluaran">
+      <h2 class="section-title">Grafik Pengeluaran</h2>
+      <div class="chart-placeholder" id="spending-chart-placeholder">
+        <svg class="chart-placeholder-icon" viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M3 3v18h18" />
+          <path d="M7 15l4-5 3 3 5-7" />
+        </svg>
+        <p>Grafik pengeluaran akan tampil di sini</p>
+      </div>
+    </section>
+
+    <!-- 7. FINANCIAL INSIGHT -->
+    <section class="insight" aria-label="Wawasan keuangan">
+      <h2 class="section-title">Wawasan Keuangan</h2>
+      <div class="insight-card" id="insight-card">
+        <p id="insight-text">Memuat wawasan keuangan...</p>
+      </div>
+    </section>
+
+    <!-- 8. RECENT TRANSACTIONS -->
+    <section class="transactions" aria-label="Transaksi terbaru">
+      <h2 class="section-title">Transaksi Terbaru</h2>
+      <ul class="transaction-list" id="transaction-list">
+        <!-- Diisi otomatis oleh js/app.js melalui renderTransactions() -->
+      </ul>
+    </section>
+
+  </div>
+
+  <script src="js/app.js"></script>
+</body>
+</html>
