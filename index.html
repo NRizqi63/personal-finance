@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Personal Finance Dashboard</title>
+
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+    
+
+    <aside class="sidebar">
+
+        <h2>Finance</h2>
+
+        <nav>
+            <a href="#">Dashboard</a>
+            <a href="#">Transaction</a>
+            <a href="#">Investment</a>
+            <a href="#">Categories</a>
+            <a href="#">Settings</a>
+        </nav>
+    
+    </aside>
+
+    <main>
+
+        <header>
+            <h1>Finance Dashboard</h1>
+        </header>
+
+        <section>
+            <h2>Ringkasan Keuangan</h2>
+
+            <div class="summary-cards">
+                <div class="card">
+                    <p>Saldo</p>
+                    <h3 id="saldo">0</h3>
+
+                </div>
+
+                <div class="card">
+                    <p>Pemasukan</p>
+                    <h3 id="pemasukan">0</h3>
+                </div>
+
+                <div class="card">
+                    <p>Pengeluaran</p>
+                    <h3 id="pengeluaran">0</h3>
+                </div>
+
+                <div class="card">
+                    <p>Investasi</p>
+                    <h3 id="investasi">Rp 0</h3>
+                </div>
+            </div>
+        </section>
+
+        <section class="dashboard-grid">
+
+            <div class="dashboard-card">
+                <h2>Cashflow</h2>
+                <p>Belum ada transaksi.</p>
+            </div>
+
+            <div class="dashboard-card">
+                <h2>Portofolio Investasi</h2>
+                <p>Belum ada investasi.</p>
+            </div>
+
+
+
+        </section>
+
+
+        <section>
+            <h2>Tambah Transaksi</h2>
+
+            <button type="button" id="cancelEdit">Batal Edit</button>
+
+            <form id="transactionForm">
+
+                <p id="formError"></p>
+                <input 
+                    type="text"
+                    id="namaTransaksi"
+                    placeholder="Nama Transaksi">
+
+                <input 
+                    type="number"
+                    id="nominal"
+                    ="Nominal"
+                >
+
+                <select id="tipeTransaksi">
+                    <option value="pemasukan">Pemasukan</option>
+                    <option value="pengeluaran">Pengeluaran</option>
+                </select>
+
+                <select id="kategoriTransaksi">
+                    <option value="makanan">Makanan</option>
+                    <option value="transportasi">Transportasi</option>
+                    <option value="tagihan">Tagihan</option>
+                    <option value="lainnya">Lainnya</option>
+                </select>
+
+                <button type="submit">
+                    Tambah Transaksi
+                </button>
+
+            </form>
+
+            <select id="filterKategori">
+                <option value="semua">Semua Kategori</option>
+                <option value="makanan">Makanan</option>
+                <option value="transportasi">Transportasi</option>
+                <option value="tagihan">Tagihan</option>
+                <option value="lainnya">Lainnya</option>
+            </select>
+
+        </section>
+
+        <section>
+            <h2>Riwayat Transaksi</h2>
+
+            <div id="transactionList"></div>
+        </section>
+    </main>
+
+    <script src="app.js"></script>
+    
+</body>
+</html>
