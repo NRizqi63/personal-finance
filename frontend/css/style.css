@@ -2671,23 +2671,38 @@ a:focus-visible {
   flex-wrap: wrap;
 }
 
-/* Badge angka: berapa filter yang sedang aktif. */
-.filter-count {
-  min-width: 18px;
-  height: 18px;
-  padding: 0 5px;
-  display: inline-grid;
-  place-items: center;
-  border-radius: 999px;
-  background: var(--color-primary);
-  color: var(--color-text-on-primary);
-  font-size: 11px;
-  font-weight: 700;
-  line-height: 1;
+/* Grup kanan filter-bar: [Urut: …]  [Hapus Filter]. Jumlah hasil sengaja
+   tidak di sini — cukup sekali di samping judul "Hasil Filter". */
+.filter-bar-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin-left: auto;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 500;
 }
 
-.filter-count[hidden] {
+.filter-sort-label {
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+.filter-sort-label[hidden] {
   display: none;
+}
+
+/* Tombol "Hapus Filter" (filter-bar & empty state): pil ghost yang sama
+   dengan tombol lain (hover latar hijau lembut, tekan mengecil 0.97, focus
+   ring global), teks hijau supaya terbaca sebagai aksi. */
+.btn-clear-filter {
+  color: var(--color-primary);
+}
+
+/* Tombol Hapus Filter di empty state hasil filter. */
+.transaction-empty .btn {
+  margin-top: 12px;
 }
 
 /* Panel filter: card putih, dibuka/ditutup lewat tombol "Filter & Urutkan". */
@@ -2984,6 +2999,14 @@ a:focus-visible {
   /* Rentang tanggal filter: dua input menumpuk supaya tidak terlalu sempit. */
   .filter-dates {
     flex-direction: column;
+  }
+
+  /* Grup kanan filter-bar ditumpuk rata kanan supaya label urutan dan
+     tombol Hapus Filter tidak berebut lebar dengan tombol Filter & Urutkan. */
+  .filter-bar-actions {
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 4px 0;
   }
 
   /* Kalender: padding & jarak sel dirapatkan supaya 7 kolom tetap >= 36px. */

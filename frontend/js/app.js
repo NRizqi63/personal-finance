@@ -1442,17 +1442,17 @@ function hasActiveFilter() {
   return Boolean(search.trim() || type !== "all" || category !== "all" || from || to);
 }
 
-/** Berapa banyak filter (selain search) yang sedang aktif — untuk badge angka
- * di tombol "Filter & Urutkan". Rentang tanggal dihitung satu. */
-function countActiveFilters() {
-  const { search, type, category, from, to } = transactionsPage;
-  let n = 0;
-  if (search.trim()) n += 1;
-  if (type !== "all") n += 1;
-  if (category !== "all") n += 1;
-  if (from || to) n += 1;
-  return n;
+/** Mode filter = panel "Filter & Urutkan" sedang dibuka ATAU ada filter yang
+ * terisi. Begitu panel dibuka, halaman langsung beralih ke mode ini
+ * (kalender disembunyikan, daftar = hasil dari seluruh transaksi) tanpa
+ * menunggu user mengisi apa pun. Keluar dari mode ini lewat "Hapus Filter"
+ * (atau menutup panel selagi belum ada filter yang terisi). */
+function isFilterMode() {
+  return transactionsPage.filterOpen || hasActiveFilter();
 }
+
+// Label singkat urutan non-default untuk filter-bar (default "newest" tidak diberi label).
+const SORT_LABELS = { oldest: "Terlama", highest: "Nominal terbesar", lowest: "Nominal terkecil" };
 
 /** Seluruh transaksi yang lolos filter aktif (tanpa batas tanggal kalender).
  * Pencarian mencocokkan nama transaksi saja — kategori sudah punya filternya
@@ -1491,16 +1491,17 @@ function sortTransactions(list, mode) {
 }
 
 /** Halaman "Semua Transaksi" (transactions.html). Dua mode:
- *  - TANPA filter (perilaku V1): kalender + transaksi pada tanggal terpilih
+ *  - MODE KALENDER (perilaku V1): kalender + transaksi pada tanggal terpilih
  *    saja, maks. DATE_LIST_LIMIT dengan tombol "Lihat semua transaksi".
- *  - DENGAN filter (V2.1): kalender disembunyikan, daftar menampilkan seluruh
- *    hasil filter (tanpa dipotong) + jumlah hasil.
+ *  - MODE FILTER (V2.1, aktif begitu panel dibuka — lihat isFilterMode()):
+ *    kalender disembunyikan, daftar menampilkan seluruh hasil filter (tanpa
+ *    dipotong) + jumlah hasil; tanpa filter terisi = seluruh transaksi.
  * Dipanggil ulang setelah CRUD supaya titik indikator & daftar tetap sinkron. */
 function renderAllTransactionsList() {
   const listEl = document.getElementById("all-transaction-list");
   if (!listEl) return; // bukan di halaman Semua Transaksi
 
-  const filterActive = hasActiveFilter();
+  const filterActive = isFilterMode();
   const calendarSection = document.querySelector(".calendar-section");
   if (calendarSection) calendarSection.hidden = filterActive;
   // Kalender hanya perlu dirender saat benar-benar tampil.
@@ -1513,6 +1514,9 @@ function renderAllTransactionsList() {
   const all = sortTransactions(base, sort);
   const shown = filterActive || expanded ? all : all.slice(0, DATE_LIST_LIMIT);
 
+  // Jumlah hasil filter hanya ditampilkan di sini (hint di samping judul
+  // "Hasil Filter"), tidak diulang di filter-bar. aria-live="polite" pada
+  // hint membuat perubahan jumlah tetap terbaca screen reader.
   const title = document.getElementById("selected-date-title");
   const hint = document.getElementById("selected-date-hint");
   if (title) title.textContent = filterActive ? "Hasil Filter" : formatDateLongID(selected);
@@ -1526,12 +1530,21 @@ function renderAllTransactionsList() {
     hint.hidden = !hint.textContent;
   }
 
-  const emptyText = filterActive
-    ? "🔍 Tidak ada transaksi yang cocok. Coba ubah kata kunci atau hapus filter."
-    : "📭 Tidak ada transaksi pada tanggal ini.";
-  listEl.innerHTML = all.length
-    ? shown.map((tx) => renderTransactionItem(tx, true)).join("")
+  const emptyText = !filterActive
+    ? "📭 Tidak ada transaksi pada tanggal ini."
+    : hasActiveFilter()
+      ? "🔍 Tidak ada transaksi yang cocok. Coba ubah kata kunci atau hapus filter."
+      : "📭 Belum ada transaksi yang tercatat.";
+  // Mode filter: hasil lintas tanggal, jadi tiap card ikut menampilkan
+  // tanggalnya (showDate). Mode kalender: tanggal sudah jadi judul daftar.
+  // Empty state mode filter membawa tombol Hapus Filter sendiri supaya
+  // tetap terjangkau walau panel filter sedang terbuka di atasnya.
+  const emptyMarkup = filterActive
+    ? `<li class="transaction-empty">${emptyText}<button type="button" class="btn btn--ghost btn--xs" data-filter-reset>Hapus Filter</button></li>`
     : `<li class="transaction-empty">${emptyText}</li>`;
+  listEl.innerHTML = all.length
+    ? shown.map((tx) => renderTransactionItem(tx, true, { showDate: filterActive })).join("")
+    : emptyMarkup;
 
   const more = document.getElementById("transaction-list-more");
   if (more) {
@@ -1554,13 +1567,22 @@ function renderAllTransactionsList() {
 function syncFilterControls() {
   const clearBtn = document.getElementById("btn-clear-filter");
   if (!clearBtn) return; // halaman ini tidak punya panel filter
-  const active = hasActiveFilter();
+  const active = isFilterMode();
   clearBtn.hidden = !active;
 
-  const count = countActiveFilters();
-  const badge = document.getElementById("filter-count");
-  badge.hidden = count === 0;
-  badge.textContent = String(count);
+  // Panel & tombolnya mengikuti state (bukan di-toggle langsung di handler),
+  // supaya clearFilters() yang mengeset filterOpen=false ikut menutupnya.
+  const panel = document.getElementById("filter-panel");
+  const toggleBtn = document.getElementById("btn-filter-toggle");
+  panel.hidden = !transactionsPage.filterOpen;
+  toggleBtn.setAttribute("aria-expanded", String(transactionsPage.filterOpen));
+
+  // Urutan non-default ditandai secara eksplisit, bukan diam-diam. (Tombol
+  // "Filter & Urutkan" sendiri sengaja tanpa badge angka.)
+  const sortLabel = document.getElementById("filter-sort-label");
+  const sortText = SORT_LABELS[transactionsPage.sort];
+  sortLabel.hidden = !sortText;
+  sortLabel.textContent = sortText ? `Urut: ${sortText}` : "";
 
   const searchInput = document.getElementById("tx-search");
   if (searchInput.value !== transactionsPage.search) searchInput.value = transactionsPage.search;
@@ -1634,19 +1656,30 @@ function setupTransactionFilters() {
   fromInput.addEventListener("change", onRangeChange);
   toInput.addEventListener("change", onRangeChange);
 
-  toggleBtn.addEventListener("click", () => {
-    transactionsPage.filterOpen = !transactionsPage.filterOpen;
-    panel.hidden = !transactionsPage.filterOpen;
-    toggleBtn.setAttribute("aria-expanded", String(transactionsPage.filterOpen));
-  });
+  // Membuka panel = masuk mode filter (kalender langsung disembunyikan,
+  // walau belum ada yang diisi). Menutup panel selagi belum ada filter
+  // terisi = kembali ke mode kalender; kalau ada yang terisi, hasil tetap
+  // tampil dan keluar lewat "Hapus Filter".
+  toggleBtn.addEventListener("click", () => update({ filterOpen: !transactionsPage.filterOpen }));
 
-  document.getElementById("btn-clear-filter").addEventListener("click", () => {
+  /** Satu-satunya mekanisme reset: dipakai tombol "Hapus Filter" di
+   * filter-bar dan tombol yang sama di empty state hasil filter. */
+  function clearFilters() {
     searchInput.value = "";
     categorySelect.value = "all";
     fromInput.value = "";
     toInput.value = "";
     sortSelect.value = "newest";
-    update({ search: "", type: "all", category: "all", from: "", to: "", sort: "newest" });
+    // filterOpen: false -> keluar dari mode filter; kalender muncul kembali
+    // dengan tanggal terpilih yang sama seperti sebelumnya (tidak disentuh).
+    update({ search: "", type: "all", category: "all", from: "", to: "", sort: "newest", filterOpen: false });
+  }
+  document.getElementById("btn-clear-filter").addEventListener("click", clearFilters);
+  // Empty state dirender ulang tiap kali, jadi didelegasikan ke <ul>-nya.
+  // Atribut data-filter-reset (bukan data-action) supaya tidak bersinggungan
+  // dengan handler edit/hapus transaksi di daftar yang sama.
+  document.getElementById("all-transaction-list").addEventListener("click", (e) => {
+    if (e.target.closest("[data-filter-reset]")) clearFilters();
   });
 }
 

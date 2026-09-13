@@ -53,9 +53,14 @@
             <path d="M10 19h4" />
           </svg>
           Filter &amp; Urutkan
-          <span class="filter-count" id="filter-count" hidden></span>
         </button>
-        <button type="button" class="link-see-all" id="btn-clear-filter" hidden>Hapus Filter</button>
+        <!-- Grup kanan: label urutan (hanya saat urutan bukan default) + Hapus
+             Filter. Jumlah hasil tidak ditaruh di sini — cukup sekali di
+             samping judul "Hasil Filter" (#selected-date-hint). -->
+        <div class="filter-bar-actions">
+          <span class="filter-sort-label" id="filter-sort-label" hidden></span>
+          <button type="button" class="btn btn--ghost btn--xs btn-clear-filter" id="btn-clear-filter" hidden>Hapus Filter</button>
+        </div>
       </div>
 
       <div class="filter-panel" id="filter-panel" hidden>
@@ -118,7 +123,7 @@
     <section class="transactions" aria-label="Transaksi pada tanggal terpilih">
       <div class="section-header-row">
         <h2 class="section-title" id="selected-date-title">Hari ini</h2>
-        <span class="section-hint" id="selected-date-hint" hidden></span>
+        <span class="section-hint" id="selected-date-hint" aria-live="polite" hidden></span>
       </div>
       <ul class="transaction-list" id="all-transaction-list">
         <!-- Diisi otomatis oleh js/app.js melalui renderAllTransactionsList() -->
