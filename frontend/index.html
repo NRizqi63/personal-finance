@@ -6,7 +6,7 @@
   <title>Dashboard Keuangan</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="css/style.css" />
 </head>
 <body>
@@ -16,22 +16,46 @@
     <header class="app-header">
       <div class="greeting">
         <h1 class="greeting-text" id="greeting-text">Halo, Rizqi</h1>
-        <p class="subtitle">Kelola keuanganmu dengan lebih baik hari ini.</p>
       </div>
       <div class="header-actions">
-        <button type="button" class="icon-btn" id="btn-notification" aria-label="Notifikasi">
-          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
-            <path d="M13.73 21a2 2 0 0 1-3.46 0" />
-          </svg>
-          <span class="icon-btn-dot" id="notification-dot" hidden></span>
-        </button>
-        <button type="button" class="icon-btn" id="btn-settings" aria-label="Pengaturan">
-          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <circle cx="12" cy="12" r="3" />
-            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82A1.65 1.65 0 0 0 3 12.55H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
-          </svg>
-        </button>
+        <div class="dropdown-wrapper">
+          <button type="button" class="icon-btn" id="btn-notification" aria-label="Notifikasi" aria-haspopup="true" aria-expanded="false">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
+              <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+            </svg>
+            <span class="icon-btn-dot" id="notification-dot" hidden></span>
+          </button>
+          <div class="dropdown-panel" id="notification-panel" hidden>
+            <div class="dropdown-panel-header">
+              <h3>Notifikasi</h3>
+            </div>
+            <ul class="notification-list" id="notification-list">
+              <!-- Diisi otomatis oleh js/app.js melalui renderNotifications() -->
+            </ul>
+          </div>
+        </div>
+        <div class="dropdown-wrapper">
+          <button type="button" class="icon-btn" id="btn-settings" aria-label="Pengaturan" aria-haspopup="true" aria-expanded="false">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <circle cx="12" cy="12" r="3" />
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82A1.65 1.65 0 0 0 3 12.55H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+            </svg>
+          </button>
+          <div class="dropdown-panel" id="settings-panel" hidden>
+            <div class="dropdown-panel-header">
+              <h3>Pengaturan</h3>
+            </div>
+            <ul class="settings-menu">
+              <!-- V1: Profil & Tentang Aplikasi belum punya fitur -> disembunyikan
+                   sementara (hidden), bukan dihapus. Hapus atribut hidden saat
+                   halamannya sudah ada. -->
+              <li hidden><button type="button" class="settings-menu-item" data-setting="profil">Profil</button></li>
+              <li><button type="button" class="settings-menu-item" data-setting="preferensi-kategori">Preferensi Kategori</button></li>
+              <li hidden><button type="button" class="settings-menu-item" data-setting="tentang-aplikasi">Tentang Aplikasi</button></li>
+            </ul>
+          </div>
+        </div>
       </div>
     </header>
 
@@ -39,67 +63,70 @@
     <section class="summary" aria-label="Ringkasan keuangan">
       <div class="summary-primary">
         <div class="summary-main">
-          <span class="summary-label">Sisa Uang</span>
-          <span class="summary-value" id="balance-value">Rp0</span>
+          <div class="summary-label-row">
+            <span class="summary-label">Saldo Anda</span>
+            <button type="button" class="balance-toggle" id="btn-toggle-balance" aria-label="Tampilkan saldo" aria-pressed="false">
+              <svg class="icon-eye is-hidden" id="icon-eye" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8Z" />
+                <circle cx="12" cy="12" r="3" />
+              </svg>
+              <svg class="icon-eye-off" id="icon-eye-off" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M9.88 9.88a3 3 0 1 0 4.24 4.24" />
+                <path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 11 7 11 7a13.16 13.16 0 0 1-3.05 4.17M6.5 6.5C3.73 8.13 2 12 2 12a13.16 13.16 0 0 0 3.05 4.17A10.43 10.43 0 0 0 12 19c1.06 0 2.08-.15 3.02-.44" />
+                <path d="M2 2l20 20" />
+              </svg>
+            </button>
+          </div>
+          <span class="summary-value is-masked" id="balance-value">••••••••</span>
         </div>
+        <!-- Baris statistik: 2 card putih terpisah (Pemasukan & Pengeluaran)
+             yang duduk berdampingan di atas card hijau. Hanya ada dua jenis
+             transaksi di aplikasi ini — jenis "Investasi" sudah dihapus. -->
         <div class="summary-grid">
           <div class="summary-item summary-item--income">
-            <span class="summary-item-icon" aria-hidden="true">↓</span>
-            <div class="summary-item-text">
-              <span class="summary-item-label">Pemasukan</span>
-              <span class="summary-item-value" id="income-value">Rp0</span>
-            </div>
+            <span class="summary-item-label">Pemasukan</span>
+            <span class="summary-item-value is-masked" id="income-value">••••••••</span>
           </div>
           <div class="summary-item summary-item--expense">
-            <span class="summary-item-icon" aria-hidden="true">↑</span>
-            <div class="summary-item-text">
-              <span class="summary-item-label">Pengeluaran</span>
-              <span class="summary-item-value" id="expense-value">Rp0</span>
-            </div>
+            <span class="summary-item-label">Pengeluaran</span>
+            <span class="summary-item-value is-masked" id="expense-value">••••••••</span>
           </div>
         </div>
       </div>
-
-      <div class="summary-goals" id="goals-card">
-        <div class="goals-header">
-          <span class="goals-icon" aria-hidden="true">🎯</span>
-          <h3 class="goals-title">Goals Keuangan</h3>
-        </div>
-        <div class="goals-body" id="goals-body">
-          <!-- Diisi otomatis oleh js/app.js melalui renderGoals() -->
-        </div>
-      </div>
-
     </section>
 
-    <!-- 3 & 4. PERIOD + CATEGORY FILTER -->
-    <section class="filters" aria-label="Filter periode dan kategori">
-      <div class="filter-group" id="period-filter" role="group" aria-label="Filter periode">
-        <button type="button" class="filter-chip is-active" data-period="today">Hari Ini</button>
-        <button type="button" class="filter-chip" data-period="week">Minggu Ini</button>
-        <button type="button" class="filter-chip" data-period="month">Bulan Ini</button>
-        <button type="button" class="filter-chip" data-period="custom">Custom</button>
-      </div>
-      <div class="filter-group filter-group--category" id="category-filter" role="group" aria-label="Filter kategori">
-        <button type="button" class="filter-chip filter-chip--category is-active" data-category="all">Semua Kategori</button>
-        <button type="button" class="filter-chip filter-chip--category" data-category="makanan">Makanan</button>
-        <button type="button" class="filter-chip filter-chip--category" data-category="bensin">Bensin</button>
-        <button type="button" class="filter-chip filter-chip--category" data-category="belanja">Belanja</button>
-        <button type="button" class="filter-chip filter-chip--category" data-category="tagihan">Tagihan</button>
-        <button type="button" class="filter-chip filter-chip--category" data-category="hiburan">Hiburan</button>
+    <!-- 3. AKSI CEPAT -->
+    <section class="quick-actions" aria-label="Aksi cepat">
+      <h2 class="section-title">Aksi Cepat</h2>
+      <div class="quick-actions-row">
+        <button type="button" class="btn btn--primary btn--block" data-action="add-transaction">
+          <span class="btn-icon" aria-hidden="true">+</span> Tambah Transaksi
+        </button>
+        <a class="btn btn--ghost btn--block" href="analytics.html">Lihat Analisis</a>
       </div>
     </section>
 
-    <!-- 5. CATEGORY ANALYSIS -->
-    <section class="category-analysis" aria-label="Analisis kategori">
-      <h2 class="section-title">Analisis Kategori</h2>
-      <div class="category-card" id="category-analysis-card">
-        <!-- Diisi otomatis oleh js/app.js melalui renderCategoryAnalysis() -->
+    <!-- 4. BUDGET BULAN INI
+         Angkanya dari data yang SUDAH ADA: budget per kategori
+         (financeData.categories) dan pengeluaran aktual (getCategoryUsed()).
+         Pengaturan budget & kategori ada di budget.html ("Lihat Detail");
+         analisis pola pengeluaran ada di analytics.html ("Lihat Analisis"). -->
+    <section class="budget" aria-label="Budget bulan ini">
+      <div class="section-header-row">
+        <h2 class="section-title">Budget Bulan Ini</h2>
+        <a class="link-see-all" href="budget.html">Lihat Detail <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14" /><path d="m12 5 7 7-7 7" /></svg></a>
+      </div>
+      <div class="budget-card" id="budget-card">
+        <!-- Diisi otomatis oleh js/app.js melalui renderBudgetSummary() -->
       </div>
     </section>
 
-    <!-- 6. SPENDING CHART -->
-    <section class="spending-chart" aria-label="Grafik pengeluaran">
+    <!-- 5. SPENDING CHART
+         Dinonaktifkan sementara di M1 (fokus mobile: input transaksi harus
+         cepat dijangkau tanpa scroll panjang). Markup, CSS, dan placeholder
+         tetap dipertahankan — tinggal hapus atribut `hidden` di bawah untuk
+         menampilkannya kembali pada milestone berikutnya. -->
+    <section class="spending-chart" aria-label="Grafik pengeluaran" hidden>
       <h2 class="section-title">Grafik Pengeluaran</h2>
       <div class="chart-placeholder" id="spending-chart-placeholder">
         <svg class="chart-placeholder-icon" viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -110,22 +137,115 @@
       </div>
     </section>
 
-    <!-- 7. FINANCIAL INSIGHT -->
-    <section class="insight" aria-label="Wawasan keuangan">
-      <h2 class="section-title">Wawasan Keuangan</h2>
-      <div class="insight-card" id="insight-card">
-        <p id="insight-text">Memuat wawasan keuangan...</p>
-      </div>
-    </section>
-
-    <!-- 8. RECENT TRANSACTIONS -->
+    <!-- 6. RECENT TRANSACTIONS -->
     <section class="transactions" aria-label="Transaksi terbaru">
-      <h2 class="section-title">Transaksi Terbaru</h2>
+      <div class="section-header-row">
+        <h2 class="section-title">Transaksi Terbaru</h2>
+        <!-- Link ke halaman penuh Semua Transaksi (bukan popup). id tetap
+             sama supaya logika tampil/sembunyi di renderRecentTransactions()
+             tidak berubah. -->
+        <a class="link-see-all" id="btn-see-all-transactions" href="transactions.html" hidden>
+          Lihat semua
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M5 12h14" />
+            <path d="m12 5 7 7-7 7" />
+          </svg>
+        </a>
+      </div>
       <ul class="transaction-list" id="transaction-list">
-        <!-- Diisi otomatis oleh js/app.js melalui renderTransactions() -->
+        <!-- Diisi otomatis oleh js/app.js melalui renderRecentTransactions() -->
       </ul>
     </section>
 
+  </div>
+
+  <!-- MODAL: FINANCIAL CHECK-IN
+       Tampil sekali per sesi saat dashboard dibuka (setupCheckin() di app.js).
+       Isinya dirender dari data aktual: saldo, pemasukan/pengeluaran, budget,
+       goal, insight mingguan, dan status keuangan rule-based. Menggantikan
+       section "Insight Keuangan" & "Pengingat Goals" yang dulu ada di
+       dashboard — datanya tetap, hanya presentasinya pindah ke sini. -->
+  <div class="modal-overlay modal-overlay--checkin" id="checkin-overlay" hidden>
+    <div class="modal modal--checkin" role="dialog" aria-modal="true" aria-labelledby="checkin-title">
+      <div class="modal-header">
+        <h2 id="checkin-title">Financial Check-in</h2>
+        <button type="button" class="modal-close" id="checkin-close" aria-label="Tutup">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M18 6 6 18" />
+            <path d="m6 6 12 12" />
+          </svg>
+        </button>
+      </div>
+      <div class="checkin-body" id="checkin-body">
+        <!-- Diisi otomatis oleh js/app.js melalui renderCheckin() -->
+      </div>
+      <div class="modal-actions modal-actions--single">
+        <button type="button" class="btn btn--primary btn--block" id="checkin-cta">✓ Mengerti, Lanjut ke Dashboard</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: TAMBAH / EDIT TRANSAKSI
+       Markup identik dengan yang ada di transactions.html — kalau form ini
+       diubah, ubah di kedua file. -->
+  <div class="modal-overlay" id="transaction-modal-overlay" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+      <div class="modal-header">
+        <h2 id="modal-title">Tambah Transaksi</h2>
+        <button type="button" class="modal-close" id="modal-close" aria-label="Tutup">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M18 6 6 18" />
+            <path d="m6 6 12 12" />
+          </svg>
+        </button>
+      </div>
+
+      <form class="transaction-form" id="transaction-form" novalidate>
+        <input type="hidden" id="field-id" name="id" value="" />
+
+        <div class="type-toggle" id="type-toggle" role="group" aria-label="Jenis transaksi">
+          <div class="type-toggle-indicator" id="type-toggle-indicator" aria-hidden="true"></div>
+          <button type="button" class="type-toggle-btn" data-type="income">Pemasukan</button>
+          <button type="button" class="type-toggle-btn is-active" data-type="expense">Pengeluaran</button>
+        </div>
+
+        <div class="form-field">
+          <label for="field-title">Nama Transaksi</label>
+          <input type="text" id="field-title" name="title" placeholder="Contoh: Makan siang" required />
+        </div>
+
+        <div class="form-field">
+          <label for="field-category">Kategori</label>
+          <select id="field-category" name="category" required>
+            <option value="" disabled selected>Pilih kategori</option>
+            <option value="makanan">Makanan</option>
+            <option value="bensin">Bensin</option>
+            <option value="belanja">Belanja</option>
+            <option value="tagihan">Tagihan</option>
+            <option value="hiburan">Hiburan</option>
+            <option value="lainnya">Lainnya</option>
+          </select>
+        </div>
+
+        <div class="form-field">
+          <label for="field-amount">Nominal</label>
+          <div class="input-prefix">
+            <span class="input-prefix-label">Rp</span>
+            <input type="text" inputmode="numeric" id="field-amount" name="amount" placeholder="0" required />
+          </div>
+        </div>
+
+        <div class="form-field">
+          <label for="field-date">Tanggal</label>
+          <input type="date" id="field-date" name="date" required />
+        </div>
+
+        <div class="modal-actions">
+          <button type="button" class="btn btn--ghost" id="modal-cancel">Batal</button>
+          <button type="submit" class="btn btn--primary" id="modal-submit">Simpan Transaksi</button>
+        </div>
+      </form>
+    </div>
   </div>
 
   <script src="js/app.js"></script>

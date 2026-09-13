@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Analisis</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<!-- data-page="analytics" -> js/app.js menjalankan initAnalyticsPage().
+     Halaman untuk memahami pola penggunaan uang: ringkasan, chart per waktu &
+     per kategori, dan Insight Keuangan. Semua angka dihitung dari transaksi +
+     budget yang sama di localStorage (tidak ada dataset terpisah); chart
+     digambar dengan HTML/CSS biasa (tanpa library) supaya menyatu dengan UI.
+     Pengaturan budget/kategori ada di budget.html. -->
+<body data-page="analytics">
+  <div class="app app--page">
+
+    <!-- HEADER: tombol kembali + judul halaman -->
+    <header class="app-header page-header">
+      <a class="icon-btn" href="index.html" aria-label="Kembali ke dashboard">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M19 12H5" />
+          <path d="m12 19-7-7 7-7" />
+        </svg>
+      </a>
+      <h1 class="greeting-text">Analisis</h1>
+    </header>
+
+    <!-- RINGKASAN: total pengeluaran bulan ini, kategori terbesar,
+         perubahan vs bulan lalu (renderAnalyticsSummary()) -->
+    <section class="analytics-summary" aria-label="Ringkasan analisis">
+      <div class="stat-grid" id="analytics-summary">
+        <!-- Diisi otomatis oleh js/app.js -->
+      </div>
+    </section>
+
+    <!-- PENGELUARAN PER TANGGAL: satu batang per tanggal bulan ini, bisa
+         diklik/tap; area batang bisa digeser horizontal (scroll native di
+         dalam card). Card detail di bawahnya menampilkan transaksi tanggal
+         terpilih / seluruh bulan. -->
+    <section class="analytics-time" aria-label="Pengeluaran per tanggal">
+      <h2 class="section-title">Pengeluaran per Tanggal <span class="section-title-sub" id="time-chart-sub"></span></h2>
+      <div class="budget-card chart-card" id="time-chart">
+        <!-- Diisi otomatis oleh js/app.js melalui renderTimeChart() -->
+      </div>
+      <div class="budget-card chart-detail" id="chart-detail">
+        <!-- Diisi otomatis oleh js/app.js melalui renderChartDetail() -->
+      </div>
+    </section>
+
+    <!-- PENGELUARAN PER KATEGORI: batang horizontal, bulan ini -->
+    <section class="analytics-category" aria-label="Pengeluaran per kategori">
+      <h2 class="section-title">Pengeluaran per Kategori</h2>
+      <div class="budget-card chart-card" id="category-chart">
+        <!-- Diisi otomatis oleh js/app.js melalui renderCategoryChart() -->
+      </div>
+    </section>
+
+    <!-- INSIGHT KEUANGAN: rule-based dari data aktual + sisa hari bulan ini
+         (getAnalyticsInsights()). Bulan berjalan, terikat budget bulanan.
+         Berbeda dari Financial Check-in. -->
+    <section class="analytics-insight" aria-label="Insight keuangan">
+      <h2 class="section-title">Insight Keuangan <span class="section-title-sub">bulan ini</span></h2>
+      <ul class="insight-list" id="insight-list">
+        <!-- Diisi otomatis oleh js/app.js melalui renderInsights() -->
+      </ul>
+    </section>
+
+  </div>
+
+  <script src="js/app.js"></script>
+</body>
+</html>

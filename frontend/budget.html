@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Budget &amp; Kategori</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<!-- data-page="budget" -> js/app.js menjalankan initBudgetPage().
+     Halaman pengaturan budget: budget bulanan + budget/nama/emoji tiap
+     kategori (tambah/edit/hapus). Satu app.js & style.css dipakai semua
+     halaman; data dibaca dari localStorage yang sama. Analisis pola
+     pengeluaran ada di analytics.html, bukan di sini. -->
+<body data-page="budget">
+  <div class="app app--page">
+
+    <!-- HEADER: tombol kembali + judul halaman -->
+    <header class="app-header page-header">
+      <a class="icon-btn" href="index.html" aria-label="Kembali ke dashboard">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M19 12H5" />
+          <path d="m12 19-7-7 7-7" />
+        </svg>
+      </a>
+      <h1 class="greeting-text">Sesuaikan Budget Kamu🙌</h1>
+    </header>
+
+    <!-- BUDGET BULAN INI — budget bulanan yang diatur user (renderBudgetSummary())
+         + tombol Edit yang membuka popup #budget-modal-overlay. -->
+    <section class="budget" aria-label="Budget bulan ini">
+      <div class="section-header-row">
+        <h2 class="section-title">Budget Bulan Ini</h2>
+        <button type="button" class="btn btn--ghost btn--xs" id="btn-edit-budget" aria-label="Edit budget bulan ini"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9" /><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" /></svg> Edit</button>
+      </div>
+      <div class="budget-card" id="budget-card">
+        <!-- Diisi otomatis oleh js/app.js melalui renderBudgetSummary() -->
+      </div>
+      <!-- Catatan ringan kalau total budget kategori > budget bulanan -->
+      <p class="budget-note" id="budget-note" hidden></p>
+    </section>
+
+    <!-- SEMUA KATEGORI — satu card per kategori (renderCategoryList()), tiap
+         card punya tombol Edit (popup #category-modal-overlay), lalu tombol
+         Tambah Kategori di bawah daftar. -->
+    <section class="category-analysis" aria-label="Analisis per kategori">
+      <h2 class="section-title">Budget Kategori</h2>
+      <div class="category-list" id="category-list">
+        <!-- Diisi otomatis oleh js/app.js melalui renderCategoryList() -->
+      </div>
+      <button type="button" class="btn btn--ghost btn--block btn-add-category" id="btn-add-category">
+        <span class="btn-icon" aria-hidden="true">+</span> Tambah Kategori
+      </button>
+    </section>
+
+  </div>
+
+  <!-- MODAL: ATUR BUDGET BULAN INI (setupBudgetEditor() di app.js) -->
+  <div class="modal-overlay" id="budget-modal-overlay" hidden>
+    <div class="modal modal--form" role="dialog" aria-modal="true" aria-labelledby="budget-modal-title">
+      <div class="modal-header">
+        <h2 id="budget-modal-title">💰 Atur Budget Bulan Ini</h2>
+        <button type="button" class="modal-close" data-modal-close aria-label="Tutup">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M18 6 6 18" />
+            <path d="m6 6 12 12" />
+          </svg>
+        </button>
+      </div>
+      <p class="modal-sub">Berapa budget yang ingin kamu gunakan bulan ini?</p>
+      <form id="budget-form" novalidate>
+        <div class="form-field">
+          <label for="field-budget-monthly">Budget bulanan</label>
+          <div class="input-prefix">
+            <span class="input-prefix-label">Rp</span>
+            <input type="text" inputmode="numeric" id="field-budget-monthly" name="monthly" placeholder="0" required />
+          </div>
+        </div>
+        <div class="quick-amounts" id="budget-quick-amounts" aria-label="Pilihan cepat">
+          <!-- Diisi oleh app.js (renderQuickAmounts()) -->
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn--ghost" data-modal-close>Batal</button>
+          <button type="submit" class="btn btn--primary">Simpan Budget</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: TAMBAH / EDIT KATEGORI -->
+  <div class="modal-overlay" id="category-modal-overlay" hidden>
+    <div class="modal modal--form" role="dialog" aria-modal="true" aria-labelledby="category-modal-title">
+      <div class="modal-header">
+        <h2 id="category-modal-title">Edit Kategori</h2>
+        <button type="button" class="modal-close" data-modal-close aria-label="Tutup">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M18 6 6 18" />
+            <path d="m6 6 12 12" />
+          </svg>
+        </button>
+      </div>
+      <p class="modal-sub" id="category-modal-sub">Atur budget kategori ini sesuai kebutuhan kamu.</p>
+      <form id="category-form" novalidate>
+        <input type="hidden" id="field-category-key" value="" />
+        <div class="form-field">
+          <label for="field-category-name">Nama kategori</label>
+          <input type="text" id="field-category-name" name="name" placeholder="Contoh: Kopi & Jajan" maxlength="24" required />
+        </div>
+        <div class="form-field">
+          <label for="field-category-budget">Budget</label>
+          <div class="input-prefix">
+            <span class="input-prefix-label">Rp</span>
+            <input type="text" inputmode="numeric" id="field-category-budget" name="budget" placeholder="0" required />
+          </div>
+        </div>
+        <div class="form-field">
+          <span class="form-field-label" id="emoji-picker-label">Emoji kategori</span>
+          <div class="emoji-picker" id="emoji-picker" role="radiogroup" aria-labelledby="emoji-picker-label">
+            <!-- Diisi oleh app.js (renderEmojiPicker()) -->
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn--ghost" data-modal-close>Batal</button>
+          <button type="submit" class="btn btn--primary" id="category-modal-submit">Simpan Perubahan</button>
+        </div>
+        <!-- Aksi destruktif sekunder: hanya tampil saat mode edit -->
+        <button type="button" class="btn btn--danger-ghost btn--block modal-secondary" id="btn-delete-category" hidden>🗑️ Hapus Kategori</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: KONFIRMASI HAPUS KATEGORI -->
+  <div class="modal-overlay" id="confirm-modal-overlay" hidden>
+    <div class="modal modal--form modal--confirm" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
+      <div class="modal-header">
+        <h2 id="confirm-title">Yakin ingin menghapus kategori?</h2>
+        <button type="button" class="modal-close" data-modal-close aria-label="Tutup">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M18 6 6 18" />
+            <path d="m6 6 12 12" />
+          </svg>
+        </button>
+      </div>
+      <p class="modal-sub" id="confirm-text">Transaksi yang sudah ada tidak akan ikut terhapus.</p>
+      <div class="modal-actions">
+        <button type="button" class="btn btn--ghost" data-modal-close>Batal</button>
+        <button type="button" class="btn btn--danger" id="confirm-delete">Hapus Kategori</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/app.js"></script>
+</body>
+</html>
