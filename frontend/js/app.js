@@ -2101,17 +2101,21 @@ function setupHeaderActions() {
     { passive: true }
   );
 
-  // Menu pengaturan. V1: hanya "Preferensi Kategori" yang punya tujuan
-  // (budget.html). "Profil" & "Tentang Aplikasi" belum punya fitur — item-nya
-  // disembunyikan sementara di index.html (atribut hidden), logikanya
-  // dipertahankan di sini supaya tinggal ditampilkan lagi saat siap.
-  const SETTINGS_TARGET = { "preferensi-kategori": "budget.html" };
+  // Menu pengaturan: "Pengaturan" & "Tentang Aplikasi" -> settings.html
+  // (Settings V1), "Preferensi Kategori" tetap ke budget.html. "Profil"
+  // belum punya fitur — item-nya masih hidden di index.html; logikanya
+  // dipertahankan supaya tinggal ditampilkan saat tahapnya tiba.
+  const SETTINGS_TARGET = {
+    pengaturan: "settings.html",
+    "preferensi-kategori": "budget.html",
+    "tentang-aplikasi": "settings.html#tentang",
+  };
   document.querySelectorAll(".settings-menu-item").forEach((item) => {
     item.addEventListener("click", () => {
       const target = SETTINGS_TARGET[item.dataset.setting];
       closeAllPanels();
       if (target) window.location.href = target;
-      // TODO: profil & tentang-aplikasi — arahkan ke halamannya saat fitur tersedia
+      // TODO: profil — arahkan ke settings.html#profil saat section-nya ada
     });
   });
 }
@@ -2895,6 +2899,29 @@ function initBudgetPage() {
 }
 
 /**
+ * Halaman "Pengaturan" (settings.html) — Settings V1 Tahap 1: fondasi.
+ * Belum ada state yang disimpan; isinya tautan ke budget.html, info
+ * keamanan, dan Tentang Aplikasi. Fungsi ini aman dipanggil di halaman
+ * mana pun (no-op kalau elemennya tidak ada). Tahap berikutnya (profil,
+ * preferensi, export/import, reset) ditambahkan di sini.
+ */
+const APP_VERSION = "V2.2";
+
+function initSettingsPage() {
+  const version = document.getElementById("settings-app-version");
+  if (!version) return; // bukan di halaman pengaturan
+  version.textContent = APP_VERSION;
+
+  // Deep-link dari dropdown dashboard ("Tentang Aplikasi" -> #tentang):
+  // scroll halus ke section-nya setelah render, tanpa mengubah URL lagi.
+  const hash = window.location.hash.replace(/^#/, "");
+  const target = hash && document.getElementById(hash);
+  if (target && target.classList.contains("settings-section")) {
+    requestAnimationFrame(() => target.scrollIntoView({ behavior: "smooth", block: "start" }));
+  }
+}
+
+/**
  * Halaman "Analisis" (analytics.html): ringkasan, chart pengeluaran per
  * waktu & per kategori, dan Insight Keuangan — semuanya dari transaksi +
  * budget yang sama di localStorage, tidak ada dataset terpisah.
@@ -2919,7 +2946,7 @@ function initAnalyticsPage() {
   }
 }
 
-// Satu app.js dipakai dua halaman; <body data-page="..."> yang menentukan
+// Satu app.js dipakai semua halaman; <body data-page="..."> yang menentukan
 // init mana yang jalan. Default (tanpa atribut) = dashboard.
 document.addEventListener("DOMContentLoaded", () => {
   const page = document.body.dataset.page;
@@ -2929,6 +2956,8 @@ document.addEventListener("DOMContentLoaded", () => {
     initAnalyticsPage();
   } else if (page === "budget") {
     initBudgetPage();
+  } else if (page === "settings") {
+    initSettingsPage();
   } else {
     initDashboard();
   }
@@ -2951,7 +2980,7 @@ document.addEventListener("touchstart", () => {}, { passive: true });
  * Murni visual: tidak mencegah default, tidak menyentuh handler klik.
  */
 (function setupPressFeedback() {
-  const PRESSABLE = ".btn, .icon-btn, .icon-btn-sm, .modal-close, .type-toggle-btn, .filter-chip, .settings-menu-item, .link-see-all, .balance-toggle, .quick-amount, .emoji-option, .calendar-nav, .calendar-day, .bar-col";
+  const PRESSABLE = ".btn, .icon-btn, .icon-btn-sm, .modal-close, .type-toggle-btn, .filter-chip, .settings-menu-item, .settings-row-link, .link-see-all, .balance-toggle, .quick-amount, .emoji-option, .calendar-nav, .calendar-day, .bar-col";
   const MIN_HOLD_MS = 120;
   let pressed = null;
   let pressedAt = 0;

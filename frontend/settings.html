@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Pengaturan</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<!-- data-page="settings" -> js/app.js menjalankan initSettingsPage().
+     Settings V1 Tahap 1 = fondasi: halaman ini belum menyimpan apa pun.
+     Isinya tautan ke pengaturan yang sudah ada (budget.html), informasi
+     keamanan (fitur akun belum tersedia — tidak ada PIN/login palsu), dan
+     Tentang Aplikasi. Profil, preferensi, export/import, dan reset data
+     menyusul di tahap berikutnya. Dibuka dari dropdown Pengaturan di
+     dashboard (index.html). -->
+<body data-page="settings">
+  <div class="app app--page">
+
+    <!-- HEADER: tombol kembali + judul halaman -->
+    <header class="app-header page-header">
+      <a class="icon-btn" href="index.html" aria-label="Kembali ke dashboard">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M19 12H5" />
+          <path d="m12 19-7-7 7-7" />
+        </svg>
+      </a>
+      <h1 class="greeting-text">Pengaturan</h1>
+    </header>
+
+    <!-- 1. KEUANGAN — tautan ke pengaturan yang sudah ada di budget.html.
+         Sengaja tidak ada form budget/kategori di sini supaya hanya ada satu
+         tempat untuk mengelolanya. -->
+    <section class="settings-section" id="keuangan" aria-labelledby="settings-keuangan-title">
+      <h2 class="section-title" id="settings-keuangan-title">Keuangan</h2>
+      <div class="settings-card">
+        <a class="settings-row settings-row-link" href="budget.html" id="settings-link-budget">
+          <span class="settings-row-icon" aria-hidden="true">💰</span>
+          <span class="settings-row-body">
+            <span class="settings-row-title">Budget Bulanan</span>
+            <span class="settings-row-desc">Kelola budget dan batas pengeluaran</span>
+          </span>
+          <svg class="settings-row-chevron" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6" /></svg>
+        </a>
+        <a class="settings-row settings-row-link" href="budget.html" id="settings-link-category">
+          <span class="settings-row-icon" aria-hidden="true">🏷️</span>
+          <span class="settings-row-body">
+            <span class="settings-row-title">Kategori</span>
+            <span class="settings-row-desc">Tambah, edit, atau hapus kategori</span>
+          </span>
+          <svg class="settings-row-chevron" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6" /></svg>
+        </a>
+      </div>
+    </section>
+
+    <!-- 2. KEAMANAN — informasi saja. Belum ada backend/autentikasi, jadi
+         tidak ada login, password, PIN, atau sinkronisasi di sini (PIN yang
+         cuma disimpan di localStorage hanya memberi rasa aman palsu). -->
+    <section class="settings-section" id="keamanan" aria-labelledby="settings-keamanan-title">
+      <h2 class="section-title" id="settings-keamanan-title">Keamanan <span class="badge-soon">Segera hadir</span></h2>
+      <div class="settings-card">
+        <div class="settings-row">
+          <span class="settings-row-icon" aria-hidden="true">🔒</span>
+          <span class="settings-row-body">
+            <span class="settings-row-title">Data tersimpan di browser ini</span>
+            <span class="settings-row-desc">Transaksi dan budget disimpan secara lokal di perangkat ini (local storage), tidak dikirim ke server mana pun.</span>
+          </span>
+        </div>
+        <div class="settings-row">
+          <span class="settings-row-icon" aria-hidden="true">🛡️</span>
+          <span class="settings-row-body">
+            <span class="settings-row-title">Login, password &amp; sinkronisasi cloud</span>
+            <span class="settings-row-desc">Belum tersedia. Akun, autentikasi, dan backup ke cloud akan hadir setelah ada server.</span>
+          </span>
+          <span class="badge-soon">Segera hadir</span>
+        </div>
+        <p class="settings-info">Karena data hanya ada di browser ini, menghapus data situs di browser akan menghapus transaksi dan budget kamu.</p>
+      </div>
+    </section>
+
+    <!-- 3. TENTANG APLIKASI — statis. Versi diperbarui manual tiap rilis. -->
+    <section class="settings-section" id="tentang" aria-labelledby="settings-tentang-title">
+      <h2 class="section-title" id="settings-tentang-title">Tentang Aplikasi</h2>
+      <div class="settings-card">
+        <div class="settings-row">
+          <span class="settings-row-icon" aria-hidden="true">📒</span>
+          <span class="settings-row-body">
+            <span class="settings-row-title">Personal Finance</span>
+            <span class="settings-row-desc">Catat pemasukan &amp; pengeluaran, atur budget per kategori, dan pahami pola keuanganmu lewat analisis sederhana.</span>
+          </span>
+        </div>
+        <dl class="settings-meta">
+          <div class="settings-meta-row">
+            <dt>Versi</dt>
+            <dd id="settings-app-version">V2.2</dd>
+          </div>
+          <div class="settings-meta-row">
+            <dt>Penyimpanan</dt>
+            <dd>Local browser storage</dd>
+          </div>
+          <div class="settings-meta-row">
+            <dt>Repository</dt>
+            <dd><a class="settings-inline-link" href="https://github.com/NRizqi63/personal-finance" target="_blank" rel="noopener noreferrer">github.com/NRizqi63/personal-finance</a></dd>
+          </div>
+        </dl>
+      </div>
+    </section>
+
+  </div>
+
+  <script src="js/app.js"></script>
+</body>
+</html>
