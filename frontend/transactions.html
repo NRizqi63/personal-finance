@@ -26,6 +26,82 @@
       <h1 class="greeting-text">Semua Transaksi</h1>
     </header>
 
+    <!-- CARI & FILTER (V2.1) — murni lapisan tampilan: tidak mengubah data
+         transaksi maupun localStorage. Saat salah satu filter aktif, kalender
+         disembunyikan dan daftar menampilkan hasil dari SELURUH transaksi;
+         "Hapus Filter" mengembalikan tampilan kalender seperti V1. -->
+    <section class="tx-filters" aria-label="Cari dan filter transaksi">
+      <div class="search-field">
+        <svg class="search-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="11" cy="11" r="7" />
+          <path d="m20 20-3.5-3.5" />
+        </svg>
+        <input type="search" id="tx-search" placeholder="Cari nama transaksi..." autocomplete="off" aria-label="Cari nama transaksi" />
+        <button type="button" class="search-clear" id="tx-search-clear" hidden aria-label="Hapus pencarian">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M18 6 6 18" />
+            <path d="m6 6 12 12" />
+          </svg>
+        </button>
+      </div>
+
+      <div class="filter-bar">
+        <button type="button" class="btn btn--ghost btn--xs" id="btn-filter-toggle" aria-expanded="false" aria-controls="filter-panel">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M3 5h18" />
+            <path d="M7 12h10" />
+            <path d="M10 19h4" />
+          </svg>
+          Filter &amp; Urutkan
+          <span class="filter-count" id="filter-count" hidden></span>
+        </button>
+        <button type="button" class="link-see-all" id="btn-clear-filter" hidden>Hapus Filter</button>
+      </div>
+
+      <div class="filter-panel" id="filter-panel" hidden>
+        <div class="form-field">
+          <span class="form-field-label" id="filter-type-label">Jenis transaksi</span>
+          <div class="filter-group" role="group" aria-labelledby="filter-type-label">
+            <button type="button" class="filter-chip is-active" data-filter-type="all" aria-pressed="true">Semua</button>
+            <button type="button" class="filter-chip" data-filter-type="income" aria-pressed="false">Pemasukan</button>
+            <button type="button" class="filter-chip" data-filter-type="expense" aria-pressed="false">Pengeluaran</button>
+          </div>
+        </div>
+
+        <div class="form-field">
+          <label for="filter-category">Kategori</label>
+          <select id="filter-category">
+            <!-- Opsi diisi js/app.js dari financeData.categories -->
+            <option value="all">Semua kategori</option>
+          </select>
+        </div>
+
+        <div class="form-field">
+          <span class="form-field-label" id="filter-range-label">Rentang tanggal</span>
+          <div class="filter-dates" role="group" aria-labelledby="filter-range-label">
+            <label class="filter-date">
+              <span>Dari</span>
+              <input type="date" id="filter-from" />
+            </label>
+            <label class="filter-date">
+              <span>Sampai</span>
+              <input type="date" id="filter-to" />
+            </label>
+          </div>
+        </div>
+
+        <div class="form-field filter-field--last">
+          <label for="filter-sort">Urutkan</label>
+          <select id="filter-sort">
+            <option value="newest">Terbaru</option>
+            <option value="oldest">Terlama</option>
+            <option value="highest">Nominal terbesar</option>
+            <option value="lowest">Nominal terkecil</option>
+          </select>
+        </div>
+      </div>
+    </section>
+
     <!-- KALENDER (custom, bukan kalender bawaan browser) — pilih tanggal
          untuk memfilter daftar di bawahnya. Default: hari ini.
          Dirender oleh renderCalendar() di app.js. -->

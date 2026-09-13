@@ -1351,11 +1351,26 @@ function renderRecentTransactions() {
   seeAllLink.hidden = sorted.length <= limited.length;
 }
 
-// State halaman Semua Transaksi: bulan yang ditampilkan kalender, tanggal
-// terpilih (default hari ini), dan apakah daftar sedang diperluas (>3).
+// State halaman Semua Transaksi.
+//  - year/month/selected/expanded : mode kalender V1 (tidak berubah).
+//  - search/type/category/from/to/sort/filterOpen : lapisan cari & filter V2.1.
+// State filter sengaja HANYA di memori (tidak dipersist ke localStorage):
+// filter adalah cara melihat data, bukan data itu sendiri.
 const transactionsPage = (() => {
   const today = new Date();
-  return { year: today.getFullYear(), month: today.getMonth(), selected: toIsoDate(today), expanded: false };
+  return {
+    year: today.getFullYear(),
+    month: today.getMonth(),
+    selected: toIsoDate(today),
+    expanded: false,
+    search: "",
+    type: "all",
+    category: "all",
+    from: "",
+    to: "",
+    sort: "newest",
+    filterOpen: false,
+  };
 })();
 
 // Maksimal transaksi yang ditampilkan per tanggal sebelum "Lihat semua transaksi".
@@ -1415,43 +1430,224 @@ function renderCalendar() {
   `;
 }
 
-/** Halaman "Semua Transaksi" (transactions.html): kalender + transaksi pada
- * tanggal terpilih saja (maks. 3, bisa diperluas ke semua transaksi tanggal
- * itu). Dipanggil ulang setelah CRUD supaya titik indikator & daftar sinkron. */
+/* ---------- V2.1: cari, filter, dan urutkan daftar transaksi ----------
+   Semua fungsi di bawah HANYA membaca financeData.transactions dan
+   mengembalikan salinan; data asli tidak pernah diubah. */
+
+/** Filter dianggap aktif kalau salah satu dari search/jenis/kategori/rentang
+ * tanggal dipakai. Urutan (sort) SENGAJA tidak dihitung: mengganti urutan
+ * tidak mengubah transaksi mana yang tampil, jadi kalender tetap dipakai. */
+function hasActiveFilter() {
+  const { search, type, category, from, to } = transactionsPage;
+  return Boolean(search.trim() || type !== "all" || category !== "all" || from || to);
+}
+
+/** Berapa banyak filter (selain search) yang sedang aktif — untuk badge angka
+ * di tombol "Filter & Urutkan". Rentang tanggal dihitung satu. */
+function countActiveFilters() {
+  const { search, type, category, from, to } = transactionsPage;
+  let n = 0;
+  if (search.trim()) n += 1;
+  if (type !== "all") n += 1;
+  if (category !== "all") n += 1;
+  if (from || to) n += 1;
+  return n;
+}
+
+/** Seluruh transaksi yang lolos filter aktif (tanpa batas tanggal kalender).
+ * Pencarian mencocokkan nama transaksi saja — kategori sudah punya filternya
+ * sendiri, jadi tidak perlu ikut dicocokkan di sini. */
+function getFilteredTransactions() {
+  const { search, type, category, from, to } = transactionsPage;
+  const query = search.trim().toLowerCase();
+  return financeData.transactions.filter((tx) => {
+    if (type !== "all" && tx.type !== type) return false;
+    if (category !== "all") {
+      // Transaksi yang kategorinya sudah dihapus user dianggap "lainnya",
+      // sama seperti tampilannya di kartu transaksi.
+      const key = financeData.categories[tx.category] ? tx.category : FALLBACK_CATEGORY.key;
+      if (key !== category) return false;
+    }
+    if (from && (!tx.isoDate || tx.isoDate < from)) return false;
+    if (to && (!tx.isoDate || tx.isoDate > to)) return false;
+    if (query && !String(tx.title || "").toLowerCase().includes(query)) return false;
+    return true;
+  });
+}
+
+/** Salinan terurut sesuai pilihan user. "newest" memakai getSortedTransactions()
+ * yang sudah dipakai V1 supaya urutan default persis sama. */
+function sortTransactions(list, mode) {
+  if (mode === "oldest") {
+    return [...list].sort((a, b) => (a.isoDate || "").localeCompare(b.isoDate || "") || a.id - b.id);
+  }
+  if (mode === "highest") {
+    return [...list].sort((a, b) => b.amount - a.amount || (b.isoDate || "").localeCompare(a.isoDate || ""));
+  }
+  if (mode === "lowest") {
+    return [...list].sort((a, b) => a.amount - b.amount || (b.isoDate || "").localeCompare(a.isoDate || ""));
+  }
+  return getSortedTransactions(list);
+}
+
+/** Halaman "Semua Transaksi" (transactions.html). Dua mode:
+ *  - TANPA filter (perilaku V1): kalender + transaksi pada tanggal terpilih
+ *    saja, maks. DATE_LIST_LIMIT dengan tombol "Lihat semua transaksi".
+ *  - DENGAN filter (V2.1): kalender disembunyikan, daftar menampilkan seluruh
+ *    hasil filter (tanpa dipotong) + jumlah hasil.
+ * Dipanggil ulang setelah CRUD supaya titik indikator & daftar tetap sinkron. */
 function renderAllTransactionsList() {
   const listEl = document.getElementById("all-transaction-list");
   if (!listEl) return; // bukan di halaman Semua Transaksi
 
-  renderCalendar();
+  const filterActive = hasActiveFilter();
+  const calendarSection = document.querySelector(".calendar-section");
+  if (calendarSection) calendarSection.hidden = filterActive;
+  // Kalender hanya perlu dirender saat benar-benar tampil.
+  if (!filterActive) renderCalendar();
 
-  const { selected, expanded } = transactionsPage;
-  const all = getSortedTransactions(financeData.transactions).filter((tx) => tx.isoDate === selected);
-  const shown = expanded ? all : all.slice(0, DATE_LIST_LIMIT);
+  const { selected, expanded, sort } = transactionsPage;
+  const base = filterActive
+    ? getFilteredTransactions()
+    : financeData.transactions.filter((tx) => tx.isoDate === selected);
+  const all = sortTransactions(base, sort);
+  const shown = filterActive || expanded ? all : all.slice(0, DATE_LIST_LIMIT);
 
   const title = document.getElementById("selected-date-title");
   const hint = document.getElementById("selected-date-hint");
-  if (title) title.textContent = formatDateLongID(selected);
+  if (title) title.textContent = filterActive ? "Hasil Filter" : formatDateLongID(selected);
   if (hint) {
-    const label = getDayLabel(selected);
-    hint.textContent = label === "Hari ini" || label === "Kemarin" ? label : "";
+    if (filterActive) {
+      hint.textContent = `${all.length} transaksi`;
+    } else {
+      const label = getDayLabel(selected);
+      hint.textContent = label === "Hari ini" || label === "Kemarin" ? label : "";
+    }
     hint.hidden = !hint.textContent;
   }
 
+  const emptyText = filterActive
+    ? "🔍 Tidak ada transaksi yang cocok. Coba ubah kata kunci atau hapus filter."
+    : "📭 Tidak ada transaksi pada tanggal ini.";
   listEl.innerHTML = all.length
     ? shown.map((tx) => renderTransactionItem(tx, true)).join("")
-    : `<li class="transaction-empty">📭 Tidak ada transaksi pada tanggal ini.</li>`;
+    : `<li class="transaction-empty">${emptyText}</li>`;
 
   const more = document.getElementById("transaction-list-more");
   if (more) {
-    const hidden = all.length - shown.length;
-    more.hidden = all.length <= DATE_LIST_LIMIT;
+    // Blok "Lihat semua transaksi" milik mode kalender; di mode filter seluruh
+    // hasil sudah ditampilkan sehingga blok ini disembunyikan.
+    const hiddenCount = all.length - shown.length;
+    more.hidden = filterActive || all.length <= DATE_LIST_LIMIT;
     const note = document.getElementById("transaction-list-more-note");
     note.hidden = expanded;
-    note.textContent = `+ ${hidden} transaksi lainnya`;
+    note.textContent = `+ ${hiddenCount} transaksi lainnya`;
     const toggle = document.getElementById("btn-toggle-all");
     toggle.textContent = expanded ? "Ringkas kembali" : "Lihat semua transaksi";
     toggle.setAttribute("aria-expanded", String(expanded));
   }
+
+  syncFilterControls();
+}
+
+/** Sinkronkan tampilan kontrol filter dengan state (dipanggil tiap render). */
+function syncFilterControls() {
+  const clearBtn = document.getElementById("btn-clear-filter");
+  if (!clearBtn) return; // halaman ini tidak punya panel filter
+  const active = hasActiveFilter();
+  clearBtn.hidden = !active;
+
+  const count = countActiveFilters();
+  const badge = document.getElementById("filter-count");
+  badge.hidden = count === 0;
+  badge.textContent = String(count);
+
+  const searchInput = document.getElementById("tx-search");
+  if (searchInput.value !== transactionsPage.search) searchInput.value = transactionsPage.search;
+  document.getElementById("tx-search-clear").hidden = !transactionsPage.search;
+
+  document.querySelectorAll("#filter-panel [data-filter-type]").forEach((chip) => {
+    const on = chip.dataset.filterType === transactionsPage.type;
+    chip.classList.toggle("is-active", on);
+    chip.setAttribute("aria-pressed", String(on));
+  });
+}
+
+/** Kontrol cari, filter, dan urutkan (V2.1) di halaman Semua Transaksi.
+ * Semuanya hanya mengubah transactionsPage lalu merender ulang daftar —
+ * tidak ada perubahan pada data transaksi maupun localStorage. */
+function setupTransactionFilters() {
+  const panel = document.getElementById("filter-panel");
+  if (!panel) return; // bukan di halaman Semua Transaksi
+
+  const searchInput = document.getElementById("tx-search");
+  const categorySelect = document.getElementById("filter-category");
+  const fromInput = document.getElementById("filter-from");
+  const toInput = document.getElementById("filter-to");
+  const sortSelect = document.getElementById("filter-sort");
+  const toggleBtn = document.getElementById("btn-filter-toggle");
+
+  // Opsi kategori mengikuti kategori user (+ cadangan "Lainnya"), sama
+  // seperti form transaksi supaya pilihannya konsisten.
+  const options = Object.entries(financeData.categories).map(
+    ([key, cat]) => `<option value="${key}">${cat.emoji} ${cat.name}</option>`
+  );
+  if (!financeData.categories[FALLBACK_CATEGORY.key]) {
+    options.push(`<option value="${FALLBACK_CATEGORY.key}">${FALLBACK_CATEGORY.emoji} ${FALLBACK_CATEGORY.name}</option>`);
+  }
+  categorySelect.innerHTML = `<option value="all">Semua kategori</option>${options.join("")}`;
+
+  /** Ganti state lalu render ulang. Pilihan tanggal kalender tidak diubah,
+   * jadi menghapus filter mengembalikan tampilan persis seperti sebelumnya. */
+  function update(patch) {
+    Object.assign(transactionsPage, patch);
+    renderAllTransactionsList();
+  }
+
+  searchInput.addEventListener("input", () => update({ search: searchInput.value }));
+  document.getElementById("tx-search-clear").addEventListener("click", () => {
+    searchInput.value = "";
+    update({ search: "" });
+    searchInput.focus();
+  });
+
+  panel.addEventListener("click", (e) => {
+    const chip = e.target.closest("[data-filter-type]");
+    if (chip) update({ type: chip.dataset.filterType });
+  });
+
+  categorySelect.addEventListener("change", () => update({ category: categorySelect.value }));
+  sortSelect.addEventListener("change", () => update({ sort: sortSelect.value }));
+
+  // Rentang tanggal: kalau user membalik urutannya, tukar supaya tidak
+  // menghasilkan daftar kosong yang membingungkan.
+  function onRangeChange() {
+    let from = fromInput.value;
+    let to = toInput.value;
+    if (from && to && from > to) {
+      [from, to] = [to, from];
+      fromInput.value = from;
+      toInput.value = to;
+    }
+    update({ from, to });
+  }
+  fromInput.addEventListener("change", onRangeChange);
+  toInput.addEventListener("change", onRangeChange);
+
+  toggleBtn.addEventListener("click", () => {
+    transactionsPage.filterOpen = !transactionsPage.filterOpen;
+    panel.hidden = !transactionsPage.filterOpen;
+    toggleBtn.setAttribute("aria-expanded", String(transactionsPage.filterOpen));
+  });
+
+  document.getElementById("btn-clear-filter").addEventListener("click", () => {
+    searchInput.value = "";
+    categorySelect.value = "all";
+    fromInput.value = "";
+    toInput.value = "";
+    sortSelect.value = "newest";
+    update({ search: "", type: "all", category: "all", from: "", to: "", sort: "newest" });
+  });
 }
 
 /** Interaksi kalender & tombol perluas/ringkas di halaman Semua Transaksi. */
@@ -2452,6 +2648,7 @@ function initDashboard() {
  * dipersist ke localStorage sehingga dashboard ikut update saat kembali.
  */
 function initTransactionsPage() {
+  setupTransactionFilters(); // isi opsi kategori sebelum render pertama
   renderAllTransactionsList();
   setupCalendar();
   setupTransactionModal();

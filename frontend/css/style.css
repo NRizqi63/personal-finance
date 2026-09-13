@@ -1710,6 +1710,7 @@ a:focus-visible {
 }
  
 .form-field input[type="text"],
+.form-field input[type="search"],
 .form-field input[type="date"],
 .form-field select {
   width: 100%;
@@ -1759,6 +1760,7 @@ a:focus-visible {
 }
 
 .form-field input[type="text"]:focus,
+.form-field input[type="search"]:focus,
 .form-field input[type="date"]:focus,
 .form-field select:focus {
   outline: none;
@@ -2124,7 +2126,7 @@ a:focus-visible {
 /* Catatan: kedua :is() harus BERSAMBUNG tanpa spasi — spasi/baris baru di
    antaranya berarti descendant combinator, dan rule ini tidak akan pernah
    cocok. */
-:is(.btn, .icon-btn, .icon-btn-sm, .modal-close, .type-toggle-btn, .filter-chip, .settings-menu-item, .link-see-all, .balance-toggle, .quick-amount, .emoji-option, .calendar-nav, .calendar-day, .bar-col):is(:active, .is-pressed) {
+:is(.btn, .icon-btn, .icon-btn-sm, .modal-close, .type-toggle-btn, .filter-chip, .settings-menu-item, .link-see-all, .balance-toggle, .quick-amount, .emoji-option, .calendar-nav, .calendar-day, .bar-col, .search-clear):is(:active, .is-pressed) {
   transform: scale(0.97);
   transition-duration: 60ms;
   transition-timing-function: ease-out;
@@ -2578,6 +2580,203 @@ a:focus-visible {
 .insight-item[data-level="neutral"] { border-left-color: var(--color-border); }
 
 /* =========================================================
+   CARI & FILTER TRANSAKSI (transactions.html, V2.1)
+   Lapisan tampilan di atas daftar: tidak mengubah data. Memakai ulang
+   komponen yang sudah ada (.filter-chip, .form-field, .btn--xs).
+   ========================================================= */
+.tx-filters {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* Kotak pencarian: ikon di kiri, tombol hapus di kanan, tinggi sama dengan
+   input form lain (44px) supaya nyaman ditekan di HP. */
+.search-field {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.search-icon {
+  position: absolute;
+  left: 12px;
+  color: var(--color-text-muted);
+  pointer-events: none;
+}
+
+.search-field input[type="search"] {
+  width: 100%;
+  appearance: none;
+  -webkit-appearance: none;
+  font-family: var(--font-body);
+  font-weight: 500;
+  /* 16px: di bawah itu iOS Safari otomatis men-zoom halaman saat field difokus. */
+  font-size: 16px;
+  line-height: 1.25;
+  min-height: 44px;
+  color: var(--color-text);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 11px 40px 11px 36px;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.search-field input[type="search"]::-webkit-search-decoration,
+.search-field input[type="search"]::-webkit-search-cancel-button {
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.search-field input[type="search"]:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px rgba(20, 83, 45, 0.12);
+}
+
+.search-clear {
+  position: absolute;
+  right: 4px;
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  border: none;
+  background: transparent;
+  border-radius: 999px;
+  color: var(--color-text-muted);
+  transition: background-color 0.15s ease, color 0.15s ease, transform 0.15s ease;
+}
+
+.search-clear[hidden] {
+  display: none;
+}
+
+/* Chip jenis di dalam panel filter: hanya 3 opsi tetap, jadi dibiarkan
+   membungkus ke baris berikutnya alih-alih memakai scroll horizontal
+   bawaan .filter-group (di 320px ketiganya tidak muat satu baris). */
+.filter-panel .filter-group {
+  overflow-x: visible;
+  flex-wrap: wrap;
+  padding: 0;
+  margin: 0;
+}
+
+.filter-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+/* Badge angka: berapa filter yang sedang aktif. */
+.filter-count {
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--color-primary);
+  color: var(--color-text-on-primary);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.filter-count[hidden] {
+  display: none;
+}
+
+/* Panel filter: card putih, dibuka/ditutup lewat tombol "Filter & Urutkan". */
+.filter-panel {
+  padding: 14px 14px 4px;
+  background: var(--color-surface);
+  border: 1px solid rgba(225, 228, 221, 0.7);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-card);
+}
+
+.filter-panel[hidden] {
+  display: none;
+}
+
+.filter-panel .form-field {
+  margin-bottom: 14px;
+}
+
+.filter-field--last {
+  margin-bottom: 10px !important;
+}
+
+/* Dua input tanggal berdampingan; menumpuk di layar sangat sempit. */
+.filter-dates {
+  display: flex;
+  gap: 10px;
+}
+
+.filter-date {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.filter-date span {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-text-muted);
+}
+
+.filter-date input[type="date"] {
+  width: 100%;
+  appearance: none;
+  -webkit-appearance: none;
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+  font-family: var(--font-body);
+  font-weight: 500;
+  font-size: 16px;
+  line-height: 1.25;
+  min-height: 44px;
+  color: var(--color-text);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 11px 12px;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.filter-date input[type="date"]::-webkit-date-and-time-value {
+  text-align: left;
+  width: 100%;
+  margin: 0;
+}
+
+.filter-date input[type="date"]:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px rgba(20, 83, 45, 0.12);
+}
+
+@media (hover: hover) {
+  .search-clear:hover {
+    background: var(--color-primary-soft);
+    color: var(--color-primary);
+  }
+}
+
+.search-clear.is-pressed {
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+}
+
+/* =========================================================
    KALENDER (transactions.html) — custom, bukan <input type="date">
    ========================================================= */
 .calendar {
@@ -2782,6 +2981,11 @@ a:focus-visible {
    overflow-wrap: break-word di .summary-item-value.
    ========================================================= */
 @media (max-width: 360px) {
+  /* Rentang tanggal filter: dua input menumpuk supaya tidak terlalu sempit. */
+  .filter-dates {
+    flex-direction: column;
+  }
+
   /* Kalender: padding & jarak sel dirapatkan supaya 7 kolom tetap >= 36px. */
   .calendar {
     padding: 12px 8px 8px;
