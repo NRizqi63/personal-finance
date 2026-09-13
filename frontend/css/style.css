@@ -1203,10 +1203,30 @@ a:focus-visible {
   box-shadow: none;
 }
 
-.category-unset-hint {
-  color: var(--color-text-muted);
-  font-weight: 500;
-  text-align: right;
+/* Tombol "Atur Budget" di card tanpa budget (handler = tombol Edit). */
+.btn-set-budget {
+  flex-shrink: 0;
+  color: var(--color-primary);
+  border-color: var(--color-primary-soft);
+}
+
+/* Card tanpa budget: foot menyejajarkan teks & tombol secara vertikal. */
+.category-card--unset .category-card-foot {
+  align-items: center;
+}
+
+/* Empty state "belum ada budget": banner di atas card (card tetap ada
+   supaya tombol Atur Budget/Edit bisa dipakai). */
+.category-empty--budget {
+  text-align: left;
+  border-style: solid;
+  background: var(--color-primary-soft);
+  border-color: var(--color-primary-soft);
+  color: var(--color-primary);
+}
+
+.category-empty--budget strong {
+  font-weight: 600;
 }
 
 /* Baris "Pengeluaran lain tanpa budget" di bawah daftar kategori. */

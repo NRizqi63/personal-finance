@@ -605,7 +605,7 @@ function renderCategoryPanel(key, categoryData, now = new Date()) {
     <article class="category-card category-card--unset" data-category="${key}">${head}
       <div class="category-card-foot">
         <span>Terpakai: <strong class="num">${formatRupiah(used)}</strong></span>
-        <span class="category-unset-hint">Atur budget lewat tombol Edit</span>
+        <button type="button" class="btn btn--ghost btn--xs btn-set-budget" data-action="edit-category" data-key="${key}" aria-label="Atur budget kategori ${name}">Atur Budget</button>
       </div>
     </article>
   `;
@@ -677,7 +677,15 @@ function renderCategoryList(now = new Date()) {
   const cards = entries.length
     ? entries.map(([key, data]) => renderCategoryPanel(key, data, now)).join("")
     : `<p class="category-empty">Belum ada kategori. Tambahkan kategori untuk mulai mengatur budget per pos pengeluaran.</p>`;
-  list.innerHTML = cards + renderUnbudgetedRow(now);
+
+  // Empty state budget: ada kategori, tapi semuanya masih 0. Ditaruh di ATAS
+  // card (bukan menggantikannya) supaya tombol Atur Budget/Edit tetap ada,
+  // dan baris "Pengeluaran lain tanpa budget" di bawah tetap tampil.
+  const noBudgetYet = entries.length > 0 && entries.every(([, cat]) => !(cat.budget > 0));
+  const emptyBudget = noBudgetYet
+    ? `<p class="category-empty category-empty--budget" id="category-empty-budget">💡 Belum ada budget yang diatur. Tekan <strong>Atur Budget</strong> atau <strong>Edit</strong> pada kategori untuk mulai menentukan batas pengeluarannya.</p>`
+    : "";
+  list.innerHTML = emptyBudget + cards + renderUnbudgetedRow(now);
 }
 
 /** Navigator bulan di budget.html: label, tombol › (disabled di bulan
@@ -2631,6 +2639,7 @@ function setupBudgetEditor() {
   const fieldBudget = document.getElementById("field-category-budget");
   const emojiPicker = document.getElementById("emoji-picker");
   const deleteBtn = document.getElementById("btn-delete-category");
+  const clearBudgetBtn = document.getElementById("btn-clear-budget");
 
   let selectedEmoji = EMOJI_CHOICES[0];
 
@@ -2670,13 +2679,19 @@ function setupBudgetEditor() {
     fieldBudget.setCustomValidity("");
     if (mode === "edit" && financeData.categories[key]) {
       const cat = financeData.categories[key];
+      const hasBudget = cat.budget > 0;
       fieldKey.value = key;
       fieldName.value = cat.name;
-      fieldBudget.value = formatAmountDigits(String(cat.budget));
+      // Budget 0 = belum diatur: kotak dibiarkan kosong (placeholder "0"),
+      // bukan "0" — supaya user langsung mengetik nominal barunya.
+      fieldBudget.value = hasBudget ? formatAmountDigits(String(cat.budget)) : "";
       renderEmojiPicker(cat.emoji || FALLBACK_CATEGORY.emoji);
-      categoryTitle.textContent = `${cat.emoji} Edit Kategori ${cat.name}`;
-      categorySub.textContent = "Atur budget kategori ini sesuai kebutuhan kamu.";
-      categorySubmit.textContent = "Simpan Perubahan";
+      categoryTitle.textContent = hasBudget ? `${cat.emoji} Edit Kategori ${cat.name}` : `${cat.emoji} Atur Budget ${cat.name}`;
+      categorySub.textContent = hasBudget
+        ? "Atur budget kategori ini sesuai kebutuhan kamu."
+        : "Kategori ini belum punya budget. Tentukan nominalnya untuk mulai memantau pengeluarannya.";
+      categorySubmit.textContent = hasBudget ? "Simpan Perubahan" : "Atur Budget";
+      clearBudgetBtn.hidden = !hasBudget; // hanya ada budget yang bisa dikosongkan
       deleteBtn.hidden = false;
     } else {
       fieldKey.value = "";
@@ -2684,6 +2699,7 @@ function setupBudgetEditor() {
       categoryTitle.textContent = "➕ Tambah Kategori";
       categorySub.textContent = "Buat pos pengeluaran baru dan tentukan budgetnya.";
       categorySubmit.textContent = "Tambah Kategori";
+      clearBudgetBtn.hidden = true;
       deleteBtn.hidden = true;
     }
     categoryModal.open();
@@ -2700,20 +2716,45 @@ function setupBudgetEditor() {
   categoryForm.addEventListener("submit", (e) => {
     e.preventDefault();
     const name = fieldName.value.trim();
-    const budget = readAmount(fieldBudget);
     if (!name) {
       fieldName.setCustomValidity("Isi nama kategori.");
       categoryForm.reportValidity();
       return;
     }
-    if (budget <= 0) {
-      fieldBudget.setCustomValidity("Masukkan nominal budget kategori.");
+    // Validasi nominal dari teks mentah: kosong, ada minus, atau karakter
+    // selain angka/pemisah ribuan -> tolak dengan pesan yang jelas. Nilai 0
+    // sengaja TIDAK bisa lewat sini — mengosongkan budget hanya lewat tombol
+    // "Kosongkan Budget" supaya tidak terjadi tanpa sengaja.
+    const raw = fieldBudget.value.trim();
+    const budget = readAmount(fieldBudget);
+    let budgetError = "";
+    if (!raw) budgetError = "Isi nominal budget kategori.";
+    else if (/-/.test(raw) || !/^[\d.]+$/.test(raw)) budgetError = "Nominal budget harus berupa angka positif, tanpa tanda minus atau huruf.";
+    else if (budget <= 0) budgetError = fieldKey.value
+      ? 'Nominal budget harus lebih dari 0. Untuk menghapus budget, gunakan tombol "Kosongkan Budget".'
+      : "Nominal budget harus lebih dari 0.";
+    if (budgetError) {
+      fieldBudget.setCustomValidity(budgetError);
       categoryForm.reportValidity();
       return;
     }
     const key = fieldKey.value || makeCategoryKey(name);
     // Edit: key tetap (transaksi lama tetap terhubung), hanya isinya diganti.
     financeData.categories[key] = { name, emoji: selectedEmoji, budget };
+    persistAndRerender();
+    categoryModal.close();
+  });
+
+  // ---------- 2b. Kosongkan budget (budget -> 0, kategori & transaksi tetap) ----------
+  // Bukan aksi destruktif (bisa diatur lagi kapan saja), jadi tanpa
+  // konfirmasi. Nama/emoji yang sedang diubah di form ikut disimpan supaya
+  // tidak hilang diam-diam; bulan yang sedang dilihat tidak disentuh.
+  clearBudgetBtn.addEventListener("click", () => {
+    const key = fieldKey.value;
+    const cat = financeData.categories[key];
+    if (!cat) return;
+    const name = fieldName.value.trim() || cat.name;
+    financeData.categories[key] = { name, emoji: selectedEmoji || cat.emoji, budget: 0 };
     persistAndRerender();
     categoryModal.close();
   });

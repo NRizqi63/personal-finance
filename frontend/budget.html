@@ -152,7 +152,11 @@
           <button type="button" class="btn btn--ghost" data-modal-close>Batal</button>
           <button type="submit" class="btn btn--primary" id="category-modal-submit">Simpan Perubahan</button>
         </div>
-        <!-- Aksi destruktif sekunder: hanya tampil saat mode edit -->
+        <!-- Aksi sekunder (mode edit saja). "Kosongkan Budget" hanya saat
+             budget > 0: mengubah budget jadi 0 (= belum ada budget) tanpa
+             menghapus kategori/transaksi. "Hapus Kategori" tetap destruktif
+             (konfirmasi custom). -->
+        <button type="button" class="btn btn--ghost btn--block modal-secondary" id="btn-clear-budget" hidden>Kosongkan Budget</button>
         <button type="button" class="btn btn--danger-ghost btn--block modal-secondary" id="btn-delete-category" hidden>🗑️ Hapus Kategori</button>
       </form>
     </div>
