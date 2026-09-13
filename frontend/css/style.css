@@ -361,7 +361,7 @@ a:focus-visible {
 }
  
 @media (hover: hover) {
-  .btn--ghost:hover {
+  .btn--ghost:not(:disabled):hover {
     border-color: var(--color-primary);
     background: var(--color-primary-soft);
     box-shadow: 0 3px 10px rgba(31, 36, 33, 0.08);
@@ -1120,6 +1120,30 @@ a:focus-visible {
   color: var(--color-danger);
 }
 
+/* V2.2 — status 4 level untuk card kategori (getCategoryBudgetStatus()):
+   watch = kuning lembut (sama seperti "warning" lama), near = jingga lebih
+   pekat, over = merah, unset = abu netral (belum ada budget, bukan masalah). */
+.category-status[data-status="watch"] {
+  background: var(--color-accent-soft);
+  color: #8A5A16;
+}
+
+.category-status[data-status="near"] {
+  background: #F9E0CC;
+  color: #9A4A0E;
+}
+
+.category-status[data-status="over"] {
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
+}
+
+.category-status[data-status="unset"] {
+  background: var(--color-bg);
+  color: var(--color-text-muted);
+  border: 1px solid var(--color-border);
+}
+
 .category-budget-row {
   display: flex;
   align-items: baseline;
@@ -1152,6 +1176,66 @@ a:focus-visible {
 
 .progress-bar-fill[data-status="danger"] {
   background: var(--color-danger);
+}
+
+.progress-bar-fill[data-status="watch"] {
+  background: var(--color-accent);
+}
+
+.progress-bar-fill[data-status="near"] {
+  background: #D9702A;
+}
+
+.progress-bar-fill[data-status="over"] {
+  background: var(--color-danger);
+}
+
+/* Persen & "Lebih Rp…" ikut merah saat melebihi budget. */
+.progress-percent[data-status="over"],
+.remaining-budget.is-over,
+.remaining-budget.is-over .num {
+  color: var(--color-danger);
+}
+
+/* Card kategori tanpa budget: lebih tenang (tanpa progress bar). */
+.category-card--unset {
+  border-style: dashed;
+  box-shadow: none;
+}
+
+.category-unset-hint {
+  color: var(--color-text-muted);
+  font-weight: 500;
+  text-align: right;
+}
+
+/* Baris "Pengeluaran lain tanpa budget" di bawah daftar kategori. */
+.category-card--other {
+  background: var(--color-bg);
+  box-shadow: none;
+}
+
+.category-card--other .category-card-head {
+  margin-bottom: 4px;
+}
+
+.category-other-amount {
+  flex-shrink: 0;
+  font-size: 14px;
+  color: var(--color-text);
+}
+
+.category-other-hint {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--color-text-muted);
+}
+
+/* Peringatan "N kategori melebihi budget" di atas daftar. */
+.budget-note--over {
+  margin: 0 0 10px;
+  color: var(--color-danger);
 }
 
 .category-card-foot {
@@ -2838,6 +2922,49 @@ a:focus-visible {
   inset: -4px; /* area tap efektif 44px */
 }
 
+/* Navigator bulan di budget.html: memakai tombol bulat & judul yang sama
+   dengan kalender, plus tombol "Bulan Ini" di kanan. Judul mengisi sisa
+   ruang (rata tengah) dan tidak pernah terpotong (nowrap + wrap baris). */
+.budget-period-nav {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.budget-period-title {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.budget-period-today {
+  margin-left: auto;
+}
+
+.budget-period-hint {
+  margin: 8px 0 0;
+  padding: 0 2px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--color-text-muted);
+}
+
+/* Tombol nonaktif (› di bulan berjalan, "Bulan Ini" saat sudah di bulan
+   berjalan): tetap terlihat, tapi jelas tidak bisa ditekan. */
+.calendar-nav:disabled,
+.btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.calendar-nav:disabled,
+.btn--ghost:disabled {
+  background: var(--color-surface);
+  border-color: var(--color-border);
+  transform: none;
+}
+
 .calendar-weekdays,
 .calendar-grid {
   display: grid;
@@ -2904,7 +3031,7 @@ a:focus-visible {
 }
 
 @media (hover: hover) {
-  .calendar-nav:hover {
+  .calendar-nav:not(:disabled):hover {
     background: var(--color-primary-soft);
     border-color: var(--color-primary-soft);
   }
@@ -2999,6 +3126,14 @@ a:focus-visible {
   /* Rentang tanggal filter: dua input menumpuk supaya tidak terlalu sempit. */
   .filter-dates {
     flex-direction: column;
+  }
+
+  /* Navigator bulan budget: "Bulan Ini" turun ke baris kedua (rata kanan)
+     supaya ‹ Bulan › tetap satu baris utuh di 320px. */
+  .budget-period-today {
+    flex-basis: 100%;
+    max-width: max-content;
+    margin-left: auto;
   }
 
   /* Grup kanan filter-bar ditumpuk rata kanan supaya label urutan dan

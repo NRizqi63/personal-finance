@@ -257,6 +257,27 @@ function isSameMonth(isoDate, date) {
   return !!isoDate && isoDate.slice(0, 7) === toIsoDate(date).slice(0, 7);
 }
 
+/** Tanggal 1 bulan `date`, 00:00 LOKAL (komponen lokal, bukan toISOString). */
+function startOfMonth(date) {
+  return new Date(date.getFullYear(), date.getMonth(), 1);
+}
+
+/** "September 2026" — label bulan+tahun dalam Bahasa Indonesia. */
+function formatMonthYearID(date) {
+  return `${NAMA_BULAN_PANJANG_ID[date.getMonth()]} ${date.getFullYear()}`;
+}
+
+/** Apakah `date` berada di bulan kalender yang sama dengan hari ini. */
+function isCurrentMonth(date, today = new Date()) {
+  return date.getFullYear() === today.getFullYear() && date.getMonth() === today.getMonth();
+}
+
+// Bulan yang sedang DILIHAT di budget.html (V2.2 Tahap B). Hanya state
+// halaman — tidak disimpan ke localStorage. Default bulan berjalan; hanya
+// boleh mundur (bulan masa depan tidak bisa dipilih). Dashboard tidak
+// memakai ini: card Budget Bulan Ini di sana selalu bulan berjalan.
+let budgetViewDate = startOfMonth(new Date());
+
 /** Jumlah hari di bulan `date` (28/29/30/31 — dihitung, bukan hardcode). */
 function getDaysInMonth(date) {
   return new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
@@ -291,6 +312,37 @@ function getTotalUsed(now = new Date()) {
  * catatan ringan "total budget kategori melebihi budget bulanan". */
 function getTotalCategoryBudget() {
   return Object.values(financeData.categories).reduce((sum, cat) => sum + cat.budget, 0);
+}
+
+/** Status budget SATU KATEGORI (card di budget.html) — V2.2, 4 level +
+ * "belum diatur". Terpisah dari getBudgetStatus() yang tetap dipakai card
+ * Budget Bulan Ini (dashboard) dan Financial Check-in.
+ *   budget <= 0 -> unset : "Belum ada budget"  (tanpa persen/progress)
+ *   < 70%       -> safe  : "Aman"
+ *   70-89%      -> watch : "Perlu diperhatikan"
+ *   90-99%      -> near  : "Mendekati batas"
+ *   >= 100%     -> over  : "Melebihi budget"
+ * percent tidak dipotong ke 100 (label boleh "125%"); remaining boleh
+ * negatif — tampilannya "Lebih Rp…" ditangani template. */
+function getCategoryBudgetStatus(used, budget) {
+  if (!(budget > 0)) return { key: "unset", label: "Belum ada budget", percent: 0, remaining: 0 };
+  const percent = (used / budget) * 100;
+  const remaining = budget - used;
+  if (percent >= 100) return { key: "over", label: "Melebihi budget", percent, remaining };
+  if (percent >= 90) return { key: "near", label: "Mendekati batas", percent, remaining };
+  if (percent >= 70) return { key: "watch", label: "Perlu diperhatikan", percent, remaining };
+  return { key: "safe", label: "Aman", percent, remaining };
+}
+
+/** Pengeluaran bulan `now` yang TIDAK punya budget kategori: kategori
+ * "Lainnya" dan kategori yang sudah dihapus user (key-nya tetap tersimpan
+ * di transaksi). Ditampilkan sebagai satu baris info di budget.html supaya
+ * total pengeluaran periode tetap jujur, bukan "hilang" dari daftar. */
+function getUnbudgetedUsed(now = new Date()) {
+  const list = financeData.transactions.filter(
+    (tx) => tx.type === "expense" && !financeData.categories[tx.category] && isSameMonth(tx.isoDate, now)
+  );
+  return { amount: list.reduce((sum, tx) => sum + tx.amount, 0), count: list.length };
 }
 
 /** Hitung status budget kategori berdasarkan persentase pemakaian */
@@ -487,12 +539,17 @@ function setBalanceVisible(visible) {
  * #budget-note: catatan ringan kalau total budget kategori > budget bulanan
  * (tidak mengubah data apa pun).
  */
-function renderBudgetSummary() {
+function renderBudgetSummary(now = new Date()) {
   const card = document.getElementById("budget-card");
   if (!card) return; // halaman ini tidak punya card budget
 
+  // budget.html: judul mengikuti bulan yang dilihat. Dashboard tidak punya
+  // elemen ini (judulnya statis "Budget Bulan Ini" dan selalu bulan berjalan).
+  const title = document.getElementById("budget-summary-title");
+  if (title) title.textContent = isCurrentMonth(now) ? "Budget Bulan Ini" : `Budget ${formatMonthYearID(now)}`;
+
   const budget = financeData.budget.monthly;
-  const used = getTotalUsed();
+  const used = getTotalUsed(now);
   const remaining = Math.max(budget - used, 0);
   const percent = budget > 0 ? (used / budget) * 100 : 0;
   const percentLabel = percent.toLocaleString("id-ID", { maximumFractionDigits: 1 });
@@ -530,33 +587,69 @@ function renderBudgetSummary() {
  * Analisis Kategori versi lama (nama, status, budget, terpakai, progress
  * bar, sisa) — yang berubah cuma: sekarang dicetak satu panel per kategori
  * di dalam carousel, bukan satu card yang innerHTML-nya diganti-ganti. */
-function renderCategoryPanel(key, categoryData) {
+function renderCategoryPanel(key, categoryData, now = new Date()) {
   const { name, budget, emoji } = categoryData;
-  const used = getCategoryUsed(key);
-  const remaining = Math.max(budget - used, 0);
-  const percent = budget > 0 ? (used / budget) * 100 : 0;
-  const percentLabel = percent.toLocaleString("id-ID", { maximumFractionDigits: 1 });
-  const status = getBudgetStatus(percent);
-
-  return `
-    <article class="category-card" data-category="${key}">
+  const used = getCategoryUsed(key, now);
+  const status = getCategoryBudgetStatus(used, budget);
+  const head = `
       <div class="category-card-head">
         <span class="category-name"><span class="category-emoji" aria-hidden="true">${emoji || FALLBACK_CATEGORY.emoji}</span>${name}</span>
         <span class="category-status" data-status="${status.key}">${status.label}</span>
         <button type="button" class="btn btn--ghost btn--xs" data-action="edit-category" data-key="${key}" aria-label="Edit kategori ${name}">${ICON_EDIT} Edit</button>
+      </div>`;
+
+  // Budget 0 = belum diatur: kategori tetap ada (dipakai form transaksi),
+  // tapi tanpa persen/progress/status palsu — hanya pengeluaran aktualnya.
+  if (status.key === "unset") {
+    return `
+    <article class="category-card category-card--unset" data-category="${key}">${head}
+      <div class="category-card-foot">
+        <span>Terpakai: <strong class="num">${formatRupiah(used)}</strong></span>
+        <span class="category-unset-hint">Atur budget lewat tombol Edit</span>
       </div>
+    </article>
+  `;
+  }
+
+  const percentLabel = status.percent.toLocaleString("id-ID", { maximumFractionDigits: 1 });
+  // Sisa boleh negatif: ditampilkan "Lebih Rp…" (formatRupiah memakai nilai
+  // absolut, jadi tidak pernah muncul "-Rp").
+  const over = status.remaining < 0;
+  const remainingMarkup = over
+    ? `<span class="remaining-budget is-over">Lebih <strong class="num">${formatRupiah(-status.remaining)}</strong></span>`
+    : `<span class="remaining-budget">Sisa <strong class="num">${formatRupiah(status.remaining)}</strong></span>`;
+
+  return `
+    <article class="category-card" data-category="${key}">${head}
       <div class="category-budget-row">
         <span>Budget: <strong class="num">${formatRupiah(budget)}</strong></span>
-        <span class="progress-percent">${percentLabel}%</span>
+        <span class="progress-percent" data-status="${status.key}">${percentLabel}%</span>
       </div>
       <div class="progress-bar">
-        <div class="progress-bar-fill" data-status="${status.key}" style="width:${Math.min(percent, 100)}%"></div>
+        <div class="progress-bar-fill" data-status="${status.key}" style="width:${Math.min(status.percent, 100)}%"></div>
       </div>
       <div class="category-card-foot">
         <span>Terpakai: <strong class="num">${formatRupiah(used)}</strong></span>
-        <span class="remaining-budget">Sisa <strong class="num">${formatRupiah(remaining)}</strong></span>
+        ${remainingMarkup}
       </div>
     </article>
+  `;
+}
+
+/** Baris "Pengeluaran lain tanpa budget" di bawah daftar kategori — hanya
+ * kalau memang ada (kategori Lainnya / kategori yang sudah dihapus). */
+function renderUnbudgetedRow(now = new Date()) {
+  const { amount, count } = getUnbudgetedUsed(now);
+  if (!count) return "";
+  const noun = count === 1 ? "1 transaksi" : `${count} transaksi`;
+  return `
+    <div class="category-card category-card--other" data-category="__other">
+      <div class="category-card-head">
+        <span class="category-name"><span class="category-emoji" aria-hidden="true">${FALLBACK_CATEGORY.emoji}</span>Pengeluaran lain tanpa budget</span>
+        <strong class="num category-other-amount">${formatRupiah(amount)}</strong>
+      </div>
+      <p class="category-other-hint">${noun} di kategori Lainnya atau kategori yang sudah dihapus. Tidak dibandingkan dengan budget mana pun.</p>
+    </div>
   `;
 }
 
@@ -564,15 +657,76 @@ function renderCategoryPanel(key, categoryData) {
  * Halaman analytics.html: semua kategori ditumpuk vertikal,
  * memakai template panel yang sama persis dengan dashboard.
  */
-function renderCategoryList() {
+function renderCategoryList(now = new Date()) {
   const list = document.getElementById("category-list");
-  if (!list) return; // bukan di halaman analytics
+  if (!list) return; // bukan di halaman budget
   const entries = Object.entries(financeData.categories);
-  if (!entries.length) {
-    list.innerHTML = `<p class="category-empty">Belum ada kategori. Tambahkan kategori untuk mulai mengatur budget per pos pengeluaran.</p>`;
-    return;
+
+  // Peringatan ringkas di atas daftar: berapa kategori yang sudah melebihi
+  // budget pada periode ini (0 -> disembunyikan).
+  const note = document.getElementById("category-note");
+  if (note) {
+    const overCount = entries.filter(([key, cat]) => getCategoryBudgetStatus(getCategoryUsed(key, now), cat.budget).key === "over").length;
+    note.hidden = overCount === 0;
+    const when = isCurrentMonth(now) ? "bulan ini" : `pada ${formatMonthYearID(now)}`;
+    note.textContent = overCount
+      ? `⚠️ ${overCount} kategori sudah melebihi budget ${when}. Cek card yang bertanda "Melebihi budget".`
+      : "";
   }
-  list.innerHTML = entries.map(([key, data]) => renderCategoryPanel(key, data)).join("");
+
+  const cards = entries.length
+    ? entries.map(([key, data]) => renderCategoryPanel(key, data, now)).join("")
+    : `<p class="category-empty">Belum ada kategori. Tambahkan kategori untuk mulai mengatur budget per pos pengeluaran.</p>`;
+  list.innerHTML = cards + renderUnbudgetedRow(now);
+}
+
+/** Navigator bulan di budget.html: label, tombol › (disabled di bulan
+ * berjalan — masa depan tidak bisa dipilih), tombol "Bulan Ini" (disabled
+ * kalau sudah di bulan berjalan), dan catatan "budget saat ini" saat
+ * melihat bulan lain. */
+function renderBudgetPeriod() {
+  const title = document.getElementById("budget-period-title");
+  if (!title) return; // bukan di halaman budget
+  const current = isCurrentMonth(budgetViewDate);
+  title.textContent = formatMonthYearID(budgetViewDate);
+  document.getElementById("budget-next-month").disabled = current;
+  document.getElementById("budget-this-month").disabled = current;
+  const hint = document.getElementById("budget-period-hint");
+  hint.hidden = current;
+  hint.textContent = current
+    ? ""
+    : `Pengeluaran ${formatMonthYearID(budgetViewDate)} dibandingkan dengan budget saat ini.`;
+}
+
+/** Render seluruh budget.html untuk bulan yang dilihat (budgetViewDate):
+ * summary, card kategori, note kategori melebihi budget, baris pengeluaran
+ * tanpa budget, dan navigator — semuanya memakai tanggal yang sama. */
+function renderBudgetPage() {
+  renderBudgetSummary(budgetViewDate);
+  renderCategoryList(budgetViewDate);
+  renderBudgetPeriod();
+}
+
+/** Pasang tombol navigator bulan (budget.html). */
+function setupBudgetPeriodNav() {
+  const prev = document.getElementById("budget-prev-month");
+  if (!prev) return; // bukan di halaman budget
+  const next = document.getElementById("budget-next-month");
+  const thisMonth = document.getElementById("budget-this-month");
+
+  function setViewMonth(date) {
+    // Jaga supaya tidak pernah melewati bulan berjalan (komponen lokal).
+    const limit = startOfMonth(new Date());
+    budgetViewDate = date > limit ? limit : startOfMonth(date);
+    renderBudgetPage();
+  }
+
+  prev.addEventListener("click", () => setViewMonth(new Date(budgetViewDate.getFullYear(), budgetViewDate.getMonth() - 1, 1)));
+  next.addEventListener("click", () => {
+    if (isCurrentMonth(budgetViewDate)) return; // tombol sudah disabled; jaga-jaga
+    setViewMonth(new Date(budgetViewDate.getFullYear(), budgetViewDate.getMonth() + 1, 1));
+  });
+  thisMonth.addEventListener("click", () => setViewMonth(new Date()));
 }
 
 /* ---------- Financial Check-in: perhitungan berbasis data aktual ---------- */
@@ -2386,8 +2540,7 @@ function setupBudgetEditor() {
   const confirmModal = createModalController(confirmOverlay);
 
   function rerender() {
-    renderBudgetSummary();
-    renderCategoryList();
+    renderBudgetPage(); // ikut bulan yang sedang dilihat (budgetViewDate)
   }
 
   function persistAndRerender() {
@@ -2694,9 +2847,10 @@ function initTransactionsPage() {
  */
 function initBudgetPage() {
   recalcFromTransactions();
-  renderBudgetSummary();
-  renderCategoryList();
+  budgetViewDate = startOfMonth(new Date()); // default: bulan berjalan
+  renderBudgetPage();
   setupBudgetEditor();
+  setupBudgetPeriodNav();
 }
 
 /**
