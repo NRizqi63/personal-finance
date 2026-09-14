@@ -2790,6 +2790,27 @@ a:focus-visible {
   border-radius: var(--radius-sm);
 }
 
+/* Baris pengaturan dengan tombol aksi di kanan (Export JSON/CSV). Di layar
+   sempit tombolnya turun ke baris sendiri, rata kanan, supaya teks
+   deskripsi tidak terjepit. */
+.settings-row--action {
+  flex-wrap: wrap;
+}
+
+.settings-row-action {
+  flex-shrink: 0;
+  margin-left: auto;
+  color: var(--color-primary);
+}
+
+@media (max-width: 430px) {
+  .settings-row-action {
+    flex-basis: 100%;
+    max-width: max-content;
+    margin-left: auto;
+  }
+}
+
 /* Badge "Segera hadir": pil kuning lembut, dipakai di judul section & baris. */
 .badge-soon {
   flex-shrink: 0;

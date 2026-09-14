@@ -2984,6 +2984,132 @@ function initBudgetPage() {
   setupBudgetPeriodNav();
 }
 
+/* ---------- Data & Backup: export (Settings V1 Tahap 3A) ----------
+   Semua file dibuat di browser (Blob + <a download>). Tidak ada fetch/
+   jaringan, tidak ada eval/new Function, tidak ada data yang dikirim ke
+   mana pun. Import & reset menyusul di tahap berikutnya. */
+
+// Versi FORMAT file backup (bukan versi aplikasi) — dinaikkan hanya kalau
+// struktur file berubah, dipakai import nanti untuk menolak file yang lebih baru.
+const BACKUP_SCHEMA_VERSION = 1;
+const BACKUP_APP_ID = "personal-finance";
+
+/**
+ * Isi file backup JSON: HANYA data yang benar-benar dipersist (tiga key
+ * localStorage). Mock (notifications, goal), state sesi (checkinDismissed,
+ * isBalanceVisible, budgetViewDate, filter/sort, nextTransactionId) sengaja
+ * TIDAK ikut — semuanya dihitung/di-reset sendiri saat aplikasi dibuka.
+ */
+function buildBackup(now = new Date()) {
+  return {
+    app: BACKUP_APP_ID,
+    appName: "Personal Finance",
+    schema: BACKUP_SCHEMA_VERSION,
+    appVersion: APP_VERSION,
+    exportedAt: now.toISOString(), // metadata saja; nama file memakai tanggal lokal
+    counts: {
+      transactions: financeData.transactions.length,
+      categories: Object.keys(financeData.categories).length,
+    },
+    data: {
+      transactions: financeData.transactions,
+      budget: { monthly: financeData.budget.monthly, categories: financeData.categories },
+      settings: financeData.settings,
+    },
+  };
+}
+
+/** Simpan teks sebagai file lewat Blob + <a download> (murni lokal). */
+function downloadFile(filename, content, mimeType) {
+  const blob = new Blob([content], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.hidden = true;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  // Beri jeda sebelum URL dilepas supaya unduhan sempat dimulai.
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+/** Nama file dengan tanggal LOKAL (toIsoDate, bukan toISOString yang UTC). */
+function backupFileName(extension, now = new Date()) {
+  const slug = extension === "csv" ? "transaksi" : "backup";
+  return `personal-finance-${slug}-${toIsoDate(now)}.${extension}`;
+}
+
+/** Satu sel CSV: selalu dikutip (aman untuk koma, kutip, newline, emoji) +
+ * lindungi dari CSV injection — sel yang diawali = + - @ (juga tab/CR)
+ * diberi awalan apostrof supaya spreadsheet membacanya sebagai teks. */
+function toCsvCell(value) {
+  let text = value === null || value === undefined ? "" : String(value);
+  if (/^[=+\-@\t\r]/.test(text)) text = `'${text}`;
+  return `"${text.replace(/"/g, '""')}"`;
+}
+
+const CSV_HEADER = ["tanggal", "jenis", "judul", "kategori", "kategori_nama", "jumlah", "waktu"];
+
+/** Seluruh transaksi sebagai CSV (urut terbaru dulu). Nominal ditulis
+ * mentah (angka, tanpa "Rp"/pemisah ribuan) supaya bisa dihitung di
+ * spreadsheet. BOM UTF-8 di depan supaya Excel membaca emoji & huruf
+ * Indonesia dengan benar. */
+function buildTransactionsCsv() {
+  const rows = getSortedTransactions(financeData.transactions).map((tx) =>
+    [tx.isoDate, tx.type, tx.title, tx.category, getCategoryLabel(tx.category), tx.amount, tx.time]
+      .map(toCsvCell)
+      .join(",")
+  );
+  return `\uFEFF${[CSV_HEADER.map(toCsvCell).join(","), ...rows].join("\r\n")}\r\n`;
+}
+
+/** Tulis pesan hasil export di card Data & Backup (pola .settings-feedback). */
+let dataFeedbackTimer = 0;
+function showDataFeedback(text, type) {
+  const feedback = document.getElementById("settings-data-feedback");
+  if (!feedback) return;
+  clearTimeout(dataFeedbackTimer);
+  feedback.textContent = text;
+  feedback.dataset.type = type;
+  feedback.hidden = false;
+  if (type === "success") dataFeedbackTimer = setTimeout(() => { feedback.hidden = true; }, 4000);
+}
+
+function exportBackupJson() {
+  try {
+    const backup = buildBackup();
+    const name = backupFileName("json");
+    downloadFile(name, JSON.stringify(backup, null, 2), "application/json");
+    showDataFeedback(`Backup tersimpan sebagai ${name} (${backup.counts.transactions} transaksi, ${backup.counts.categories} kategori).`, "success");
+  } catch (err) {
+    showDataFeedback("Gagal membuat file backup. Coba lagi, atau periksa pengaturan unduhan browser.", "error");
+  }
+}
+
+function exportTransactionsCsv() {
+  try {
+    const total = financeData.transactions.length;
+    if (!total) {
+      showDataFeedback("Belum ada transaksi yang bisa diexport.", "error");
+      return;
+    }
+    const name = backupFileName("csv");
+    downloadFile(name, buildTransactionsCsv(), "text/csv;charset=utf-8");
+    showDataFeedback(`${total} transaksi tersimpan sebagai ${name}.`, "success");
+  } catch (err) {
+    showDataFeedback("Gagal membuat file CSV. Coba lagi, atau periksa pengaturan unduhan browser.", "error");
+  }
+}
+
+/** Pasang tombol export di section Data & Backup. */
+function setupSettingsData() {
+  const jsonBtn = document.getElementById("btn-export-json");
+  if (!jsonBtn) return; // bukan di halaman pengaturan
+  jsonBtn.addEventListener("click", exportBackupJson);
+  document.getElementById("btn-export-csv").addEventListener("click", exportTransactionsCsv);
+}
+
 /**
  * Halaman "Pengaturan" (settings.html) — Settings V1 Tahap 1: fondasi.
  * Belum ada state yang disimpan; isinya tautan ke budget.html, info
@@ -3000,6 +3126,7 @@ function initSettingsPage() {
 
   setupSettingsProfile();
   setupSettingsPreferences();
+  setupSettingsData();
 
   // Deep-link dari dropdown dashboard ("Tentang Aplikasi" -> #tentang):
   // scroll halus ke section-nya setelah render, tanpa mengubah URL lagi.

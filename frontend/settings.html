@@ -106,19 +106,38 @@
       </div>
     </section>
 
-    <!-- 4. DATA & BACKUP — belum aktif (export/import/reset menyusul di tahap
-         berikutnya). Hanya informasi + badge, tanpa tombol apa pun. -->
+    <!-- 4. DATA & BACKUP (Tahap 3A: export saja) — file dibuat sepenuhnya di
+         browser (Blob + <a download>), tidak ada jaringan/server. Import &
+         reset data menyusul di tahap berikutnya. -->
     <section class="settings-section" id="data" aria-labelledby="settings-data-title">
-      <h2 class="section-title" id="settings-data-title">Data &amp; Backup <span class="badge-soon">Segera hadir</span></h2>
+      <h2 class="section-title" id="settings-data-title">Data &amp; Backup</h2>
       <div class="settings-card">
-        <div class="settings-row">
+        <div class="settings-row settings-row--action">
           <span class="settings-row-icon" aria-hidden="true">💾</span>
           <span class="settings-row-body">
-            <span class="settings-row-title">Export, import &amp; reset data</span>
-            <span class="settings-row-desc">Cadangkan transaksi dan budget ke file, pulihkan dari file, atau hapus data — akan hadir di pembaruan berikutnya.</span>
+            <span class="settings-row-title">Export Backup (JSON)</span>
+            <span class="settings-row-desc">Simpan seluruh transaksi, budget, kategori, dan pengaturan ke satu file untuk cadangan.</span>
+          </span>
+          <button type="button" class="btn btn--ghost btn--xs settings-row-action" id="btn-export-json">Export JSON</button>
+        </div>
+        <div class="settings-row settings-row--action">
+          <span class="settings-row-icon" aria-hidden="true">📄</span>
+          <span class="settings-row-body">
+            <span class="settings-row-title">Export Transaksi (CSV)</span>
+            <span class="settings-row-desc">Untuk dibuka di spreadsheet. File CSV tidak bisa dipakai memulihkan data — gunakan backup JSON untuk itu.</span>
+          </span>
+          <button type="button" class="btn btn--ghost btn--xs settings-row-action" id="btn-export-csv">Export CSV</button>
+        </div>
+        <div class="settings-row">
+          <span class="settings-row-icon" aria-hidden="true">📥</span>
+          <span class="settings-row-body">
+            <span class="settings-row-title">Import backup &amp; reset data</span>
+            <span class="settings-row-desc">Memulihkan data dari file backup dan menghapus data akan hadir di pembaruan berikutnya.</span>
           </span>
           <span class="badge-soon">Segera hadir</span>
         </div>
+        <p class="settings-feedback settings-feedback--inset" id="settings-data-feedback" role="status" aria-live="polite" hidden></p>
+        <p class="settings-info">⚠️ File backup berisi data keuangan pribadi kamu. Simpan di tempat yang aman dan jangan dibagikan ke orang lain.</p>
       </div>
     </section>
 
