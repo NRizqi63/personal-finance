@@ -29,8 +29,25 @@
       <h1 class="greeting-text">Analisis</h1>
     </header>
 
-    <!-- RINGKASAN: total pengeluaran bulan ini, kategori terbesar,
-         perubahan vs bulan lalu (renderAnalyticsSummary()) -->
+    <!-- NAVIGATOR BULAN — periode yang dianalisis: ‹ Bulan › + "Bulan Ini".
+         Struktur & kelasnya sama persis dengan navigator di budget.html.
+         Hanya state halaman (analyticsViewDate di app.js), tidak disimpan ke
+         localStorage; bulan masa depan tidak bisa dipilih (tombol › disabled). -->
+    <section class="budget-period" aria-label="Periode analisis">
+      <div class="budget-period-nav">
+        <button type="button" class="calendar-nav" id="analytics-prev-month" aria-label="Bulan sebelumnya">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6" /></svg>
+        </button>
+        <span class="calendar-title budget-period-title" id="analytics-period-title" aria-live="polite"></span>
+        <button type="button" class="calendar-nav" id="analytics-next-month" aria-label="Bulan berikutnya" disabled>
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6" /></svg>
+        </button>
+        <button type="button" class="btn btn--ghost btn--xs budget-period-today" id="analytics-this-month" disabled>Bulan Ini</button>
+      </div>
+    </section>
+
+    <!-- RINGKASAN: total pengeluaran bulan terpilih, kategori terbesar,
+         perubahan vs bulan sebelumnya (renderAnalyticsSummary()) -->
     <section class="analytics-summary" aria-label="Ringkasan analisis">
       <div class="stat-grid" id="analytics-summary">
         <!-- Diisi otomatis oleh js/app.js -->
@@ -51,7 +68,7 @@
       </div>
     </section>
 
-    <!-- PENGELUARAN PER KATEGORI: batang horizontal, bulan ini -->
+    <!-- PENGELUARAN PER KATEGORI: batang horizontal, bulan terpilih -->
     <section class="analytics-category" aria-label="Pengeluaran per kategori">
       <h2 class="section-title">Pengeluaran per Kategori</h2>
       <div class="budget-card chart-card" id="category-chart">
@@ -63,7 +80,7 @@
          (getAnalyticsInsights()). Bulan berjalan, terikat budget bulanan.
          Berbeda dari Financial Check-in. -->
     <section class="analytics-insight" aria-label="Insight keuangan">
-      <h2 class="section-title">Insight Keuangan <span class="section-title-sub">bulan ini</span></h2>
+      <h2 class="section-title">Insight Keuangan <span class="section-title-sub" id="insight-period-sub">bulan ini</span></h2>
       <ul class="insight-list" id="insight-list">
         <!-- Diisi otomatis oleh js/app.js melalui renderInsights() -->
       </ul>

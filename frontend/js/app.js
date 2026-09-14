@@ -912,6 +912,11 @@ function getWeeklyComparison(category) {
 // State halaman Analisis: batang (tanggal) yang dipilih & daftar detail diperluas.
 const analyticsPage = { selectedKey: null, detailExpanded: false };
 
+// Bulan yang sedang DILIHAT di analytics.html — hanya state halaman (tidak
+// dipersist), pola & aturannya sama dengan budgetViewDate di budget.html:
+// default bulan berjalan, hanya boleh mundur.
+let analyticsViewDate = startOfMonth(new Date());
+
 /** Tambah n hari (komponen lokal). */
 function addDays(date, n) {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate() + n);
@@ -1184,7 +1189,7 @@ function renderTimeChart(range, buckets) {
         })
         .join("")}
     </div>
-    <p class="chart-note">${max > 0 ? `Total bulan ini <strong class="num">${formatRupiah(total)}</strong>` : "Belum ada pengeluaran bulan ini."}${undated ? ` <span class="chart-note-muted">· ${undated} pengeluaran tanpa tanggal valid tidak ditampilkan</span>` : ""}</p>
+    <p class="chart-note">${max > 0 ? `Total ${range.label} <strong class="num">${formatRupiah(total)}</strong>` : `Belum ada pengeluaran pada ${range.label}.`}${undated ? ` <span class="chart-note-muted">· ${undated} pengeluaran tanpa tanggal valid tidak ditampilkan</span>` : ""}</p>
   `;
   syncBarHighlights();
 }
@@ -1239,7 +1244,7 @@ function setSelectedBar(key) {
     });
     syncBarHighlights();
   }
-  const range = getMonthRange(new Date());
+  const range = getMonthRange(analyticsViewDate);
   renderChartDetail(range, getDayBuckets(range.from, range.to));
 }
 
@@ -1343,7 +1348,7 @@ function renderCategoryChart(range) {
   if (!el) return;
   const rows = getExpenseByCategory(range);
   if (!rows.length) {
-    el.innerHTML = `<p class="chart-empty">Belum ada pengeluaran bulan ini.</p>`;
+    el.innerHTML = `<p class="chart-empty">Belum ada pengeluaran pada ${escapeHtml(range.label)}.</p>`;
     return;
   }
   const max = rows[0].amount;
@@ -1402,6 +1407,17 @@ function renderChartDetail(range, buckets) {
 function renderInsights() {
   const el = document.getElementById("insight-list");
   if (!el) return;
+  // Insight memakai sisa hari bulan berjalan & perbandingan minggu ini vs
+  // minggu lalu, jadi hanya bermakna untuk bulan berjalan. Saat user melihat
+  // bulan lain, katakan apa adanya — jangan tampilkan angka bulan ini
+  // seolah-olah milik bulan yang sedang dilihat.
+  const sub = document.getElementById("insight-period-sub");
+  const viewingCurrentMonth = isCurrentMonth(analyticsViewDate);
+  if (sub) sub.textContent = viewingCurrentMonth ? "bulan ini" : formatMonthYearID(new Date());
+  if (!viewingCurrentMonth) {
+    el.innerHTML = `<li class="insight-item" data-level="neutral">💡 Insight keuangan dihitung untuk bulan berjalan (${escapeHtml(formatMonthYearID(new Date()))}). Kembali ke "Bulan Ini" untuk melihatnya.</li>`;
+    return;
+  }
   el.innerHTML = getAnalyticsInsights()
     .map((ins) => `<li class="insight-item" data-level="${ins.level}">${ins.text}</li>`)
     .join("");
@@ -1409,7 +1425,7 @@ function renderInsights() {
 
 /** Render seluruh halaman Analisis dari rentang bulan berjalan. */
 function renderAnalytics() {
-  const range = getMonthRange(new Date());
+  const range = getMonthRange(analyticsViewDate);
   const buckets = getDayBuckets(range.from, range.to);
   if (analyticsPage.selectedKey && !buckets.some((b) => b.key === analyticsPage.selectedKey)) analyticsPage.selectedKey = null;
   renderAnalyticsSummary(range);
@@ -1417,6 +1433,42 @@ function renderAnalytics() {
   renderCategoryChart(range);
   renderChartDetail(range, buckets);
   renderInsights();
+  renderAnalyticsPeriod();
+}
+
+/** Navigator bulan di analytics.html: label, tombol › (disabled di bulan
+ * berjalan — masa depan tidak bisa dipilih) dan "Bulan Ini" (disabled kalau
+ * sudah di bulan berjalan). Aturan sama dengan navigator budget. */
+function renderAnalyticsPeriod() {
+  const title = document.getElementById("analytics-period-title");
+  if (!title) return; // bukan di halaman analisis
+  const current = isCurrentMonth(analyticsViewDate);
+  title.textContent = formatMonthYearID(analyticsViewDate);
+  document.getElementById("analytics-next-month").disabled = current;
+  document.getElementById("analytics-this-month").disabled = current;
+}
+
+/** Pasang tombol navigator bulan (analytics.html). Listener dipasang SEKALI
+ * saat init; render ulang hanya mengubah isi, bukan menambah listener. */
+function setupAnalyticsPeriodNav() {
+  const prev = document.getElementById("analytics-prev-month");
+  if (!prev) return; // bukan di halaman analisis
+
+  function setViewMonth(date) {
+    const limit = startOfMonth(new Date()); // tidak pernah melewati bulan berjalan
+    analyticsViewDate = date > limit ? limit : startOfMonth(date);
+    // Pilihan batang & daftar detail milik bulan sebelumnya tidak relevan lagi.
+    analyticsPage.selectedKey = null;
+    analyticsPage.detailExpanded = false;
+    renderAnalytics();
+  }
+
+  prev.addEventListener("click", () => setViewMonth(new Date(analyticsViewDate.getFullYear(), analyticsViewDate.getMonth() - 1, 1)));
+  document.getElementById("analytics-next-month").addEventListener("click", () => {
+    if (isCurrentMonth(analyticsViewDate)) return; // tombol sudah disabled; jaga-jaga
+    setViewMonth(new Date(analyticsViewDate.getFullYear(), analyticsViewDate.getMonth() + 1, 1));
+  });
+  document.getElementById("analytics-this-month").addEventListener("click", () => setViewMonth(new Date()));
 }
 
 /**
@@ -4162,7 +4214,9 @@ function setupSettingsPreferences() {
  */
 function initAnalyticsPage() {
   recalcFromTransactions();
+  analyticsViewDate = startOfMonth(new Date()); // default: bulan berjalan
   renderAnalytics();
+  setupAnalyticsPeriodNav();
   setupChartScrub();
 
   const detail = document.getElementById("chart-detail");
