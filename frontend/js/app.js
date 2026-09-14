@@ -17,6 +17,28 @@
    Nantinya bagian ini bisa diganti dengan hasil fetch() ke API,
    tanpa perlu mengubah fungsi render di bawah.
    ========================================================= */
+// Nilai awal budget untuk pengguna baru — dipakai financeData di bawah DAN
+// sebagai "default aplikasi" saat file backup yang diimport tidak membawa
+// budget yang bisa dibaca. Dibekukan supaya tidak ikut termodifikasi saat
+// user mengedit kategorinya.
+const DEFAULT_MONTHLY_BUDGET = 2400000;
+const DEFAULT_CATEGORIES = Object.freeze({
+  makanan: Object.freeze({ name: "Makanan", emoji: "🍜", budget: 800000 }),
+  bensin: Object.freeze({ name: "Bensin", emoji: "⛽", budget: 300000 }),
+  belanja: Object.freeze({ name: "Belanja", emoji: "🛍️", budget: 500000 }),
+  tagihan: Object.freeze({ name: "Tagihan", emoji: "🧾", budget: 600000 }),
+  hiburan: Object.freeze({ name: "Hiburan", emoji: "🎬", budget: 200000 }),
+});
+
+/** Salinan baru kategori default (boleh diubah user tanpa menyentuh template). */
+function cloneDefaultCategories() {
+  const categories = {};
+  Object.entries(DEFAULT_CATEGORIES).forEach(([key, cat]) => {
+    categories[key] = { name: cat.name, emoji: cat.emoji, budget: cat.budget };
+  });
+  return categories;
+}
+
 const financeData = {
   // Diisi ulang oleh recalcFromTransactions() dari daftar transaksi nyata
   // setiap kali halaman dibuka & setiap CRUD — nilai di sini hanya titik awal
@@ -33,7 +55,7 @@ const financeData = {
   // angka ini — UI hanya memberi catatan ringan, tidak mengubah data user.
   // Nilai awal ini dipakai kalau belum ada yang tersimpan di localStorage.
   budget: {
-    monthly: 2400000,
+    monthly: DEFAULT_MONTHLY_BUDGET,
   },
 
   // Konfigurasi budget per kategori (key = value <option> kategori di form
@@ -44,13 +66,7 @@ const financeData = {
   // "Terpakai" TIDAK disimpan di sini — dihitung dari transaksi pengeluaran
   // aktual lewat getCategoryUsed(), supaya dashboard dan analytics.html
   // selalu membaca data yang sama dengan daftar transaksi.
-  categories: {
-    makanan: { name: "Makanan", emoji: "🍜", budget: 800000 },
-    bensin: { name: "Bensin", emoji: "⛽", budget: 300000 },
-    belanja: { name: "Belanja", emoji: "🛍️", budget: 500000 },
-    tagihan: { name: "Tagihan", emoji: "🧾", budget: 600000 },
-    hiburan: { name: "Hiburan", emoji: "🎬", budget: 200000 },
-  },
+  categories: cloneDefaultCategories(),
 
   // Pengaturan user (Settings V1 Tahap 2): nama panggilan untuk sapaan,
   // preferensi saldo saat dashboard dibuka, dan izin popup check-in.
@@ -3141,6 +3157,309 @@ function exportTransactionsCsv() {
   }
 }
 
+/* ---------- Data & Backup: import — pemeriksaan file (Tahap 3B-1) ----------
+   Tahap ini HANYA membaca & memvalidasi file. Tidak ada satu pun penulisan
+   ke localStorage, tidak ada snapshot/rollback/reload, dan tidak ada modal
+   konfirmasi — semuanya menyusul di tahap berikutnya. */
+
+const IMPORT_MAX_BYTES = 5 * 1024 * 1024; // 5 MB
+const IMPORT_TITLE_MAX = 120;
+const IMPORT_TIME_MAX = 40;
+const IMPORT_NAME_MAX = 40;
+const IMPORT_EMOJI_MAX = 8;
+// Key kategori yang aman dipakai sebagai atribut & key objek.
+const CATEGORY_KEY_PATTERN = /^[A-Za-z0-9_.:@+-]{1,40}$/;
+
+// Hasil pemeriksaan file terakhir — HANYA di memori, tidak dipersist.
+// Diisi di Tahap 3B-1, dipakai untuk menerapkan data di tahap berikutnya.
+let pendingImport = null;
+
+/** Hasil pemeriksaan file yang sedang menunggu konfirmasi (null kalau tidak
+ * ada). Dipakai tahap berikutnya saat menerapkan backup. */
+function getPendingImport() {
+  return pendingImport;
+}
+
+/** Key kategori dari file: harus string, berpola aman, dan bukan key yang
+ * bisa mengutak-atik prototype. Selain itu -> "lainnya". */
+function normalizeCategoryKey(key) {
+  if (typeof key !== "string" || !isSafeObjectKey(key) || !CATEGORY_KEY_PATTERN.test(key)) return null;
+  return key;
+}
+
+/** Budget dari file -> bentuk aplikasi { monthly, categories }. Objek baru
+ * (bukan hasil JSON mentah), key berbahaya dilewati, kategori tidak lengkap
+ * dilewati dan dihitung. Rusak total -> default aplikasi. */
+function normalizeBudgetData(raw) {
+  const fallback = () => ({ budget: { monthly: DEFAULT_MONTHLY_BUDGET, categories: cloneDefaultCategories() }, usedFallback: true, skipped: 0 });
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return fallback();
+
+  const monthly = Number.isFinite(raw.monthly) && raw.monthly >= 0 ? raw.monthly : null;
+  if (!raw.categories || typeof raw.categories !== "object" || Array.isArray(raw.categories)) {
+    const fb = fallback();
+    if (monthly !== null) fb.budget.monthly = monthly; // monthly masih bisa dipakai
+    return fb;
+  }
+
+  const categories = {};
+  let skipped = 0;
+  Object.entries(raw.categories).forEach(([key, cat]) => {
+    const safeKey = normalizeCategoryKey(key);
+    if (!safeKey || !cat || typeof cat !== "object" || Array.isArray(cat)) { skipped += 1; return; }
+    const name = typeof cat.name === "string" ? cat.name.trim() : "";
+    if (!name || name.length > IMPORT_NAME_MAX) { skipped += 1; return; }
+    if (!Number.isFinite(cat.budget) || cat.budget < 0) { skipped += 1; return; }
+    const emoji = typeof cat.emoji === "string" && cat.emoji && cat.emoji.length <= IMPORT_EMOJI_MAX ? cat.emoji : FALLBACK_CATEGORY.emoji;
+    categories[safeKey] = { name, emoji, budget: cat.budget };
+  });
+
+  return {
+    budget: { monthly: monthly === null ? DEFAULT_MONTHLY_BUDGET : monthly, categories },
+    usedFallback: monthly === null,
+    skipped,
+  };
+}
+
+/**
+ * Periksa isi file backup JSON. FUNGSI MURNI: tidak menyentuh DOM,
+ * localStorage, maupun state aplikasi — hanya menerima teks dan
+ * mengembalikan hasil pemeriksaan.
+ *
+ * Hasil: { ok, errors[], warnings[], data|null, counts{totalRows,validRows,
+ * skippedRows}, skipped{alasan:n}, meta{...} }. `data` hanya diisi kalau ok.
+ */
+function validateBackup(rawText) {
+  const errors = [];
+  const warnings = [];
+  const skipped = { shape: 0, title: 0, amount: 0, type: 0, isoDate: 0 };
+  const meta = {
+    exportedAt: null, appVersion: null, schema: null,
+    budgetFound: false, settingsFound: false, budgetFallback: false, settingsFallback: false,
+    categories: 0, categoriesSkipped: 0, monthly: 0,
+    unknownCategories: [], idsRenumbered: false, duplicateIds: 0, invalidIds: 0,
+  };
+  const fail = (message) => {
+    errors.push(message);
+    return { ok: false, errors, warnings, data: null, counts: { totalRows: 0, validRows: 0, skippedRows: 0 }, skipped, meta };
+  };
+
+  let parsed;
+  try {
+    parsed = JSON.parse(rawText);
+  } catch (err) {
+    return fail("File ini bukan file backup JSON yang bisa dibaca. Pilih file hasil Export Backup (JSON) dari aplikasi ini.");
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return fail("Isi file tidak sesuai format backup aplikasi ini.");
+  }
+  if (parsed.app !== BACKUP_APP_ID) {
+    return fail("File ini sepertinya berasal dari aplikasi lain. Import hanya menerima backup dari Personal Finance.");
+  }
+  if (!Number.isFinite(parsed.schema)) {
+    return fail("File backup tidak menyebutkan versi formatnya, jadi tidak bisa dibaca.");
+  }
+  if (parsed.schema > BACKUP_SCHEMA_VERSION) {
+    return fail(`File ini dibuat oleh versi aplikasi yang lebih baru (format ${parsed.schema}). Perbarui aplikasi dulu, lalu coba lagi.`);
+  }
+  if (!parsed.data || typeof parsed.data !== "object" || Array.isArray(parsed.data)) {
+    return fail("Bagian data tidak ditemukan di file ini.");
+  }
+  if (!Array.isArray(parsed.data.transactions)) {
+    return fail("Bagian data transaksi tidak ditemukan di file ini.");
+  }
+
+  meta.schema = parsed.schema;
+  meta.exportedAt = typeof parsed.exportedAt === "string" && !isNaN(Date.parse(parsed.exportedAt)) ? parsed.exportedAt : null;
+  meta.appVersion = typeof parsed.appVersion === "string" ? parsed.appVersion : null;
+
+  // ---------- transaksi ----------
+  const rawRows = parsed.data.transactions;
+  const seenIds = new Set();
+  const rows = [];
+  rawRows.forEach((raw) => {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) { skipped.shape += 1; return; }
+
+    const title = typeof raw.title === "string" ? raw.title.trim() : "";
+    if (!title || title.length > IMPORT_TITLE_MAX) { skipped.title += 1; return; }
+
+    // Nominal WAJIB number: string angka sengaja tidak diterima diam-diam.
+    if (typeof raw.amount !== "number" || !Number.isFinite(raw.amount) || raw.amount <= 0) { skipped.amount += 1; return; }
+
+    // "investment" = jenis lama yang sudah menyatu ke pengeluaran.
+    const type = raw.type === "investment" ? "expense" : raw.type;
+    if (type !== "income" && type !== "expense") { skipped.type += 1; return; }
+
+    if (!isValidIsoDate(raw.isoDate)) { skipped.isoDate += 1; return; }
+
+    const category = normalizeCategoryKey(raw.category) || FALLBACK_CATEGORY.key;
+    const time = typeof raw.time === "string" && raw.time.length <= IMPORT_TIME_MAX ? raw.time : "";
+
+    // id dari file dicatat untuk laporan, TAPI tidak dipakai sebagai id final.
+    if (!Number.isFinite(raw.id)) meta.invalidIds += 1;
+    else if (seenIds.has(raw.id)) meta.duplicateIds += 1;
+    else seenIds.add(raw.id);
+
+    rows.push({ title, category, type, amount: raw.amount, isoDate: raw.isoDate, time });
+  });
+
+  const skippedRows = Object.values(skipped).reduce((sum, n) => sum + n, 0);
+  if (rawRows.length > 0 && rows.length === 0) {
+    return fail("Tidak ada transaksi yang bisa dibaca dari file ini, jadi import dibatalkan. Data kamu tidak berubah.");
+  }
+
+  // Penomoran ulang MENURUN mengikuti urutan file: elemen pertama mendapat id
+  // tertinggi, sama seperti transaksi terbaru di aplikasi (urutan tampilan
+  // tetap sama, dan id berikutnya tidak akan bentrok).
+  const total = rows.length;
+  const transactions = rows.map((row, index) => ({ id: total - index, ...row }));
+  meta.idsRenumbered = meta.invalidIds > 0 || meta.duplicateIds > 0 || total > 0;
+
+  // ---------- budget ----------
+  meta.budgetFound = !!parsed.data.budget && typeof parsed.data.budget === "object" && !Array.isArray(parsed.data.budget);
+  const budgetResult = normalizeBudgetData(parsed.data.budget);
+  meta.budgetFallback = !meta.budgetFound || budgetResult.usedFallback;
+  meta.categories = Object.keys(budgetResult.budget.categories).length;
+  meta.categoriesSkipped = budgetResult.skipped;
+  meta.monthly = budgetResult.budget.monthly;
+  if (!meta.budgetFound) warnings.push("Data budget tidak ada di file, jadi budget default aplikasi yang akan dipakai.");
+  else if (budgetResult.usedFallback) warnings.push("Budget bulanan di file tidak terbaca, jadi nilai default yang akan dipakai.");
+  if (budgetResult.skipped) warnings.push(`${budgetResult.skipped} kategori dilewati karena datanya tidak lengkap.`);
+
+  // ---------- settings ----------
+  meta.settingsFound = !!parsed.data.settings && typeof parsed.data.settings === "object" && !Array.isArray(parsed.data.settings);
+  const settings = normalizeSettings(meta.settingsFound ? parsed.data.settings : null);
+  meta.settingsFallback = !meta.settingsFound;
+  if (!meta.settingsFound) warnings.push("Pengaturan tidak ada di file, jadi pengaturan default yang akan dipakai.");
+
+  // ---------- kategori transaksi yang tidak dikenal ----------
+  const unknown = new Set();
+  transactions.forEach((tx) => {
+    if (!Object.prototype.hasOwnProperty.call(budgetResult.budget.categories, tx.category)) unknown.add(tx.category);
+  });
+  meta.unknownCategories = [...unknown];
+  if (unknown.size) warnings.push(`${unknown.size} kategori pada transaksi tidak ada di daftar budget dan akan tampil sebagai "${FALLBACK_CATEGORY.name}".`);
+  if (skippedRows) warnings.push(`${skippedRows} baris transaksi dilewati karena datanya tidak lengkap atau tidak valid.`);
+
+  return {
+    ok: true,
+    errors,
+    warnings,
+    data: { transactions, budget: budgetResult.budget, settings },
+    counts: { totalRows: rawRows.length, validRows: transactions.length, skippedRows },
+    skipped,
+    meta,
+  };
+}
+
+/** Baca file sebagai teks di browser (FileReader) — tanpa jaringan. */
+function readBackupFile(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(new Error("read-error"));
+    reader.onabort = () => reject(new Error("read-abort"));
+    reader.readAsText(file);
+  });
+}
+
+/** Pesan status import (pola .settings-feedback yang sama dengan export). */
+let importFeedbackTimer = 0;
+function showImportFeedback(text, type) {
+  const feedback = document.getElementById("settings-import-feedback");
+  if (!feedback) return;
+  clearTimeout(importFeedbackTimer);
+  feedback.textContent = text;
+  feedback.dataset.type = type;
+  feedback.hidden = false;
+}
+
+/** Ringkasan isi file — dibangun dengan textContent (tidak pernah innerHTML),
+ * jadi isi file tidak bisa menyuntikkan markup. */
+function renderImportSummary(result) {
+  const box = document.getElementById("import-summary");
+  if (!box) return;
+  box.textContent = "";
+  if (!result) {
+    box.hidden = true;
+    return;
+  }
+  const rows = [
+    ["Diexport", result.meta.exportedAt ? formatDateLongID(toIsoDate(new Date(result.meta.exportedAt))) : "tidak diketahui"],
+    ["Transaksi valid", `${result.counts.validRows} dari ${result.counts.totalRows}`],
+    ["Baris dilewati", String(result.counts.skippedRows)],
+    ["Kategori", `${result.meta.categories}${result.meta.budgetFallback ? " (default aplikasi)" : ""}`],
+    ["Budget bulanan", formatRupiah(result.meta.monthly)],
+    ["Pengaturan", result.meta.settingsFallback ? "default aplikasi" : "dari file"],
+  ];
+  rows.forEach(([label, value]) => {
+    const row = document.createElement("div");
+    row.className = "settings-meta-row";
+    const dt = document.createElement("dt");
+    dt.textContent = label;
+    const dd = document.createElement("dd");
+    dd.textContent = value;
+    row.append(dt, dd);
+    box.append(row);
+  });
+  box.hidden = false;
+}
+
+/** Proses satu file yang dipilih user: cek ukuran & jenis, baca, validasi.
+ * TIDAK menyentuh localStorage sama sekali. */
+async function handleImportFile(file) {
+  pendingImport = null;
+  renderImportSummary(null);
+
+  if (!file) return;
+  const isJsonName = /\.json$/i.test(file.name || "");
+  const isJsonType = file.type === "application/json" || file.type === "text/json";
+  if (!isJsonName && !isJsonType) {
+    showImportFeedback("Pilih file .json hasil Export Backup dari aplikasi ini.", "error");
+    return;
+  }
+  if (!file.size) {
+    showImportFeedback("File yang dipilih kosong.", "error");
+    return;
+  }
+  if (file.size > IMPORT_MAX_BYTES) {
+    showImportFeedback("Ukuran file melebihi 5 MB, jadi tidak bisa diproses. Gunakan file backup yang lebih baru.", "error");
+    return;
+  }
+
+  let text;
+  try {
+    text = await readBackupFile(file);
+  } catch (err) {
+    showImportFeedback("File tidak bisa dibaca. Coba pilih ulang filenya.", "error");
+    return;
+  }
+
+  const result = validateBackup(text);
+  if (!result.ok) {
+    showImportFeedback(result.errors[0], "error");
+    return;
+  }
+
+  pendingImport = result;
+  renderImportSummary(result);
+  const extra = result.warnings.length ? ` ${result.warnings.join(" ")}` : "";
+  showImportFeedback(`File backup valid: ${result.counts.validRows} transaksi siap dipulihkan.${extra} Data kamu BELUM diganti — penerapan backup hadir di pembaruan berikutnya.`, "success");
+}
+
+/** Pasang tombol & input file import. */
+function setupSettingsImport() {
+  const pickBtn = document.getElementById("btn-import-pick");
+  if (!pickBtn) return; // bukan di halaman pengaturan
+  const input = document.getElementById("import-file");
+  pickBtn.addEventListener("click", () => input.click());
+  input.addEventListener("change", () => {
+    const file = input.files && input.files[0];
+    // Kosongkan value supaya memilih file yang SAMA dua kali tetap memicu change.
+    input.value = "";
+    handleImportFile(file);
+  });
+}
+
 /** Pasang tombol export di section Data & Backup. */
 function setupSettingsData() {
   const jsonBtn = document.getElementById("btn-export-json");
@@ -3166,6 +3485,7 @@ function initSettingsPage() {
   setupSettingsProfile();
   setupSettingsPreferences();
   setupSettingsData();
+  setupSettingsImport();
 
   // Deep-link dari dropdown dashboard ("Tentang Aplikasi" -> #tentang):
   // scroll halus ke section-nya setelah render, tanpa mengubah URL lagi.

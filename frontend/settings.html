@@ -128,14 +128,28 @@
           </span>
           <button type="button" class="btn btn--ghost btn--xs settings-row-action" id="btn-export-csv">Export CSV</button>
         </div>
-        <div class="settings-row">
+        <!-- Import: file dibaca & diperiksa di browser (FileReader). Tahap ini
+             BARU sampai pemeriksaan file — tidak ada data yang ditimpa. -->
+        <div class="settings-row settings-row--action">
           <span class="settings-row-icon" aria-hidden="true">📥</span>
           <span class="settings-row-body">
-            <span class="settings-row-title">Import backup &amp; reset data</span>
-            <span class="settings-row-desc">Memulihkan data dari file backup dan menghapus data akan hadir di pembaruan berikutnya.</span>
+            <span class="settings-row-title">Import Backup (JSON)</span>
+            <span class="settings-row-desc">Hanya menerima file backup JSON dari aplikasi ini, maksimal 5 MB. File akan diperiksa dulu — data kamu belum diganti.</span>
+          </span>
+          <input type="file" id="import-file" accept=".json,application/json" hidden />
+          <button type="button" class="btn btn--ghost btn--xs settings-row-action" id="btn-import-pick">Pilih File…</button>
+        </div>
+        <div class="settings-row">
+          <span class="settings-row-icon" aria-hidden="true">🧹</span>
+          <span class="settings-row-body">
+            <span class="settings-row-title">Hapus &amp; reset data</span>
+            <span class="settings-row-desc">Menghapus transaksi, budget, atau seluruh data akan hadir di pembaruan berikutnya.</span>
           </span>
           <span class="badge-soon">Segera hadir</span>
         </div>
+        <!-- Ringkasan isi file hasil pemeriksaan (diisi app.js lewat textContent). -->
+        <dl class="settings-meta" id="import-summary" hidden></dl>
+        <p class="settings-feedback settings-feedback--inset" id="settings-import-feedback" role="status" aria-live="polite" hidden></p>
         <p class="settings-feedback settings-feedback--inset" id="settings-data-feedback" role="status" aria-live="polite" hidden></p>
         <p class="settings-info">⚠️ File backup berisi data keuangan pribadi kamu. Simpan di tempat yang aman dan jangan dibagikan ke orang lain.</p>
       </div>
