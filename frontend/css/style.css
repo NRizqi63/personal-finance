@@ -1635,6 +1635,10 @@ a:focus-visible {
   padding: 20px;
   background: rgba(15, 23, 18, 0.5);
   overflow-y: auto;
+  /* Scroll yang mentok di ujung overlay/modal tidak "menular" ke halaman di
+     belakangnya (scroll chaining, terutama iOS) — body memang sudah dikunci
+     saat modal terbuka, ini pengaman keduanya. */
+  overscroll-behavior: contain;
   /* Pengaman: overlay tidak boleh pernah bisa digeser horizontal, apa pun
      yang terjadi di dalam .modal (lihat juga .modal & .type-toggle). */
   overflow-x: hidden;
@@ -1653,6 +1657,7 @@ a:focus-visible {
   max-height: calc(100vh - 40px);
   max-height: calc(100dvh - 40px);
   overflow-y: auto;
+  overscroll-behavior: contain;
   /* Pengaman kedua: bug lama (modal bisa digeser kanan-kiri) datang dari
      .type-toggle yang melebihi lebar modal. Sekarang .type-toggle sudah
      tidak mungkin overflow lagi (3 tombol flex:1 rata, tidak discroll —
