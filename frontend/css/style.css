@@ -2811,6 +2811,18 @@ a:focus-visible {
   }
 }
 
+/* Judul card kedua di dalam satu section (mis. "Zona Berbahaya"). */
+.settings-subtitle {
+  margin-top: 20px;
+}
+
+/* Tombol aksi berbahaya di baris pengaturan: warna merah menang atas warna
+   hijau .settings-row-action (specificity sama, jadi ditulis setelahnya). */
+.settings-row-action.btn--danger-ghost {
+  color: var(--color-danger);
+  border-color: var(--color-danger-soft);
+}
+
 /* Badge "Segera hadir": pil kuning lembut, dipakai di judul section & baris. */
 .badge-soon {
   flex-shrink: 0;

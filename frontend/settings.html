@@ -139,19 +139,42 @@
           <input type="file" id="import-file" accept=".json,application/json" hidden />
           <button type="button" class="btn btn--ghost btn--xs settings-row-action" id="btn-import-pick">Pilih File…</button>
         </div>
-        <div class="settings-row">
-          <span class="settings-row-icon" aria-hidden="true">🧹</span>
-          <span class="settings-row-body">
-            <span class="settings-row-title">Hapus &amp; reset data</span>
-            <span class="settings-row-desc">Menghapus transaksi, budget, atau seluruh data akan hadir di pembaruan berikutnya.</span>
-          </span>
-          <span class="badge-soon">Segera hadir</span>
-        </div>
         <!-- Ringkasan isi file hasil pemeriksaan (diisi app.js lewat textContent). -->
         <dl class="settings-meta" id="import-summary" hidden></dl>
         <p class="settings-feedback settings-feedback--inset" id="settings-import-feedback" role="status" aria-live="polite" hidden></p>
         <p class="settings-feedback settings-feedback--inset" id="settings-data-feedback" role="status" aria-live="polite" hidden></p>
         <p class="settings-info">⚠️ File backup berisi data keuangan pribadi kamu. Simpan di tempat yang aman dan jangan dibagikan ke orang lain.</p>
+      </div>
+
+      <!-- ZONA BERBAHAYA — tiga reset terpisah, masing-masing lewat modal
+           konfirmasi. Menghapus seluruh data sekaligus belum tersedia. -->
+      <h3 class="section-title settings-subtitle" id="settings-danger-title">Zona Berbahaya</h3>
+      <div class="settings-card" id="reset-actions">
+        <div class="settings-row settings-row--action">
+          <span class="settings-row-icon" aria-hidden="true">🧹</span>
+          <span class="settings-row-body">
+            <span class="settings-row-title">Hapus Semua Transaksi</span>
+            <span class="settings-row-desc">Menghapus seluruh catatan pemasukan &amp; pengeluaran. Budget, kategori, dan pengaturan tetap.</span>
+          </span>
+          <button type="button" class="btn btn--danger-ghost btn--xs settings-row-action" data-reset-target="transactions">Hapus</button>
+        </div>
+        <div class="settings-row settings-row--action">
+          <span class="settings-row-icon" aria-hidden="true">🏷️</span>
+          <span class="settings-row-body">
+            <span class="settings-row-title">Reset Budget &amp; Kategori</span>
+            <span class="settings-row-desc">Budget bulanan dan kategori kembali ke bawaan aplikasi. Transaksi tidak dihapus.</span>
+          </span>
+          <button type="button" class="btn btn--danger-ghost btn--xs settings-row-action" data-reset-target="budget">Reset</button>
+        </div>
+        <div class="settings-row settings-row--action">
+          <span class="settings-row-icon" aria-hidden="true">👤</span>
+          <span class="settings-row-body">
+            <span class="settings-row-title">Reset Profil &amp; Preferensi</span>
+            <span class="settings-row-desc">Nama panggilan dan preferensi tampilan kembali ke default. Transaksi dan budget tetap.</span>
+          </span>
+          <button type="button" class="btn btn--danger-ghost btn--xs settings-row-action" data-reset-target="settings">Reset</button>
+        </div>
+        <p class="settings-info">⚠️ Reset tidak bisa dibatalkan. Export backup dulu kalau kamu masih ingin menyimpan datanya.</p>
       </div>
     </section>
 
@@ -233,6 +256,31 @@
         <button type="button" class="btn btn--danger" id="btn-import-apply">Timpa Data</button>
       </div>
       <button type="button" class="btn btn--ghost btn--block modal-secondary" id="btn-import-export-first">💾 Export data saat ini dulu</button>
+    </div>
+  </div>
+
+  <!-- MODAL: KONFIRMASI RESET (dipakai ketiga jenis reset, isinya diisi
+       setupSettingsReset() lewat textContent). Tidak ada data yang berubah
+       sampai tombol aksi di modal ini ditekan. -->
+  <div class="modal-overlay" id="reset-modal-overlay" hidden>
+    <div class="modal modal--form modal--confirm" role="dialog" aria-modal="true" aria-labelledby="reset-modal-title">
+      <div class="modal-header">
+        <h2 id="reset-modal-title">Reset Data</h2>
+        <button type="button" class="modal-close" id="reset-modal-close" aria-label="Tutup">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M18 6 6 18" />
+            <path d="m6 6 12 12" />
+          </svg>
+        </button>
+      </div>
+      <p class="modal-sub" id="reset-modal-sub"></p>
+      <dl class="settings-meta" id="reset-modal-summary"></dl>
+      <p class="settings-feedback settings-feedback--inset" id="reset-modal-status" role="status" aria-live="polite" hidden></p>
+      <div class="modal-actions">
+        <button type="button" class="btn btn--ghost" id="btn-reset-cancel">Batal</button>
+        <button type="button" class="btn btn--danger" id="btn-reset-confirm">Hapus</button>
+      </div>
+      <button type="button" class="btn btn--ghost btn--block modal-secondary" id="btn-reset-export-first">💾 Export data saat ini dulu</button>
     </div>
   </div>
 

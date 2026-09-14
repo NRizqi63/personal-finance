@@ -3174,13 +3174,39 @@ const IMPORT_EMOJI_MAX = 8;
 // Key kategori yang aman dipakai sebagai atribut & key objek.
 const CATEGORY_KEY_PATTERN = /^[A-Za-z0-9_.:@+-]{1,40}$/;
 
-// Notifikasi "import berhasil" yang bertahan satu kali melewati reload.
-// Key sendiri — TIDAK pernah menyentuh sessionStorage "checkinDismissed".
-const IMPORT_NOTICE_KEY = "financeData.importNotice";
+// Notifikasi hasil operasi data (import & reset) yang bertahan satu kali
+// melewati reload. Key sendiri — TIDAK pernah menyentuh "checkinDismissed".
+// Nilai key sengaja tidak diubah supaya notice yang sudah tersimpan di sesi
+// berjalan tetap terbaca setelah pembaruan ini.
+const DATA_NOTICE_KEY = "financeData.importNotice";
 
 // Tiga key yang boleh disentuh proses import (urutan penulisan: yang paling
 // besar dulu, supaya kegagalan kuota terjadi sebelum key lain berubah).
 const IMPORT_STORAGE_KEYS = [TRANSACTIONS_STORAGE_KEY, BUDGET_STORAGE_KEY, SETTINGS_STORAGE_KEY];
+
+// Key yang dihapus per jenis reset. Menghapus key = aplikasi kembali memakai
+// nilai awalnya sendiri: transaksi kosong, budget seed (Rp2.400.000 + 5
+// kategori bawaan), settings default ({Rizqi, false, true}). Reset seluruh
+// data belum termasuk di sini.
+const DATA_RESET_TARGETS = {
+  transactions: [TRANSACTIONS_STORAGE_KEY],
+  budget: [BUDGET_STORAGE_KEY],
+  settings: [SETTINGS_STORAGE_KEY],
+};
+
+// Pesan hasil per jenis reset (dipakai notice setelah reload).
+const DATA_RESET_MESSAGES = {
+  transactions: "Semua transaksi sudah dihapus. Budget, kategori, dan pengaturan tidak berubah.",
+  budget: "Budget & kategori sudah dikembalikan ke pengaturan bawaan. Transaksi tidak berubah.",
+  settings: "Profil & preferensi sudah dikembalikan ke default. Transaksi dan budget tidak berubah.",
+};
+
+// Label singkat untuk pesan kegagalan.
+const DATA_RESET_LABELS = {
+  transactions: "Hapus semua transaksi",
+  budget: "Reset budget & kategori",
+  settings: "Reset profil & preferensi",
+};
 
 // Hasil pemeriksaan file terakhir — HANYA di memori, tidak dipersist.
 // Diisi di Tahap 3B-1, dipakai untuk menerapkan data di tahap berikutnya.
@@ -3366,9 +3392,9 @@ function validateBackup(rawText) {
 /** Salin nilai ASLI ketiga key sebelum ditimpa. null = key memang belum ada
  * (rollback akan menghapusnya lagi, bukan menulis "null"). Hanya di memori,
  * tidak pernah ditulis balik ke storage sebagai key cadangan. */
-function snapshotStorage() {
+function snapshotStorage(keys = IMPORT_STORAGE_KEYS) {
   const snapshot = {};
-  IMPORT_STORAGE_KEYS.forEach((key) => {
+  keys.forEach((key) => {
     snapshot[key] = localStorage.getItem(key); // string atau null
   });
   return snapshot;
@@ -3388,9 +3414,9 @@ function writeImportedData(data) {
  * DIHAPUS lagi (removeItem), bukan diisi string kosong. Tidak pernah
  * memakai localStorage.clear() dan tidak menyentuh key lain.
  * Mengembalikan true kalau semua berhasil dipulihkan. */
-function rollbackStorage(snapshot) {
+function rollbackStorage(snapshot, keys = IMPORT_STORAGE_KEYS) {
   let restored = true;
-  IMPORT_STORAGE_KEYS.forEach((key) => {
+  keys.forEach((key) => {
     const value = snapshot[key];
     try {
       if (value === null) localStorage.removeItem(key);
@@ -3402,20 +3428,31 @@ function rollbackStorage(snapshot) {
   return restored;
 }
 
-/** Simpan pesan sukses satu kali pakai (dibaca setelah reload). */
-function setImportNotice(text) {
+/** Hapus beberapa key localStorage. HANYA removeItem, hanya key yang
+ * diberikan — tidak pernah localStorage.clear(). Melempar kalau gagal
+ * supaya pemanggil bisa melakukan rollback. */
+function removeStorageKeys(keys) {
+  keys.forEach((key) => {
+    localStorage.removeItem(key);
+  });
+}
+
+/** Simpan pesan sukses satu kali pakai (dibaca setelah reload) — dipakai
+ * bersama oleh import dan reset. */
+function setDataNotice(text) {
   try {
-    sessionStorage.setItem(IMPORT_NOTICE_KEY, text);
+    sessionStorage.setItem(DATA_NOTICE_KEY, text);
   } catch (err) {
     // sessionStorage tidak tersedia — pesan cukup dilewati.
   }
 }
 
-/** Baca pesan import lalu HAPUS (sekali tampil). null kalau tidak ada. */
-function consumeImportNotice() {
+/** Baca pesan hasil operasi data lalu HAPUS (sekali tampil). null kalau
+ * tidak ada. Tidak menyentuh checkinDismissed. */
+function consumeDataNotice() {
   try {
-    const text = sessionStorage.getItem(IMPORT_NOTICE_KEY);
-    if (text !== null) sessionStorage.removeItem(IMPORT_NOTICE_KEY);
+    const text = sessionStorage.getItem(DATA_NOTICE_KEY);
+    if (text !== null) sessionStorage.removeItem(DATA_NOTICE_KEY);
     return text;
   } catch (err) {
     return null;
@@ -3458,8 +3495,45 @@ function applyPendingImport() {
 
   const counts = pending.counts;
   pendingImport = null; // sudah diterapkan; jangan bisa dipakai dua kali
-  setImportNotice(`Import berhasil: ${counts.validRows} transaksi dipulihkan dari file backup.`);
+  setDataNotice(`Import berhasil: ${counts.validRows} transaksi dipulihkan dari file backup.`);
   return { ok: true, code: "applied", message: `Import berhasil: ${counts.validRows} transaksi dipulihkan.` };
+}
+
+/**
+ * Jalankan satu jenis reset: snapshot -> hapus key target -> (gagal)
+ * rollback. Tidak menyentuh DOM, tidak memuat ulang halaman, tidak pernah
+ * memakai localStorage.clear(), dan tidak menyentuh key di luar targetnya
+ * (termasuk sessionStorage "checkinDismissed").
+ * Hasil: { ok, code, message }.
+ */
+function applyDataReset(targetName) {
+  const keys = Object.prototype.hasOwnProperty.call(DATA_RESET_TARGETS, targetName) ? DATA_RESET_TARGETS[targetName] : null;
+  if (!keys) {
+    return { ok: false, code: "unknown-target", message: "Jenis reset tidak dikenali. Muat ulang halaman lalu coba lagi." };
+  }
+
+  let snapshot;
+  try {
+    snapshot = snapshotStorage(keys);
+  } catch (err) {
+    return { ok: false, code: "storage-unavailable", message: "Penyimpanan browser tidak bisa diakses, jadi tidak ada yang dihapus." };
+  }
+
+  try {
+    removeStorageKeys(keys);
+  } catch (err) {
+    const restored = rollbackStorage(snapshot, keys);
+    const label = DATA_RESET_LABELS[targetName];
+    return restored
+      ? { ok: false, code: "reset-failed", message: `${label} gagal dijalankan. Data lama sudah dikembalikan seperti semula.` }
+      : { ok: false, code: "rollback-failed", message: `⚠️ ${label} gagal dan data lama belum bisa dikembalikan sepenuhnya. Jangan tutup atau menyegarkan halaman ini dulu.` };
+  }
+
+  // Hasil pemeriksaan file lama tidak lagi relevan setelah data berubah.
+  pendingImport = null;
+  const message = DATA_RESET_MESSAGES[targetName];
+  setDataNotice(message);
+  return { ok: true, code: "reset-applied", message };
 }
 
 /** Baca file sebagai teks di browser (FileReader) — tanpa jaringan. */
@@ -3494,7 +3568,7 @@ function renderImportSummary(result, target) {
     box.hidden = true;
     return;
   }
-  const rows = [
+  renderMetaRows(box, [
     ["Diexport", result.meta.exportedAt ? formatDateLongID(toIsoDate(new Date(result.meta.exportedAt))) : "tidak diketahui"],
     ["Transaksi valid", `${result.counts.validRows} dari ${result.counts.totalRows}`],
     ["Baris dilewati", String(result.counts.skippedRows)],
@@ -3502,7 +3576,13 @@ function renderImportSummary(result, target) {
     ["Budget bulanan", formatRupiah(result.meta.monthly)],
     ["Pengaturan", result.meta.settingsFallback ? "default aplikasi" : "dari file"],
     ["Data saat ini", `${financeData.transactions.length} transaksi akan diganti`],
-  ];
+  ]);
+}
+
+/** Isi <dl class="settings-meta"> dengan pasangan label-nilai. Selalu
+ * textContent — nilai yang berasal dari data user tidak pernah jadi HTML. */
+function renderMetaRows(box, rows) {
+  box.textContent = "";
   rows.forEach(([label, value]) => {
     const row = document.createElement("div");
     row.className = "settings-meta-row";
@@ -3558,8 +3638,10 @@ async function handleImportFile(file) {
   showImportFeedback(`File backup valid: ${result.counts.validRows} transaksi siap dipulihkan.${extra} Data kamu BELUM diganti — periksa ringkasannya, lalu pilih "Timpa Data" kalau sudah yakin.`, "success");
 }
 
-// Sedang menulis data? Dipakai untuk mencegah klik ganda pada "Timpa Data".
-let importApplying = false;
+// Sedang menulis/menghapus data? Satu guard untuk SEMUA operasi data
+// (import & reset), supaya keduanya tidak pernah berjalan bersamaan dan
+// klik ganda tidak menjalankan operasi dua kali.
+let dataOpBusy = false;
 
 /** Pasang tombol & input file import + modal konfirmasinya. */
 function setupSettingsImport() {
@@ -3587,7 +3669,7 @@ function setupSettingsImport() {
   /** Dipanggil setiap modal tertutup: buang hasil pemeriksaan supaya file
    * harus dipilih ulang. Tidak menyentuh data sama sekali. */
   function handleImportModalClosed() {
-    if (importApplying) return; // ditutup saat proses menulis berjalan
+    if (dataOpBusy) return; // ditutup saat proses menulis berjalan
     pendingImport = null;
     renderImportSummary(null);
     setStatus("", "success");
@@ -3607,8 +3689,8 @@ function setupSettingsImport() {
   });
 
   applyBtn.addEventListener("click", () => {
-    if (importApplying) return; // klik ganda diabaikan
-    importApplying = true;
+    if (dataOpBusy) return; // klik ganda / operasi lain sedang jalan
+    dataOpBusy = true;
     [applyBtn, cancelBtn, closeBtn, exportFirstBtn].forEach((btn) => { btn.disabled = true; });
     setStatus("Menerapkan data…", "success");
 
@@ -3621,7 +3703,7 @@ function setupSettingsImport() {
       return;
     }
 
-    importApplying = false;
+    dataOpBusy = false;
     [applyBtn, cancelBtn, closeBtn, exportFirstBtn].forEach((btn) => { btn.disabled = false; });
     setStatus(result.message, "error");
     if (result.code !== "rollback-failed") {
@@ -3643,10 +3725,133 @@ function setupSettingsImport() {
       modal.open();
     });
   });
+}
 
-  // Pesan hasil import dari sesi sebelum reload (sekali tampil).
-  const notice = consumeImportNotice();
-  if (notice) showImportFeedback(notice, "success");
+/** Judul, penjelasan, label tombol, dan ringkasan dampak tiap jenis reset —
+ * dihitung dari data yang sedang aktif saat modal dibuka. */
+function getResetPlan(target) {
+  const txCount = financeData.transactions.length;
+  const defaultCategoryCount = Object.keys(DEFAULT_CATEGORIES).length;
+  if (target === "transactions") {
+    return {
+      title: "Hapus Semua Transaksi?",
+      sub: "Seluruh catatan pemasukan dan pengeluaran akan dihapus dari browser ini. Tindakan ini tidak bisa dibatalkan.",
+      action: "Hapus Transaksi",
+      rows: [
+        ["Transaksi dihapus", `${txCount} transaksi`],
+        ["Budget & kategori", "tetap"],
+        ["Profil & preferensi", "tetap"],
+      ],
+    };
+  }
+  if (target === "budget") {
+    return {
+      title: "Reset Budget & Kategori?",
+      sub: "Budget bulanan dan daftar kategori kembali ke pengaturan bawaan aplikasi. Transaksi tidak dihapus.",
+      action: "Reset Budget",
+      rows: [
+        ["Budget bulanan", `kembali ke ${formatRupiah(DEFAULT_MONTHLY_BUDGET)}`],
+        ["Kategori", `kembali ke ${defaultCategoryCount} kategori bawaan`],
+        ["Transaksi", `tetap (${txCount} transaksi)`],
+        ["Profil & preferensi", "tetap"],
+      ],
+    };
+  }
+  return {
+    title: "Reset Profil & Preferensi?",
+    sub: "Nama panggilan dan preferensi tampilan kembali ke setelan awal. Transaksi dan budget tidak disentuh.",
+    action: "Reset Profil",
+    rows: [
+      ["Nama pengguna", `kembali ke "${DEFAULT_SETTINGS.name}"`],
+      ["Sembunyikan saldo saat dibuka", "kembali ke: tidak"],
+      ["Check-in harian", "kembali ke: tampil"],
+      ["Transaksi & budget", "tetap"],
+    ],
+  };
+}
+
+/** Zona Berbahaya: tiga tombol reset + satu modal konfirmasi yang dipakai
+ * bersama. Tidak ada perubahan data sampai tombol aksi di modal ditekan. */
+function setupSettingsReset() {
+  const zone = document.getElementById("reset-actions");
+  if (!zone) return; // bukan di halaman pengaturan
+  const overlay = document.getElementById("reset-modal-overlay");
+  const modal = createModalController(overlay, { onClose: handleResetModalClosed });
+  const titleEl = document.getElementById("reset-modal-title");
+  const subEl = document.getElementById("reset-modal-sub");
+  const summaryEl = document.getElementById("reset-modal-summary");
+  const status = document.getElementById("reset-modal-status");
+  const confirmBtn = document.getElementById("btn-reset-confirm");
+  const cancelBtn = document.getElementById("btn-reset-cancel");
+  const closeBtn = document.getElementById("reset-modal-close");
+  const exportFirstBtn = document.getElementById("btn-reset-export-first");
+  const buttons = [confirmBtn, cancelBtn, closeBtn, exportFirstBtn];
+
+  let activeTarget = null;
+  let silentClose = false;
+
+  function setStatus(text, type) {
+    status.textContent = text;
+    status.dataset.type = type || "success";
+    status.hidden = !text;
+  }
+
+  function handleResetModalClosed() {
+    if (dataOpBusy) return; // sedang menghapus; jangan ganggu
+    activeTarget = null;
+    setStatus("", "success");
+    if (!silentClose) showImportFeedback("Reset dibatalkan. Tidak ada data yang berubah.", "error");
+    silentClose = false;
+  }
+
+  zone.addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-reset-target]");
+    if (!btn || dataOpBusy) return;
+    const target = btn.dataset.resetTarget;
+    if (!Object.prototype.hasOwnProperty.call(DATA_RESET_TARGETS, target)) return;
+    activeTarget = target;
+    const plan = getResetPlan(target);
+    titleEl.textContent = plan.title;
+    subEl.textContent = plan.sub;
+    confirmBtn.textContent = plan.action;
+    renderMetaRows(summaryEl, plan.rows);
+    setStatus("", "success");
+    modal.open();
+  });
+
+  cancelBtn.addEventListener("click", () => modal.close());
+  closeBtn.addEventListener("click", () => modal.close());
+
+  // Export memakai fungsi yang sama dengan tombol Export Backup (Tahap 3A):
+  // isinya data yang MASIH aktif, dan modal tetap terbuka.
+  exportFirstBtn.addEventListener("click", () => {
+    exportBackupJson();
+    setStatus("Backup data saat ini sudah diunduh. Kamu bisa lanjut menghapus.", "success");
+  });
+
+  confirmBtn.addEventListener("click", () => {
+    if (dataOpBusy || !activeTarget) return;
+    dataOpBusy = true;
+    buttons.forEach((btn) => { btn.disabled = true; });
+    setStatus("Menghapus data…", "success");
+
+    const result = applyDataReset(activeTarget);
+    if (result.ok) {
+      // Reload hanya setelah removeItem selesai tanpa error, supaya seluruh
+      // halaman (dan nextTransactionId) dihitung ulang dari data terbaru.
+      reloadPage();
+      return;
+    }
+
+    dataOpBusy = false;
+    buttons.forEach((btn) => { btn.disabled = false; });
+    setStatus(result.message, "error");
+    if (result.code !== "rollback-failed") {
+      silentClose = true; // pesan errornya sendiri yang ditampilkan
+      modal.close();
+      showImportFeedback(result.message, "error");
+    }
+  });
 }
 
 /** Pasang tombol export di section Data & Backup. */
@@ -3675,6 +3880,12 @@ function initSettingsPage() {
   setupSettingsPreferences();
   setupSettingsData();
   setupSettingsImport();
+  setupSettingsReset();
+
+  // Pesan hasil operasi data (import/reset) dari sesi sebelum reload —
+  // ditampilkan sekali lalu key-nya dihapus.
+  const notice = consumeDataNotice();
+  if (notice) showImportFeedback(notice, "success");
 
   // Deep-link dari dropdown dashboard ("Tentang Aplikasi" -> #tentang):
   // scroll halus ke section-nya setelah render, tanpa mengubah URL lagi.
