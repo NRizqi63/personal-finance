@@ -2811,6 +2811,13 @@ a:focus-visible {
   }
 }
 
+/* Status hasil CRUD transaksi di dashboard & halaman Semua Transaksi:
+   memakai gaya .settings-feedback yang sama, hanya jaraknya disesuaikan
+   dengan daftar transaksi di bawahnya. */
+.transaction-feedback {
+  margin: 0 0 10px;
+}
+
 /* Judul card kedua di dalam satu section (mis. "Zona Berbahaya"). */
 .settings-subtitle {
   margin-top: 20px;

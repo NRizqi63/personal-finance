@@ -1555,6 +1555,21 @@ function renderCheckin() {
   `;
 }
 
+/** Pesan singkat hasil CRUD transaksi (tambah/edit/hapus). Memakai elemen
+ * role="status" di dashboard & halaman Semua Transaksi; halaman lain tidak
+ * punya elemennya, jadi fungsinya no-op di sana. Hanya dipanggil SETELAH
+ * operasi berhasil — tidak pernah untuk validasi gagal atau pembatalan. */
+let transactionFeedbackTimer = 0;
+function showTransactionFeedback(text) {
+  const el = document.getElementById("transaction-feedback");
+  if (!el) return; // halaman ini tidak punya area status
+  clearTimeout(transactionFeedbackTimer);
+  el.textContent = text;
+  el.dataset.type = "success";
+  el.hidden = false;
+  transactionFeedbackTimer = setTimeout(() => { el.hidden = true; }, 3000);
+}
+
 /** Render murni: cetak <li> transaksi ke dalam container manapun (dipakai
  * ulang oleh daftar utama di dashboard maupun halaman "Semua Transaksi").
  * options.showActions: tampilkan tombol edit/delete (hanya di halaman
@@ -2080,6 +2095,7 @@ function handleTransactionListClick(e) {
     const removeTransaction = () => {
       financeData.transactions = financeData.transactions.filter((item) => item.id !== id);
       refreshDashboard();
+      showTransactionFeedback("Transaksi dihapus.");
     };
     if (confirmDeleteTransaction) {
       confirmDeleteTransaction(tx, removeTransaction);
@@ -2444,6 +2460,7 @@ function setupTransactionModal() {
   function resetForm() {
     form.reset();
     fieldId.value = "";
+    [fieldTitle, fieldCategory, fieldAmount, fieldDate].forEach((field) => field.setCustomValidity(""));
     populateCategoryOptions();
     setSelectedType("expense", { animate: false });
     // Tanggal LOKAL (toIsoDate), bukan toISOString() yang berbasis UTC: di
@@ -2519,7 +2536,14 @@ function setupTransactionModal() {
   // HP itu memang posisi yang diinginkan.
   fieldAmount.addEventListener("input", () => {
     fieldAmount.value = formatAmountDigits(fieldAmount.value);
+    fieldAmount.setCustomValidity("");
   });
+
+  // Pesan validasi dibersihkan begitu field-nya diperbaiki, supaya tidak
+  // ada pesan lama yang menempel saat submit berikutnya.
+  fieldTitle.addEventListener("input", () => fieldTitle.setCustomValidity(""));
+  fieldCategory.addEventListener("change", () => fieldCategory.setCustomValidity(""));
+  fieldDate.addEventListener("change", () => fieldDate.setCustomValidity(""));
 
   // Diekspos supaya tombol edit di daftar transaksi mana pun bisa membuka
   // form edit yang sama.
@@ -2542,18 +2566,25 @@ function setupTransactionModal() {
   form.addEventListener("submit", (e) => {
     e.preventDefault();
 
+    // Validasi per field dengan pesan sendiri (pola yang sama dengan form
+    // kategori & profil). Tanpa ini, kasus seperti judul berisi spasi atau
+    // nominal 0 lolos dari atribut `required` sehingga reportValidity()
+    // tidak menampilkan apa pun dan tombol Simpan terasa "tidak bereaksi".
+    const title = fieldTitle.value.trim();
     const amountDigits = fieldAmount.value.replace(/\D/g, "");
-    if (!fieldTitle.value.trim() || !fieldCategory.value || !amountDigits || Number(amountDigits) <= 0 || !fieldDate.value) {
-      form.reportValidity();
-      return;
-    }
+    const amount = amountDigits ? Number(amountDigits) : 0;
+    fieldTitle.setCustomValidity(title ? "" : "Isi nama transaksi.");
+    fieldCategory.setCustomValidity(fieldCategory.value ? "" : "Pilih kategori dulu.");
+    fieldAmount.setCustomValidity(amount > 0 ? "" : "Nominal harus lebih dari 0.");
+    fieldDate.setCustomValidity(fieldDate.value ? "" : "Pilih tanggal transaksi.");
+    if (!form.reportValidity()) return; // tidak ada yang disimpan
 
     const editId = fieldId.value ? Number(fieldId.value) : null;
     const payload = {
-      title: fieldTitle.value.trim(),
+      title,
       category: fieldCategory.value,
       type: getSelectedType(),
-      amount: Number(amountDigits),
+      amount,
       isoDate: fieldDate.value,
       time: formatDateID(fieldDate.value),
     };
@@ -2565,8 +2596,21 @@ function setupTransactionModal() {
       financeData.transactions.unshift({ id: nextTransactionId++, ...payload });
     }
 
+    // Halaman Semua Transaksi hanya menampilkan SATU tanggal terpilih. Tanpa
+    // ini, transaksi yang baru disimpan untuk tanggal lain (termasuk hasil
+    // edit yang tanggalnya diubah) tidak kelihatan sama sekali dan terasa
+    // seperti gagal tersimpan — jadi kalender & daftar ikut pindah ke tanggal
+    // transaksinya. Filter, urutan, dan mode filter tidak disentuh.
+    const savedDate = new Date(`${payload.isoDate}T00:00:00`);
+    if (!Number.isNaN(savedDate.getTime())) {
+      transactionsPage.selected = payload.isoDate;
+      transactionsPage.year = savedDate.getFullYear();
+      transactionsPage.month = savedDate.getMonth();
+    }
+
     refreshDashboard();
     closeModal();
+    showTransactionFeedback(editId ? "Perubahan tersimpan." : "Transaksi tersimpan.");
   });
 
   // Konfirmasi hapus transaksi memakai modal custom yang sama gayanya dengan
