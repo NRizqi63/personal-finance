@@ -2107,14 +2107,14 @@ function handleTransactionListClick(e) {
 }
 
 /**
- * Dropdown Notifikasi & Pengaturan di header.
+ * Dropdown Notifikasi di header. Ikon Pengaturan bukan dropdown lagi — ia
+ * tautan biasa ke settings.html, jadi tidak ada panel/handler untuknya.
  * Setiap dropdown = { trigger, panel } — trigger toggle panelnya sendiri,
  * klik di luar wrapper mana pun (atau tombol Escape) menutup semua panel.
  */
 function setupHeaderActions() {
   const dropdowns = [
     { trigger: document.getElementById("btn-notification"), panel: document.getElementById("notification-panel") },
-    { trigger: document.getElementById("btn-settings"), panel: document.getElementById("settings-panel") },
   ];
 
   // Dicatat saat panel dibuka; dipakai listener scroll di bawah supaya panel
@@ -2254,22 +2254,6 @@ function setupHeaderActions() {
     },
     { passive: true }
   );
-
-  // Menu pengaturan: "Pengaturan", "Profil" (#profil) & "Tentang Aplikasi"
-  // (#tentang) -> settings.html; "Preferensi Kategori" tetap ke budget.html.
-  const SETTINGS_TARGET = {
-    pengaturan: "settings.html",
-    profil: "settings.html#profil",
-    "preferensi-kategori": "budget.html",
-    "tentang-aplikasi": "settings.html#tentang",
-  };
-  document.querySelectorAll(".settings-menu-item").forEach((item) => {
-    item.addEventListener("click", () => {
-      const target = SETTINGS_TARGET[item.dataset.setting];
-      closeAllPanels();
-      if (target) window.location.href = target;
-    });
-  });
 }
 
 /** Fitur hide/show Saldo Anda — default tersembunyi, toggle via icon mata. */
@@ -4095,7 +4079,7 @@ document.addEventListener("touchstart", () => {}, { passive: true });
  * Murni visual: tidak mencegah default, tidak menyentuh handler klik.
  */
 (function setupPressFeedback() {
-  const PRESSABLE = ".btn, .icon-btn, .icon-btn-sm, .modal-close, .type-toggle-btn, .filter-chip, .settings-menu-item, .settings-row-link, .link-see-all, .balance-toggle, .quick-amount, .emoji-option, .calendar-nav, .calendar-day, .bar-col";
+  const PRESSABLE = ".btn, .icon-btn, .icon-btn-sm, .modal-close, .type-toggle-btn, .filter-chip, .settings-row-link, .link-see-all, .balance-toggle, .quick-amount, .emoji-option, .calendar-nav, .calendar-day, .bar-col";
   const MIN_HOLD_MS = 120;
   let pressed = null;
   let pressedAt = 0;
