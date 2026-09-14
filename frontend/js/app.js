@@ -2628,8 +2628,11 @@ document.addEventListener("keydown", (e) => {
  * Kontrol buka/tutup generik untuk overlay modal (pola yang sama dengan modal
  * transaksi & check-in: hidden -> is-open lewat rAF bersarang, tutup lewat
  * [data-modal-close], klik latar, atau Escape lewat tumpukan modal di atas).
+ * options.onClose (opsional) dipanggil setiap modal benar-benar tertutup —
+ * lewat jalur mana pun — supaya pemanggil tidak perlu memasang listener
+ * Escape sendiri (tumpukan modal global tetap satu-satunya penangan Escape).
  */
-function createModalController(overlay) {
+function createModalController(overlay, options = {}) {
   const entry = { close: () => close() };
   function open() {
     overlay.hidden = false;
@@ -2645,6 +2648,7 @@ function createModalController(overlay) {
     setTimeout(() => {
       overlay.hidden = true;
     }, 180);
+    if (typeof options.onClose === "function") options.onClose();
   }
   overlay.querySelectorAll("[data-modal-close]").forEach((btn) => btn.addEventListener("click", close));
   overlay.addEventListener("click", (e) => {
@@ -3170,6 +3174,14 @@ const IMPORT_EMOJI_MAX = 8;
 // Key kategori yang aman dipakai sebagai atribut & key objek.
 const CATEGORY_KEY_PATTERN = /^[A-Za-z0-9_.:@+-]{1,40}$/;
 
+// Notifikasi "import berhasil" yang bertahan satu kali melewati reload.
+// Key sendiri — TIDAK pernah menyentuh sessionStorage "checkinDismissed".
+const IMPORT_NOTICE_KEY = "financeData.importNotice";
+
+// Tiga key yang boleh disentuh proses import (urutan penulisan: yang paling
+// besar dulu, supaya kegagalan kuota terjadi sebelum key lain berubah).
+const IMPORT_STORAGE_KEYS = [TRANSACTIONS_STORAGE_KEY, BUDGET_STORAGE_KEY, SETTINGS_STORAGE_KEY];
+
 // Hasil pemeriksaan file terakhir — HANYA di memori, tidak dipersist.
 // Diisi di Tahap 3B-1, dipakai untuk menerapkan data di tahap berikutnya.
 let pendingImport = null;
@@ -3351,6 +3363,105 @@ function validateBackup(rawText) {
   };
 }
 
+/** Salin nilai ASLI ketiga key sebelum ditimpa. null = key memang belum ada
+ * (rollback akan menghapusnya lagi, bukan menulis "null"). Hanya di memori,
+ * tidak pernah ditulis balik ke storage sebagai key cadangan. */
+function snapshotStorage() {
+  const snapshot = {};
+  IMPORT_STORAGE_KEYS.forEach((key) => {
+    snapshot[key] = localStorage.getItem(key); // string atau null
+  });
+  return snapshot;
+}
+
+/** Tulis data HASIL VALIDASI (bukan JSON mentah dari file) ke tiga key.
+ * Melempar kalau salah satu setItem gagal — pemanggil yang melakukan
+ * rollback. Sengaja tidak memakai saveTransactions/saveBudget/saveSettings
+ * yang menelan error di dalam try/catch-nya sendiri. */
+function writeImportedData(data) {
+  localStorage.setItem(TRANSACTIONS_STORAGE_KEY, JSON.stringify(data.transactions));
+  localStorage.setItem(BUDGET_STORAGE_KEY, JSON.stringify({ monthly: data.budget.monthly, categories: data.budget.categories }));
+  localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(data.settings));
+}
+
+/** Kembalikan ketiga key ke kondisi snapshot. Key yang tadinya tidak ada
+ * DIHAPUS lagi (removeItem), bukan diisi string kosong. Tidak pernah
+ * memakai localStorage.clear() dan tidak menyentuh key lain.
+ * Mengembalikan true kalau semua berhasil dipulihkan. */
+function rollbackStorage(snapshot) {
+  let restored = true;
+  IMPORT_STORAGE_KEYS.forEach((key) => {
+    const value = snapshot[key];
+    try {
+      if (value === null) localStorage.removeItem(key);
+      else localStorage.setItem(key, value);
+    } catch (err) {
+      restored = false;
+    }
+  });
+  return restored;
+}
+
+/** Simpan pesan sukses satu kali pakai (dibaca setelah reload). */
+function setImportNotice(text) {
+  try {
+    sessionStorage.setItem(IMPORT_NOTICE_KEY, text);
+  } catch (err) {
+    // sessionStorage tidak tersedia — pesan cukup dilewati.
+  }
+}
+
+/** Baca pesan import lalu HAPUS (sekali tampil). null kalau tidak ada. */
+function consumeImportNotice() {
+  try {
+    const text = sessionStorage.getItem(IMPORT_NOTICE_KEY);
+    if (text !== null) sessionStorage.removeItem(IMPORT_NOTICE_KEY);
+    return text;
+  } catch (err) {
+    return null;
+  }
+}
+
+/** Muat ulang halaman — dipisah supaya alur import bisa diuji tanpa reload. */
+function reloadPage() {
+  window.location.reload();
+}
+
+/**
+ * Terapkan hasil pemeriksaan file ke localStorage: snapshot -> tulis tiga
+ * key -> (gagal) rollback. Tidak menyentuh DOM dan tidak memuat ulang
+ * halaman; pemanggil yang mengurus tampilan & reload.
+ * Hasil: { ok, code, message }.
+ */
+function applyPendingImport() {
+  // Data diambil dari hasil validator di memori, BUKAN dibaca ulang dari DOM.
+  const pending = getPendingImport();
+  if (!pending || !pending.ok || !pending.data || !Array.isArray(pending.data.transactions)) {
+    return { ok: false, code: "no-pending", message: "File backup sudah tidak tersedia. Pilih ulang filenya lalu coba lagi." };
+  }
+
+  let snapshot;
+  try {
+    snapshot = snapshotStorage();
+  } catch (err) {
+    return { ok: false, code: "storage-unavailable", message: "Penyimpanan browser tidak bisa diakses, jadi import dibatalkan. Data kamu tidak berubah." };
+  }
+
+  try {
+    writeImportedData(pending.data);
+  } catch (err) {
+    const restored = rollbackStorage(snapshot);
+    return restored
+      ? { ok: false, code: "write-failed", message: "Import gagal di tengah jalan (penyimpanan browser penuh atau tidak bisa ditulis). Data lama sudah dikembalikan seperti semula." }
+      : { ok: false, code: "rollback-failed", message: "⚠️ Import gagal dan data lama belum bisa dikembalikan sepenuhnya. Jangan tutup atau menyegarkan halaman ini dulu — coba import ulang file backup kamu sekarang." };
+  }
+
+  const counts = pending.counts;
+  pendingImport = null; // sudah diterapkan; jangan bisa dipakai dua kali
+  setImportNotice(`Import berhasil: ${counts.validRows} transaksi dipulihkan dari file backup.`);
+  return { ok: true, code: "applied", message: `Import berhasil: ${counts.validRows} transaksi dipulihkan.` };
+}
+
 /** Baca file sebagai teks di browser (FileReader) — tanpa jaringan. */
 function readBackupFile(file) {
   return new Promise((resolve, reject) => {
@@ -3375,8 +3486,8 @@ function showImportFeedback(text, type) {
 
 /** Ringkasan isi file — dibangun dengan textContent (tidak pernah innerHTML),
  * jadi isi file tidak bisa menyuntikkan markup. */
-function renderImportSummary(result) {
-  const box = document.getElementById("import-summary");
+function renderImportSummary(result, target) {
+  const box = target || document.getElementById("import-summary");
   if (!box) return;
   box.textContent = "";
   if (!result) {
@@ -3390,6 +3501,7 @@ function renderImportSummary(result) {
     ["Kategori", `${result.meta.categories}${result.meta.budgetFallback ? " (default aplikasi)" : ""}`],
     ["Budget bulanan", formatRupiah(result.meta.monthly)],
     ["Pengaturan", result.meta.settingsFallback ? "default aplikasi" : "dari file"],
+    ["Data saat ini", `${financeData.transactions.length} transaksi akan diganti`],
   ];
   rows.forEach(([label, value]) => {
     const row = document.createElement("div");
@@ -3443,21 +3555,98 @@ async function handleImportFile(file) {
   pendingImport = result;
   renderImportSummary(result);
   const extra = result.warnings.length ? ` ${result.warnings.join(" ")}` : "";
-  showImportFeedback(`File backup valid: ${result.counts.validRows} transaksi siap dipulihkan.${extra} Data kamu BELUM diganti — penerapan backup hadir di pembaruan berikutnya.`, "success");
+  showImportFeedback(`File backup valid: ${result.counts.validRows} transaksi siap dipulihkan.${extra} Data kamu BELUM diganti — periksa ringkasannya, lalu pilih "Timpa Data" kalau sudah yakin.`, "success");
 }
 
-/** Pasang tombol & input file import. */
+// Sedang menulis data? Dipakai untuk mencegah klik ganda pada "Timpa Data".
+let importApplying = false;
+
+/** Pasang tombol & input file import + modal konfirmasinya. */
 function setupSettingsImport() {
   const pickBtn = document.getElementById("btn-import-pick");
   if (!pickBtn) return; // bukan di halaman pengaturan
   const input = document.getElementById("import-file");
+  const overlay = document.getElementById("import-modal-overlay");
+  // Ditutup lewat jalur mana pun (tombol Batal, ikon ✕, klik latar, Escape
+  // dari tumpukan modal global) -> hasil pemeriksaan dibuang.
+  const modal = createModalController(overlay, { onClose: handleImportModalClosed });
+  const applyBtn = document.getElementById("btn-import-apply");
+  const cancelBtn = document.getElementById("btn-import-cancel");
+  const closeBtn = document.getElementById("import-modal-close");
+  const exportFirstBtn = document.getElementById("btn-import-export-first");
+  const status = document.getElementById("import-modal-status");
+  // true = modal ditutup oleh kode (mis. setelah error), bukan dibatalkan user.
+  let silentClose = false;
+
+  function setStatus(text, type) {
+    status.textContent = text;
+    status.dataset.type = type || "success";
+    status.hidden = !text;
+  }
+
+  /** Dipanggil setiap modal tertutup: buang hasil pemeriksaan supaya file
+   * harus dipilih ulang. Tidak menyentuh data sama sekali. */
+  function handleImportModalClosed() {
+    if (importApplying) return; // ditutup saat proses menulis berjalan
+    pendingImport = null;
+    renderImportSummary(null);
+    setStatus("", "success");
+    if (!silentClose) showImportFeedback("Import dibatalkan. Tidak ada data yang berubah.", "error");
+    silentClose = false;
+  }
+
+  // "Export dulu": memakai fungsi export JSON yang sama dengan Tahap 3A.
+  // Tidak menyentuh data aktif dan TIDAK membuang hasil pemeriksaan, jadi
+  // user bisa langsung melanjutkan ke "Timpa Data".
+  cancelBtn.addEventListener("click", () => modal.close());
+  closeBtn.addEventListener("click", () => modal.close());
+
+  exportFirstBtn.addEventListener("click", () => {
+    exportBackupJson();
+    setStatus("Backup data saat ini sudah diunduh. Kamu bisa lanjut menimpa data.", "success");
+  });
+
+  applyBtn.addEventListener("click", () => {
+    if (importApplying) return; // klik ganda diabaikan
+    importApplying = true;
+    [applyBtn, cancelBtn, closeBtn, exportFirstBtn].forEach((btn) => { btn.disabled = true; });
+    setStatus("Menerapkan data…", "success");
+
+    const result = applyPendingImport();
+    if (result.ok) {
+      // Semua penulisan sukses -> muat ulang supaya seluruh halaman membaca
+      // data baru (termasuk nomor id transaksi berikutnya).
+      renderImportSummary(null);
+      reloadPage();
+      return;
+    }
+
+    importApplying = false;
+    [applyBtn, cancelBtn, closeBtn, exportFirstBtn].forEach((btn) => { btn.disabled = false; });
+    setStatus(result.message, "error");
+    if (result.code !== "rollback-failed") {
+      silentClose = true; // pesan errornya sendiri yang ditampilkan
+      modal.close();
+      showImportFeedback(result.message, "error");
+    }
+  });
+
   pickBtn.addEventListener("click", () => input.click());
   input.addEventListener("change", () => {
     const file = input.files && input.files[0];
     // Kosongkan value supaya memilih file yang SAMA dua kali tetap memicu change.
     input.value = "";
-    handleImportFile(file);
+    handleImportFile(file).then(() => {
+      if (!getPendingImport()) return; // file ditolak -> modal tidak dibuka
+      renderImportSummary(getPendingImport(), document.getElementById("import-modal-summary"));
+      setStatus("", "success");
+      modal.open();
+    });
   });
+
+  // Pesan hasil import dari sesi sebelum reload (sekali tampil).
+  const notice = consumeImportNotice();
+  if (notice) showImportFeedback(notice, "success");
 }
 
 /** Pasang tombol export di section Data & Backup. */

@@ -210,6 +210,32 @@
 
   </div>
 
+  <!-- MODAL: KONFIRMASI IMPORT BACKUP (setupSettingsImport() di app.js).
+       Muncul setelah file lolos pemeriksaan; sampai tombol "Timpa Data"
+       ditekan, tidak ada satu pun data yang ditulis. Semua angka di dalamnya
+       diisi lewat textContent, tidak pernah innerHTML. -->
+  <div class="modal-overlay" id="import-modal-overlay" hidden>
+    <div class="modal modal--form modal--confirm" role="dialog" aria-modal="true" aria-labelledby="import-modal-title">
+      <div class="modal-header">
+        <h2 id="import-modal-title">Import Backup JSON</h2>
+        <button type="button" class="modal-close" id="import-modal-close" aria-label="Tutup">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M18 6 6 18" />
+            <path d="m6 6 12 12" />
+          </svg>
+        </button>
+      </div>
+      <p class="modal-sub" id="import-modal-sub">Seluruh transaksi, budget, dan pengaturan yang ada sekarang akan diganti dengan isi file ini. Setelah diterapkan, data lama tidak bisa dikembalikan lagi kecuali kamu punya file backupnya.</p>
+      <dl class="settings-meta" id="import-modal-summary"></dl>
+      <p class="settings-feedback settings-feedback--inset" id="import-modal-status" role="status" aria-live="polite" hidden></p>
+      <div class="modal-actions">
+        <button type="button" class="btn btn--ghost" id="btn-import-cancel">Batal</button>
+        <button type="button" class="btn btn--danger" id="btn-import-apply">Timpa Data</button>
+      </div>
+      <button type="button" class="btn btn--ghost btn--block modal-secondary" id="btn-import-export-first">💾 Export data saat ini dulu</button>
+    </div>
+  </div>
+
   <script src="js/app.js"></script>
 </body>
 </html>
