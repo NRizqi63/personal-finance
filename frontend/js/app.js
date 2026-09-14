@@ -1560,12 +1560,12 @@ function renderCheckin() {
  * punya elemennya, jadi fungsinya no-op di sana. Hanya dipanggil SETELAH
  * operasi berhasil — tidak pernah untuk validasi gagal atau pembatalan. */
 let transactionFeedbackTimer = 0;
-function showTransactionFeedback(text) {
+function showTransactionFeedback(text, type = "success") {
   const el = document.getElementById("transaction-feedback");
   if (!el) return; // halaman ini tidak punya area status
   clearTimeout(transactionFeedbackTimer);
   el.textContent = text;
-  el.dataset.type = "success";
+  el.dataset.type = type;
   el.hidden = false;
   transactionFeedbackTimer = setTimeout(() => { el.hidden = true; }, 3000);
 }
@@ -2099,9 +2099,10 @@ function handleTransactionListClick(e) {
     };
     if (confirmDeleteTransaction) {
       confirmDeleteTransaction(tx, removeTransaction);
-    } else if (window.confirm(`Hapus transaksi "${tx.title}"?`)) {
-      // Cadangan untuk halaman tanpa markup modal konfirmasi.
-      removeTransaction();
+    } else {
+      // Halaman tanpa markup modal konfirmasi: jangan pakai dialog browser —
+      // lebih baik tidak melakukan apa-apa dan memberi tahu user.
+      showTransactionFeedback("Konfirmasi hapus tidak tersedia di halaman ini.", "error");
     }
   }
 }
@@ -2270,7 +2271,8 @@ function setupBalanceToggle() {
  */
 function setupTransactionModal() {
   const overlay = document.getElementById("transaction-modal-overlay");
-  const modalEntry = { close: () => closeModal() };
+  const modalEntry = { close: () => closeModal(), overlay };
+  let modalTrigger = null; // elemen yang membuka modal (untuk kembalikan fokus)
   const modalTitle = document.getElementById("modal-title");
   const submitBtn = document.getElementById("modal-submit");
   const form = document.getElementById("transaction-form");
@@ -2454,6 +2456,7 @@ function setupTransactionModal() {
   }
 
   function openModal(mode, tx) {
+    if (overlay.hidden) modalTrigger = document.activeElement;
     resetForm();
 
     let typeToSelect = "expense";
@@ -2474,6 +2477,10 @@ function setupTransactionModal() {
 
     overlay.hidden = false;
     pushModal(modalEntry);
+    lockBodyScroll();
+    // Fokus ke tombol tutup, BUKAN ke field: lihat catatan di bawah soal
+    // keyboard HP yang muncul sendiri.
+    focusModal(overlay);
     // Satu requestAnimationFrame kadang tidak cukup: browser bisa
     // menggabungkan state "hidden baru dilepas" dengan state "is-open"
     // jadi satu frame yang sama sehingga transisi terlewat/langsung
@@ -2502,6 +2509,9 @@ function setupTransactionModal() {
     setTimeout(() => {
       overlay.hidden = true;
     }, 180);
+    unlockBodyScroll();
+    restoreFocus(modalTrigger);
+    modalTrigger = null;
   }
 
   // Listener click per tombol dipertahankan (bukan cuma drag) supaya tap
@@ -2575,6 +2585,14 @@ function setupTransactionModal() {
 
     if (editId) {
       const tx = financeData.transactions.find((item) => item.id === editId);
+      if (!tx) {
+        // Datanya sudah hilang (mis. dihapus/di-import dari tab lain) —
+        // tutup dengan aman, jangan menulis ke objek yang tidak ada dan
+        // jangan menyimpan ulang data lama dari memori.
+        closeModal();
+        showTransactionFeedback("Transaksi tidak ditemukan, mungkin sudah dihapus.", "error");
+        return;
+      }
       Object.assign(tx, payload);
     } else {
       financeData.transactions.unshift({ id: nextTransactionId++, ...payload });
@@ -2635,6 +2653,95 @@ function setupTransactionModal() {
    dibuka; Escape hanya menutup entri paling atas. */
 const openModals = [];
 
+// Kontrol yang bisa menerima fokus di dalam modal. input[type=hidden] &
+// elemen ber-atribut hidden sengaja dikecualikan.
+const MODAL_FOCUSABLE_SELECTOR = [
+  "button:not([disabled])",
+  "a[href]",
+  "input:not([disabled]):not([type=hidden])",
+  "select:not([disabled])",
+  "textarea:not([disabled])",
+  '[tabindex]:not([tabindex="-1"])',
+].join(", ");
+
+/** Kontrol yang benar-benar terlihat & bisa difokus di dalam sebuah overlay. */
+function getFocusable(overlay) {
+  return [...overlay.querySelectorAll(MODAL_FOCUSABLE_SELECTOR)].filter(
+    (el) => !el.hidden && !el.closest("[hidden]") && el.getClientRects().length > 0
+  );
+}
+
+/** Kunci scroll latar selama modal terbuka (kelas yang sama dengan check-in). */
+function lockBodyScroll() {
+  document.body.classList.add("is-modal-open");
+}
+
+/** Lepas kunci scroll — hanya kalau TIDAK ada modal lain yang masih terbuka
+ * (penting untuk modal bertumpuk: konfirmasi di atas modal kategori). */
+function unlockBodyScroll() {
+  if (!openModals.length) document.body.classList.remove("is-modal-open");
+}
+
+/** Fokus awal saat modal dibuka: tombol tutup kalau ada, kalau tidak container
+ * .modal-nya sendiri. Sengaja BUKAN field teks — di HP itu langsung memunculkan
+ * keyboard tanpa diminta (lihat catatan di openModal transaksi). */
+function focusModal(overlay) {
+  const closeBtn = overlay.querySelector(".modal-close");
+  if (closeBtn) {
+    closeBtn.focus({ preventScroll: true });
+    return;
+  }
+  const box = overlay.querySelector(".modal") || overlay;
+  if (!box.hasAttribute("tabindex")) box.setAttribute("tabindex", "-1");
+  box.focus({ preventScroll: true });
+}
+
+/** Tombol pengganti untuk pemicu yang sudah hilang karena daftarnya dirender
+ * ulang (mis. tombol Edit transaksi): dicocokkan lewat data-* yang sama. */
+function findEquivalentTrigger(trigger) {
+  const ds = trigger.dataset || {};
+  if (!ds.action && !ds.resetTarget) return null;
+  return (
+    [...document.querySelectorAll("[data-action], [data-reset-target]")].find(
+      (el) =>
+        el.dataset.action === ds.action &&
+        el.dataset.id === ds.id &&
+        el.dataset.key === ds.key &&
+        el.dataset.resetTarget === ds.resetTarget
+    ) || null
+  );
+}
+
+/** Kembalikan fokus ke elemen pemicu setelah modal ditutup. Dipanggil SEGERA
+ * (tidak menunggu animasi), supaya pengguna keyboard tidak "terlempar" ke
+ * awal halaman. */
+function restoreFocus(trigger) {
+  if (!trigger || typeof trigger.focus !== "function") return;
+  const target = document.contains(trigger) ? trigger : findEquivalentTrigger(trigger);
+  if (target) target.focus({ preventScroll: true });
+}
+
+/** Jaga Tab/Shift+Tab tetap berputar di dalam modal teratas. */
+function trapTabInModal(e, overlay) {
+  const focusable = getFocusable(overlay);
+  if (!focusable.length) {
+    e.preventDefault();
+    focusModal(overlay);
+    return;
+  }
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  const active = document.activeElement;
+  const inside = overlay.contains(active);
+  if (e.shiftKey && (active === first || !inside)) {
+    e.preventDefault();
+    last.focus({ preventScroll: true });
+  } else if (!e.shiftKey && (active === last || !inside)) {
+    e.preventDefault();
+    first.focus({ preventScroll: true });
+  }
+}
+
 /** Tandai modal sebagai yang paling atas (dipanggil saat dibuka). */
 function pushModal(entry) {
   popModal(entry); // kalau dibuka ulang, pindahkan ke puncak
@@ -2647,9 +2754,17 @@ function popModal(entry) {
   if (i !== -1) openModals.splice(i, 1);
 }
 
+// Satu listener untuk SEMUA modal: Escape menutup yang teratas, Tab
+// diputar di dalam modal teratas (focus trap). Sengaja tidak menambah
+// listener keydown baru supaya tumpukan modal tetap satu sumber kebenaran.
 document.addEventListener("keydown", (e) => {
-  if (e.key !== "Escape" || !openModals.length) return;
-  openModals[openModals.length - 1].close();
+  if (!openModals.length) return;
+  const top = openModals[openModals.length - 1];
+  if (e.key === "Escape") {
+    top.close();
+    return;
+  }
+  if (e.key === "Tab" && top.overlay) trapTabInModal(e, top.overlay);
 });
 
 /**
@@ -2661,10 +2776,16 @@ document.addEventListener("keydown", (e) => {
  * Escape sendiri (tumpukan modal global tetap satu-satunya penangan Escape).
  */
 function createModalController(overlay, options = {}) {
-  const entry = { close: () => close() };
+  const entry = { close: () => close(), overlay };
+  let lastTrigger = null;
   function open() {
+    // Pemicu hanya dicatat saat modal benar-benar baru dibuka, supaya
+    // membuka ulang modal yang sudah tampil tidak menimpa pemicu aslinya.
+    if (overlay.hidden) lastTrigger = document.activeElement;
     overlay.hidden = false;
     pushModal(entry);
+    lockBodyScroll();
+    focusModal(overlay);
     requestAnimationFrame(() => {
       requestAnimationFrame(() => overlay.classList.add("is-open"));
     });
@@ -2676,6 +2797,9 @@ function createModalController(overlay, options = {}) {
     setTimeout(() => {
       overlay.hidden = true;
     }, 180);
+    unlockBodyScroll();
+    restoreFocus(lastTrigger); // segera, bukan setelah animasi 180ms
+    lastTrigger = null;
     if (typeof options.onClose === "function") options.onClose();
   }
   overlay.querySelectorAll("[data-modal-close]").forEach((btn) => btn.addEventListener("click", close));
@@ -2983,15 +3107,18 @@ function shouldShowCheckin() {
 function setupCheckin() {
   const overlay = document.getElementById("checkin-overlay");
   if (!overlay) return; // bukan di dashboard
-  const checkinEntry = { close: () => closeCheckin() };
+  const checkinEntry = { close: () => closeCheckin(), overlay };
+  let checkinTrigger = null;
 
   function closeCheckin() {
     popModal(checkinEntry);
     overlay.classList.remove("is-open");
-    document.body.classList.remove("is-modal-open");
     setTimeout(() => {
       overlay.hidden = true;
     }, 220);
+    unlockBodyScroll();
+    restoreFocus(checkinTrigger);
+    checkinTrigger = null;
     try {
       sessionStorage.setItem("checkinDismissed", "true");
     } catch (err) {
@@ -3001,10 +3128,12 @@ function setupCheckin() {
   }
 
   function openCheckin() {
+    if (overlay.hidden) checkinTrigger = document.activeElement;
     renderCheckin();
     overlay.hidden = false;
     pushModal(checkinEntry);
-    document.body.classList.add("is-modal-open");
+    lockBodyScroll();
+    focusModal(overlay);
     requestAnimationFrame(() => {
       requestAnimationFrame(() => overlay.classList.add("is-open"));
     });
