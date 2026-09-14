@@ -10,12 +10,12 @@
   <link rel="stylesheet" href="css/style.css" />
 </head>
 <!-- data-page="settings" -> js/app.js menjalankan initSettingsPage().
-     Settings V1 Tahap 1 = fondasi: halaman ini belum menyimpan apa pun.
-     Isinya tautan ke pengaturan yang sudah ada (budget.html), informasi
-     keamanan (fitur akun belum tersedia — tidak ada PIN/login palsu), dan
-     Tentang Aplikasi. Profil, preferensi, export/import, dan reset data
-     menyusul di tahap berikutnya. Dibuka dari dropdown Pengaturan di
-     dashboard (index.html). -->
+     Settings V1: Profil Akun (nama panggilan) & Preferensi Aplikasi disimpan
+     ke localStorage["financeData.settings"] (key terpisah; transaksi &
+     budget tidak disentuh). Pengaturan Keuangan = tautan ke budget.html.
+     Data & Backup masih "Segera hadir"; Keamanan hanya informasi (tidak ada
+     PIN/login palsu); Tentang Aplikasi statis. Dibuka dari dropdown
+     Pengaturan di dashboard (index.html). -->
 <body data-page="settings">
   <div class="app app--page">
 
@@ -30,11 +30,62 @@
       <h1 class="greeting-text">Pengaturan</h1>
     </header>
 
-    <!-- 1. KEUANGAN — tautan ke pengaturan yang sudah ada di budget.html.
+    <!-- 1. PROFIL AKUN — nama panggilan untuk sapaan dashboard & check-in.
+         Disimpan ke localStorage["financeData.settings"] hanya saat tombol
+         Simpan ditekan (setupSettingsProfile()); preview ikut ketikan. -->
+    <section class="settings-section" id="profil" aria-labelledby="settings-profil-title">
+      <h2 class="section-title" id="settings-profil-title">Profil Akun</h2>
+      <div class="settings-card">
+        <form class="settings-form" id="settings-profile-form" novalidate>
+          <div class="form-field settings-field">
+            <label for="settings-name">Nama Pengguna</label>
+            <input type="text" id="settings-name" name="name" maxlength="40" autocomplete="nickname" placeholder="Nama panggilan kamu" required />
+            <p class="settings-preview">Contoh sapaan: <strong id="settings-name-preview"></strong></p>
+          </div>
+          <p class="settings-feedback" id="settings-name-feedback" role="status" aria-live="polite" hidden></p>
+          <div class="settings-form-actions">
+            <button type="submit" class="btn btn--primary" id="settings-name-save">Simpan Perubahan</button>
+          </div>
+        </form>
+      </div>
+    </section>
+
+    <!-- 2. PREFERENSI APLIKASI — switch disimpan langsung saat diubah
+         (setupSettingsPreferences()). -->
+    <section class="settings-section" id="preferensi" aria-labelledby="settings-preferensi-title">
+      <h2 class="section-title" id="settings-preferensi-title">Preferensi Aplikasi</h2>
+      <div class="settings-card">
+        <label class="settings-row settings-row-switch" for="pref-hide-balance">
+          <span class="settings-row-icon" aria-hidden="true">👁️</span>
+          <span class="settings-row-body">
+            <span class="settings-row-title">Sembunyikan saldo saat membuka dashboard</span>
+            <span class="settings-row-desc">Saldo, pemasukan, dan pengeluaran ditutup dulu saat dashboard dibuka. Tombol mata tetap bisa menampilkannya.</span>
+          </span>
+          <span class="switch">
+            <input type="checkbox" class="switch-input" id="pref-hide-balance" role="switch" />
+            <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
+          </span>
+        </label>
+        <label class="settings-row settings-row-switch" for="pref-show-checkin">
+          <span class="settings-row-icon" aria-hidden="true">👋</span>
+          <span class="settings-row-body">
+            <span class="settings-row-title">Tampilkan check-in harian</span>
+            <span class="settings-row-desc">Popup Financial Check-in muncul sekali per sesi saat membuka dashboard.</span>
+          </span>
+          <span class="switch">
+            <input type="checkbox" class="switch-input" id="pref-show-checkin" role="switch" />
+            <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
+          </span>
+        </label>
+        <p class="settings-feedback settings-feedback--inset" id="settings-pref-feedback" role="status" aria-live="polite" data-type="success" hidden></p>
+      </div>
+    </section>
+
+    <!-- 3. PENGATURAN KEUANGAN — tautan ke pengaturan yang sudah ada di budget.html.
          Sengaja tidak ada form budget/kategori di sini supaya hanya ada satu
          tempat untuk mengelolanya. -->
     <section class="settings-section" id="keuangan" aria-labelledby="settings-keuangan-title">
-      <h2 class="section-title" id="settings-keuangan-title">Keuangan</h2>
+      <h2 class="section-title" id="settings-keuangan-title">Pengaturan Keuangan</h2>
       <div class="settings-card">
         <a class="settings-row settings-row-link" href="budget.html" id="settings-link-budget">
           <span class="settings-row-icon" aria-hidden="true">💰</span>
@@ -55,7 +106,23 @@
       </div>
     </section>
 
-    <!-- 2. KEAMANAN — informasi saja. Belum ada backend/autentikasi, jadi
+    <!-- 4. DATA & BACKUP — belum aktif (export/import/reset menyusul di tahap
+         berikutnya). Hanya informasi + badge, tanpa tombol apa pun. -->
+    <section class="settings-section" id="data" aria-labelledby="settings-data-title">
+      <h2 class="section-title" id="settings-data-title">Data &amp; Backup <span class="badge-soon">Segera hadir</span></h2>
+      <div class="settings-card">
+        <div class="settings-row">
+          <span class="settings-row-icon" aria-hidden="true">💾</span>
+          <span class="settings-row-body">
+            <span class="settings-row-title">Export, import &amp; reset data</span>
+            <span class="settings-row-desc">Cadangkan transaksi dan budget ke file, pulihkan dari file, atau hapus data — akan hadir di pembaruan berikutnya.</span>
+          </span>
+          <span class="badge-soon">Segera hadir</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- 5. KEAMANAN — informasi saja. Belum ada backend/autentikasi, jadi
          tidak ada login, password, PIN, atau sinkronisasi di sini (PIN yang
          cuma disimpan di localStorage hanya memberi rasa aman palsu). -->
     <section class="settings-section" id="keamanan" aria-labelledby="settings-keamanan-title">
@@ -80,7 +147,7 @@
       </div>
     </section>
 
-    <!-- 3. TENTANG APLIKASI — statis. Versi diperbarui manual tiap rilis. -->
+    <!-- 6. TENTANG APLIKASI — statis. Versi diperbarui manual tiap rilis. -->
     <section class="settings-section" id="tentang" aria-labelledby="settings-tentang-title">
       <h2 class="section-title" id="settings-tentang-title">Tentang Aplikasi</h2>
       <div class="settings-card">

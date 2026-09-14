@@ -52,6 +52,17 @@ const financeData = {
     hiburan: { name: "Hiburan", emoji: "🎬", budget: 200000 },
   },
 
+  // Pengaturan user (Settings V1 Tahap 2): nama panggilan untuk sapaan,
+  // preferensi saldo saat dashboard dibuka, dan izin popup check-in.
+  // Nilai di sini = default; ditimpa hasil merge dari localStorage
+  // (loadSettings()). Disimpan di key terpisah "financeData.settings" —
+  // key transaksi & budget lama tidak disentuh.
+  settings: {
+    name: "Rizqi",
+    hideBalanceOnOpen: false,
+    showCheckin: true,
+  },
+
   // Data goal — ditampilkan di popup Financial Check-in (renderCheckin()).
   goal: {
     name: "Dana Darurat",
@@ -118,6 +129,41 @@ const NAMA_HARI_ID = ["Min", "Sen", "Sel", "Rab", "Kam", "Jum", "Sab"];
 // notifikasi masih mock/statis.
 const TRANSACTIONS_STORAGE_KEY = "financeData.transactions";
 const BUDGET_STORAGE_KEY = "financeData.budget";
+const SETTINGS_STORAGE_KEY = "financeData.settings";
+
+// Default pengaturan — sumber kebenaran untuk merge di loadSettings() dan
+// fallback di getUserName(). Dibekukan supaya tidak termodifikasi tak sengaja.
+const DEFAULT_SETTINGS = Object.freeze({ name: "Rizqi", hideBalanceOnOpen: false, showCheckin: true });
+const USER_NAME_MAX_LENGTH = 40;
+
+/** Nama valid = string, dipangkas, tidak kosong, maks. 40 karakter; selain
+ * itu null (pemanggil memakai default). Dipakai loadSettings() & form profil. */
+function normalizeUserName(value) {
+  if (typeof value !== "string") return null;
+  const name = value.trim();
+  if (!name || name.length > USER_NAME_MAX_LENGTH) return null;
+  return name;
+}
+
+/** Boolean dari nilai tersimpan yang mungkin sudah rusak/bertipe lain:
+ * true/false, "true"/"false", 1/0 diterima; lainnya -> fallback. */
+function toBoolean(value, fallback) {
+  if (typeof value === "boolean") return value;
+  if (value === "true" || value === 1 || value === "1") return true;
+  if (value === "false" || value === 0 || value === "0") return false;
+  return fallback;
+}
+
+/** Gabungkan objek mentah (dari localStorage) dengan DEFAULT_SETTINGS —
+ * properti yang hilang/rusak jatuh ke default, properti asing dibuang. */
+function normalizeSettings(raw) {
+  const src = raw && typeof raw === "object" ? raw : {};
+  return {
+    name: normalizeUserName(src.name) || DEFAULT_SETTINGS.name,
+    hideBalanceOnOpen: toBoolean(src.hideBalanceOnOpen, DEFAULT_SETTINGS.hideBalanceOnOpen),
+    showCheckin: toBoolean(src.showCheckin, DEFAULT_SETTINGS.showCheckin),
+  };
+}
 
 /** Muat transaksi tersimpan dari localStorage (kalau ada & valid), menimpa mock data awal. */
 function loadTransactions() {
@@ -194,8 +240,44 @@ function saveBudget() {
   }
 }
 
+/** Muat pengaturan dari localStorage (kalau ada) dan MERGE dengan default:
+ * user lama tanpa key ini, key parsial ({ name } saja), atau nilai rusak
+ * ("true" sebagai string, nama kosong) semuanya aman. Tidak menulis apa pun
+ * ke localStorage saat load — disimpan hanya saat user mengubah sesuatu. */
+function loadSettings() {
+  let parsed = null;
+  try {
+    const saved = localStorage.getItem(SETTINGS_STORAGE_KEY);
+    if (saved) parsed = JSON.parse(saved);
+  } catch (err) {
+    // localStorage tidak tersedia / data korup — pakai default.
+  }
+  financeData.settings = normalizeSettings(parsed);
+}
+
+/** Simpan financeData.settings saat ini ke localStorage (key sendiri). */
+function saveSettings() {
+  try {
+    localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(financeData.settings));
+  } catch (err) {
+    // localStorage tidak tersedia — perubahan tetap berlaku di memori sesi ini.
+  }
+}
+
+/** Nama panggilan untuk sapaan — selalu string valid, tidak pernah
+ * undefined/null (fallback ke default "Rizqi"). */
+function getUserName() {
+  return normalizeUserName(financeData.settings && financeData.settings.name) || DEFAULT_SETTINGS.name;
+}
+
+/** Escape teks user sebelum dimasukkan ke template innerHTML. */
+function escapeHtml(text) {
+  return String(text).replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
+}
+
 loadTransactions();
 loadBudget();
+loadSettings();
 
 const ICON_EDIT = `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9" /><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" /></svg>`;
 const ICON_DELETE = `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18" /><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /></svg>`;
@@ -474,9 +556,10 @@ function refreshDashboard() {
    3. RENDER FUNCTIONS
    ========================================================= */
 
-/** 1. Header: sapaan dinamis */
-function renderGreeting(userName = "Rizqi") {
+/** 1. Header: sapaan dinamis — nama dari financeData.settings (getUserName()). */
+function renderGreeting(userName = getUserName()) {
   const el = document.getElementById("greeting-text");
+  if (!el) return; // bukan di dashboard
   el.textContent = `${getGreetingWord()}, ${userName}`;
 }
 
@@ -1367,7 +1450,7 @@ function renderCheckin() {
   const status = getFinancialStatus();
 
   body.innerHTML = `
-    <p class="checkin-greeting">👋 ${getGreetingWord()}, Rizqi!</p>
+    <p class="checkin-greeting">👋 ${getGreetingWord()}, ${escapeHtml(getUserName())}!</p>
     <p class="checkin-sub">Yuk cek kondisi keuangan kamu hari ini.</p>
 
     <div class="checkin-hero">
@@ -2101,12 +2184,11 @@ function setupHeaderActions() {
     { passive: true }
   );
 
-  // Menu pengaturan: "Pengaturan" & "Tentang Aplikasi" -> settings.html
-  // (Settings V1), "Preferensi Kategori" tetap ke budget.html. "Profil"
-  // belum punya fitur — item-nya masih hidden di index.html; logikanya
-  // dipertahankan supaya tinggal ditampilkan saat tahapnya tiba.
+  // Menu pengaturan: "Pengaturan", "Profil" (#profil) & "Tentang Aplikasi"
+  // (#tentang) -> settings.html; "Preferensi Kategori" tetap ke budget.html.
   const SETTINGS_TARGET = {
     pengaturan: "settings.html",
+    profil: "settings.html#profil",
     "preferensi-kategori": "budget.html",
     "tentang-aplikasi": "settings.html#tentang",
   };
@@ -2115,7 +2197,6 @@ function setupHeaderActions() {
       const target = SETTINGS_TARGET[item.dataset.setting];
       closeAllPanels();
       if (target) window.location.href = target;
-      // TODO: profil — arahkan ke settings.html#profil saat section-nya ada
     });
   });
 }
@@ -2797,6 +2878,9 @@ function setupBudgetEditor() {
  * sama, tapi tetap muncul lagi di sesi baru.
  */
 function shouldShowCheckin() {
+  // Preferensi user (settings.showCheckin) = izin tampil sama sekali.
+  // Berbeda dari checkinDismissed (sessionStorage) = sudah ditutup di sesi ini.
+  if (!financeData.settings.showCheckin) return false;
   try {
     return sessionStorage.getItem("checkinDismissed") !== "true";
   } catch (err) {
@@ -2858,9 +2942,11 @@ function initDashboard() {
   // — recalc dulu supaya Financial Summary tidak menampilkan angka mock lama.
   recalcFromTransactions();
 
-  renderGreeting("Rizqi");
+  renderGreeting();
   renderSummary(financeData.summary);
-  setBalanceVisible(false); // default: saldo tersembunyi saat dashboard dibuka
+  // Preferensi AWAL saat dashboard dibuka (settings.hideBalanceOnOpen).
+  // Setelah itu tombol mata tetap bebas mengubah isBalanceVisible sementara.
+  setBalanceVisible(!financeData.settings.hideBalanceOnOpen);
   renderBudgetSummary();
   renderRecentTransactions();
   renderNotifications();
@@ -2912,6 +2998,9 @@ function initSettingsPage() {
   if (!version) return; // bukan di halaman pengaturan
   version.textContent = APP_VERSION;
 
+  setupSettingsProfile();
+  setupSettingsPreferences();
+
   // Deep-link dari dropdown dashboard ("Tentang Aplikasi" -> #tentang):
   // scroll halus ke section-nya setelah render, tanpa mengubah URL lagi.
   const hash = window.location.hash.replace(/^#/, "");
@@ -2919,6 +3008,102 @@ function initSettingsPage() {
   if (target && target.classList.contains("settings-section")) {
     requestAnimationFrame(() => target.scrollIntoView({ behavior: "smooth", block: "start" }));
   }
+}
+
+/**
+ * Settings > Profil Akun: nama panggilan. Preview sapaan ikut ketikan
+ * (tanpa menyimpan); localStorage hanya ditulis saat "Simpan Perubahan".
+ * Validasi: kosong / hanya spasi ditolak, dipangkas, maks. 40 karakter.
+ * Feedback inline (#settings-name-feedback), bukan alert().
+ */
+function setupSettingsProfile() {
+  const form = document.getElementById("settings-profile-form");
+  if (!form) return; // bukan di halaman pengaturan
+  const input = document.getElementById("settings-name");
+  const preview = document.getElementById("settings-name-preview");
+  const feedback = document.getElementById("settings-name-feedback");
+  let feedbackTimer = 0;
+
+  function renderPreview() {
+    const name = normalizeUserName(input.value) || DEFAULT_SETTINGS.name;
+    preview.textContent = `${getGreetingWord()}, ${name}`;
+  }
+
+  function showFeedback(text, type) {
+    clearTimeout(feedbackTimer);
+    feedback.textContent = text;
+    feedback.dataset.type = type;
+    feedback.hidden = !text;
+    // Pesan sukses hilang sendiri; pesan error tetap sampai input diperbaiki.
+    if (type === "success") feedbackTimer = setTimeout(() => { feedback.hidden = true; }, 2500);
+  }
+
+  input.value = getUserName();
+  input.maxLength = USER_NAME_MAX_LENGTH;
+  renderPreview();
+
+  input.addEventListener("input", () => {
+    input.setCustomValidity("");
+    input.removeAttribute("aria-invalid");
+    if (feedback.dataset.type === "error") showFeedback("", "");
+    renderPreview();
+  });
+
+  form.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const raw = input.value;
+    const name = normalizeUserName(raw);
+    if (!name) {
+      const msg = raw.trim().length > USER_NAME_MAX_LENGTH
+        ? `Nama maksimal ${USER_NAME_MAX_LENGTH} karakter.`
+        : "Nama tidak boleh kosong.";
+      input.setAttribute("aria-invalid", "true");
+      showFeedback(msg, "error");
+      input.focus();
+      return;
+    }
+    financeData.settings.name = name;
+    saveSettings();
+    input.value = name; // tampilkan versi yang sudah dipangkas
+    renderPreview();
+    renderGreeting(); // no-op di sini; dashboard membaca settings saat dibuka
+    showFeedback(`Nama tersimpan. Sapaan di dashboard: "${getGreetingWord()}, ${name}".`, "success");
+  });
+}
+
+/**
+ * Settings > Preferensi Aplikasi: dua switch (checkbox) yang langsung
+ * disimpan saat diubah. hideBalanceOnOpen = preferensi awal saat dashboard
+ * dibuka (tombol mata tetap bekerja); showCheckin = izin popup check-in
+ * (dismiss per sesi tetap lewat sessionStorage).
+ */
+function setupSettingsPreferences() {
+  const hideBalance = document.getElementById("pref-hide-balance");
+  const showCheckin = document.getElementById("pref-show-checkin");
+  if (!hideBalance || !showCheckin) return; // bukan di halaman pengaturan
+  const feedback = document.getElementById("settings-pref-feedback");
+  let feedbackTimer = 0;
+
+  hideBalance.checked = financeData.settings.hideBalanceOnOpen;
+  showCheckin.checked = financeData.settings.showCheckin;
+
+  function saved(text) {
+    clearTimeout(feedbackTimer);
+    feedback.textContent = text;
+    feedback.hidden = false;
+    feedbackTimer = setTimeout(() => { feedback.hidden = true; }, 2500);
+  }
+
+  hideBalance.addEventListener("change", () => {
+    financeData.settings.hideBalanceOnOpen = hideBalance.checked;
+    saveSettings();
+    saved(hideBalance.checked ? "Saldo akan disembunyikan saat dashboard dibuka." : "Saldo akan langsung tampil saat dashboard dibuka.");
+  });
+  showCheckin.addEventListener("change", () => {
+    financeData.settings.showCheckin = showCheckin.checked;
+    saveSettings();
+    saved(showCheckin.checked ? "Check-in harian akan tampil saat membuka dashboard." : "Check-in harian tidak akan tampil otomatis.");
+  });
 }
 
 /**

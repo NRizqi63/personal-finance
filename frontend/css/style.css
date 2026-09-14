@@ -2849,6 +2849,150 @@ a:focus-visible {
   overflow-wrap: anywhere;
 }
 
+/* ---- Profil Akun: form nama di dalam card ---- */
+.settings-form {
+  padding: 12px 16px 14px;
+}
+
+.settings-form .form-field {
+  margin-bottom: 10px;
+}
+
+.settings-preview {
+  margin: 2px 0 0;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--color-text-muted);
+  overflow-wrap: anywhere;
+}
+
+.settings-preview strong {
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.settings-form-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* Tombol simpan selebar penuh di layar sempit supaya mudah ditekan. */
+@media (max-width: 430px) {
+  .settings-form-actions .btn {
+    width: 100%;
+  }
+}
+
+/* Feedback inline sukses/error (role=status). */
+.settings-feedback {
+  margin: 0 0 10px;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  font-size: 12.5px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.settings-feedback[data-type="success"] {
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+}
+
+.settings-feedback[data-type="error"] {
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
+}
+
+.settings-feedback[hidden] {
+  display: none;
+}
+
+.settings-feedback--inset {
+  margin: 4px 16px 10px;
+}
+
+.settings-field input[aria-invalid="true"] {
+  border-color: var(--color-danger);
+  box-shadow: 0 0 0 3px rgba(179, 65, 58, 0.12);
+}
+
+/* ---- Preferensi: baris switch (seluruh baris = label, bisa ditap) ---- */
+.settings-row-switch {
+  cursor: pointer;
+  -webkit-user-select: none;
+  user-select: none;
+  transition: background-color 0.15s ease;
+}
+
+@media (hover: hover) {
+  .settings-row-switch:hover {
+    background: var(--color-bg);
+  }
+}
+
+.switch {
+  position: relative;
+  flex-shrink: 0;
+  width: 46px;
+  height: 26px;
+  display: inline-block;
+}
+
+/* Checkbox asli tetap ada (fokus keyboard & screen reader), tapi tak
+   terlihat; visualnya .switch-track + .switch-thumb. */
+.switch-input {
+  position: absolute;
+  /* Diperluas melewati track (46x26) supaya area tap checkbox-nya sendiri
+     >= 44px tinggi; seluruh baris <label> juga sudah bisa ditap. */
+  inset: -9px -4px;
+  width: auto;
+  height: auto;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.switch-track {
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  background: var(--color-border);
+  transition: background-color 0.15s ease;
+}
+
+.switch-thumb {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--color-surface);
+  box-shadow: 0 1px 3px rgba(31, 36, 33, 0.25);
+  transition: transform 0.15s ease;
+}
+
+.switch-input:checked + .switch-track {
+  background: var(--color-primary);
+}
+
+.switch-input:checked + .switch-track .switch-thumb {
+  transform: translateX(20px);
+}
+
+.switch-input:focus-visible + .switch-track {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.switch-input:active + .switch-track .switch-thumb {
+  transform: scale(0.94);
+}
+
+.switch-input:checked:active + .switch-track .switch-thumb {
+  transform: translateX(20px) scale(0.94);
+}
+
 .settings-inline-link {
   /* Padding vertikal + margin negatif: area tap >= 36px tanpa menambah
      tinggi baris (teksnya sendiri hanya ~19px). */
