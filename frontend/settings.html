@@ -141,8 +141,9 @@
         </div>
         <!-- Ringkasan isi file hasil pemeriksaan (diisi app.js lewat textContent). -->
         <dl class="settings-meta" id="import-summary" hidden></dl>
-        <p class="settings-feedback settings-feedback--inset" id="settings-import-feedback" role="status" aria-live="polite" hidden></p>
-        <p class="settings-feedback settings-feedback--inset" id="settings-data-feedback" role="status" aria-live="polite" hidden></p>
+        <!-- SATU area status untuk seluruh aksi data (export, import, reset):
+             pesan terbaru selalu menggantikan yang lama, tidak menumpuk. -->
+        <p class="settings-feedback settings-feedback--inset" id="settings-data-status" role="status" aria-live="polite" hidden></p>
         <p class="settings-info">⚠️ File backup berisi data keuangan pribadi kamu. Simpan di tempat yang aman dan jangan dibagikan ke orang lain.</p>
       </div>
 

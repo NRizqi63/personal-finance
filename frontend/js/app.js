@@ -3280,16 +3280,27 @@ function buildTransactionsCsv() {
   return `\uFEFF${[CSV_HEADER.map(toCsvCell).join(","), ...rows].join("\r\n")}\r\n`;
 }
 
-/** Tulis pesan hasil export di card Data & Backup (pola .settings-feedback). */
-let dataFeedbackTimer = 0;
+/**
+ * SATU area status untuk semua aksi di card Data & Backup (export, import,
+ * reset). Pesan terbaru menggantikan yang lama supaya tidak pernah ada dua
+ * pesan menumpuk. Kebijakan tampil: pesan sukses hilang sendiri setelah
+ * 4 detik, pesan error menetap sampai ada aksi berikutnya.
+ */
+let dataStatusTimer = 0;
+function showDataStatus(text, type = "success") {
+  const el = document.getElementById("settings-data-status");
+  if (!el) return; // halaman ini tidak punya area status
+  clearTimeout(dataStatusTimer);
+  el.textContent = text;
+  el.dataset.type = type;
+  el.hidden = !text;
+  if (type === "success" && text) dataStatusTimer = setTimeout(() => { el.hidden = true; }, 4000);
+}
+
+/** Alias lama — dipertahankan supaya pemanggil yang sudah ada (export,
+ * import, reset) tidak perlu diubah satu per satu. */
 function showDataFeedback(text, type) {
-  const feedback = document.getElementById("settings-data-feedback");
-  if (!feedback) return;
-  clearTimeout(dataFeedbackTimer);
-  feedback.textContent = text;
-  feedback.dataset.type = type;
-  feedback.hidden = false;
-  if (type === "success") dataFeedbackTimer = setTimeout(() => { feedback.hidden = true; }, 4000);
+  showDataStatus(text, type);
 }
 
 function exportBackupJson() {
@@ -3704,15 +3715,10 @@ function readBackupFile(file) {
   });
 }
 
-/** Pesan status import (pola .settings-feedback yang sama dengan export). */
-let importFeedbackTimer = 0;
+/** Alias lama untuk status import/reset — kini menulis ke area status yang
+ * sama dengan export (lihat showDataStatus). */
 function showImportFeedback(text, type) {
-  const feedback = document.getElementById("settings-import-feedback");
-  if (!feedback) return;
-  clearTimeout(importFeedbackTimer);
-  feedback.textContent = text;
-  feedback.dataset.type = type;
-  feedback.hidden = false;
+  showDataStatus(text, type);
 }
 
 /** Ringkasan isi file — dibangun dengan textContent (tidak pernah innerHTML),
