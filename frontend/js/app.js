@@ -94,9 +94,16 @@ const financeData = {
 // disentuh (key aslinya tetap tersimpan), hanya labelnya jatuh ke sini.
 const FALLBACK_CATEGORY = { key: "lainnya", name: "Lainnya", emoji: "💼" };
 
+/** Apakah key benar-benar kategori milik user? Memakai hasOwnProperty supaya
+ * key bawaan Object ("constructor", "__proto__", "toString", …) tidak
+ * disangka kategori yang ada. */
+function hasCategory(key) {
+  return isSafeObjectKey(key) && Object.prototype.hasOwnProperty.call(financeData.categories, key);
+}
+
 /** Data kategori untuk sebuah key — kategori user, atau cadangan "Lainnya". */
 function getCategory(key) {
-  return financeData.categories[key] || FALLBACK_CATEGORY;
+  return hasCategory(key) ? financeData.categories[key] : FALLBACK_CATEGORY;
 }
 
 function getCategoryLabel(key) {
@@ -213,6 +220,9 @@ function loadBudget() {
     if (parsed.categories && typeof parsed.categories === "object") {
       const categories = {};
       Object.entries(parsed.categories).forEach(([key, cat]) => {
+        // Key berbahaya (__proto__ dkk) dilewati seperti kategori tidak valid
+        // lainnya: datanya tidak dipakai, aplikasi tetap jalan normal.
+        if (!isSafeObjectKey(key)) return;
         if (!cat || typeof cat.name !== "string" || !cat.name.trim()) return;
         if (!Number.isFinite(cat.budget) || cat.budget < 0) return;
         categories[key] = {
@@ -270,9 +280,24 @@ function getUserName() {
   return normalizeUserName(financeData.settings && financeData.settings.name) || DEFAULT_SETTINGS.name;
 }
 
-/** Escape teks user sebelum dimasukkan ke template innerHTML. */
+/** Escape teks user sebelum dimasukkan ke template innerHTML — dipakai untuk
+ * ISI teks maupun nilai atribut ber-kutip (", ' ikut di-escape). Semua data
+ * yang berasal dari localStorage (judul transaksi, nama/emoji/key kategori,
+ * time, nama user) harus melewati ini sebelum masuk innerHTML, supaya tetap
+ * tampil sebagai teks walau isinya markup. */
 function escapeHtml(text) {
   return String(text).replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
+}
+
+// Key yang tidak boleh dipakai sebagai key objek hasil parsing localStorage:
+// menugaskan "__proto__" pada objek literal MENGUBAH prototype objek itu
+// (prototype pollution); "constructor"/"prototype" ditolak sekalian.
+const UNSAFE_OBJECT_KEYS = ["__proto__", "constructor", "prototype"];
+
+/** Aman dipakai sebagai key kategori hasil parsing? (string non-kosong &
+ * bukan key yang bisa mengutak-atik prototype). */
+function isSafeObjectKey(key) {
+  return typeof key === "string" && key.length > 0 && !UNSAFE_OBJECT_KEYS.includes(key);
 }
 
 loadTransactions();
@@ -422,7 +447,7 @@ function getCategoryBudgetStatus(used, budget) {
  * total pengeluaran periode tetap jujur, bukan "hilang" dari daftar. */
 function getUnbudgetedUsed(now = new Date()) {
   const list = financeData.transactions.filter(
-    (tx) => tx.type === "expense" && !financeData.categories[tx.category] && isSameMonth(tx.isoDate, now)
+    (tx) => tx.type === "expense" && !hasCategory(tx.category) && isSameMonth(tx.isoDate, now)
   );
   return { amount: list.reduce((sum, tx) => sum + tx.amount, 0), count: list.length };
 }
@@ -674,21 +699,26 @@ function renderCategoryPanel(key, categoryData, now = new Date()) {
   const { name, budget, emoji } = categoryData;
   const used = getCategoryUsed(key, now);
   const status = getCategoryBudgetStatus(used, budget);
+  // Nama, emoji, dan key berasal dari localStorage -> escape sebelum masuk
+  // innerHTML, baik sebagai teks maupun sebagai nilai atribut.
+  const safeName = escapeHtml(name);
+  const safeEmoji = escapeHtml(emoji || FALLBACK_CATEGORY.emoji);
+  const safeKey = escapeHtml(key);
   const head = `
       <div class="category-card-head">
-        <span class="category-name"><span class="category-emoji" aria-hidden="true">${emoji || FALLBACK_CATEGORY.emoji}</span>${name}</span>
+        <span class="category-name"><span class="category-emoji" aria-hidden="true">${safeEmoji}</span>${safeName}</span>
         <span class="category-status" data-status="${status.key}">${status.label}</span>
-        <button type="button" class="btn btn--ghost btn--xs" data-action="edit-category" data-key="${key}" aria-label="Edit kategori ${name}">${ICON_EDIT} Edit</button>
+        <button type="button" class="btn btn--ghost btn--xs" data-action="edit-category" data-key="${safeKey}" aria-label="Edit kategori ${safeName}">${ICON_EDIT} Edit</button>
       </div>`;
 
   // Budget 0 = belum diatur: kategori tetap ada (dipakai form transaksi),
   // tapi tanpa persen/progress/status palsu — hanya pengeluaran aktualnya.
   if (status.key === "unset") {
     return `
-    <article class="category-card category-card--unset" data-category="${key}">${head}
+    <article class="category-card category-card--unset" data-category="${safeKey}">${head}
       <div class="category-card-foot">
         <span>Terpakai: <strong class="num">${formatRupiah(used)}</strong></span>
-        <button type="button" class="btn btn--ghost btn--xs btn-set-budget" data-action="edit-category" data-key="${key}" aria-label="Atur budget kategori ${name}">Atur Budget</button>
+        <button type="button" class="btn btn--ghost btn--xs btn-set-budget" data-action="edit-category" data-key="${safeKey}" aria-label="Atur budget kategori ${safeName}">Atur Budget</button>
       </div>
     </article>
   `;
@@ -703,7 +733,7 @@ function renderCategoryPanel(key, categoryData, now = new Date()) {
     : `<span class="remaining-budget">Sisa <strong class="num">${formatRupiah(status.remaining)}</strong></span>`;
 
   return `
-    <article class="category-card" data-category="${key}">${head}
+    <article class="category-card" data-category="${safeKey}">${head}
       <div class="category-budget-row">
         <span>Budget: <strong class="num">${formatRupiah(budget)}</strong></span>
         <span class="progress-percent" data-status="${status.key}">${percentLabel}%</span>
@@ -911,7 +941,7 @@ function sumAmount(transactions) {
 function getExpenseByCategory(range) {
   const totals = {};
   getExpensesInRange(range.from, range.to).forEach((tx) => {
-    const key = financeData.categories[tx.category] ? tx.category : FALLBACK_CATEGORY.key;
+    const key = hasCategory(tx.category) ? tx.category : FALLBACK_CATEGORY.key;
     totals[key] = (totals[key] || 0) + tx.amount;
   });
   const total = Object.values(totals).reduce((sum, v) => sum + v, 0);
@@ -987,7 +1017,10 @@ function getAnalyticsInsights(now = new Date()) {
   const dayOfMonth = now.getDate();
   const perDay = (amount) => formatRupiah(Math.ceil(amount / Math.max(daysLeft, 1) / 1000) * 1000);
 
-  /** Insight pemakaian satu budget (kategori atau bulanan). Hanya untuk >= 70%. */
+  /** Insight pemakaian satu budget (kategori atau bulanan). Hanya untuk >= 70%.
+   * `label` HARUS sudah di-escape kalau berasal dari data user (nama
+   * kategori) — hasilnya dirender sebagai HTML (mengandung emoji & <strong>
+   * dari kalimatnya sendiri), jadi escape dilakukan di sumbernya, sekali. */
   function budgetInsight(label, used, budget) {
     if (budget <= 0) return null;
     const pct = Math.round((used / budget) * 100);
@@ -1016,7 +1049,7 @@ function getAnalyticsInsights(now = new Date()) {
 
   // 2. Kategori yang mendekati / melewati budget — dari yang paling parah.
   const flagged = Object.entries(financeData.categories)
-    .map(([key, cat]) => ({ key, insight: budgetInsight(cat.name, getCategoryUsed(key, now), cat.budget) }))
+    .map(([key, cat]) => ({ key, insight: budgetInsight(escapeHtml(cat.name), getCategoryUsed(key, now), cat.budget) }))
     .filter((x) => x.insight)
     .sort((a, b) => b.insight.pct - a.insight.pct);
   flagged.slice(0, 4).forEach((x) => insights.push(x.insight));
@@ -1039,7 +1072,7 @@ function getAnalyticsInsights(now = new Date()) {
   if (top && !flaggedKeys.has(top.key)) {
     insights.push({
       level: "info",
-      text: `💡 ${top.name} jadi pengeluaran terbesar kamu bulan ini (${Math.round(top.share)}% dari total). Coba tentukan batas harian untuk kategori ini sampai akhir bulan.`,
+      text: `💡 ${escapeHtml(top.name)} jadi pengeluaran terbesar kamu bulan ini (${Math.round(top.share)}% dari total). Coba tentukan batas harian untuk kategori ini sampai akhir bulan.`,
     });
   }
 
@@ -1087,7 +1120,7 @@ function renderAnalyticsSummary(range) {
     </div>
     <div class="stat">
       <span class="stat-label">Kategori Terbesar</span>
-      ${topCategory ? `<span class="stat-value">${topCategory.emoji} ${topCategory.name}</span><span class="stat-sub num">${formatRupiah(topCategory.amount)}</span>` : `<span class="stat-value stat-value--text">Belum ada</span><span class="stat-sub">pengeluaran bulan ini</span>`}
+      ${topCategory ? `<span class="stat-value">${escapeHtml(topCategory.emoji)} ${escapeHtml(topCategory.name)}</span><span class="stat-sub num">${formatRupiah(topCategory.amount)}</span>` : `<span class="stat-value stat-value--text">Belum ada</span><span class="stat-sub">pengeluaran bulan ini</span>`}
     </div>
     <div class="stat">
       <span class="stat-label">Perubahan</span>
@@ -1303,7 +1336,7 @@ function renderCategoryChart(range) {
       (r) => `
       <div class="cat-row">
         <div class="cat-row-head">
-          <span class="cat-row-name"><span class="category-emoji" aria-hidden="true">${r.emoji}</span>${r.name}</span>
+          <span class="cat-row-name"><span class="category-emoji" aria-hidden="true">${escapeHtml(r.emoji)}</span>${escapeHtml(r.name)}</span>
           <span class="cat-row-amount num">${formatRupiah(r.amount)}</span>
         </div>
         <div class="cat-row-bar"><div class="cat-row-fill" style="width:${(r.amount / max) * 100}%"></div></div>
@@ -1426,10 +1459,11 @@ function getSpendingInsight() {
 
   if (!best) return "💡 Belum cukup data untuk membuat perbandingan minggu ini.";
 
-  const name = financeData.categories[best.key].name;
+  // Teks ini dirender lewat innerHTML (checkin-insight) -> escape nama & emoji.
+  const name = escapeHtml(financeData.categories[best.key].name);
   const pct = Math.abs(Math.round(best.change * 100));
   const dir = best.change >= 0 ? "naik" : "turun";
-  return `${getCategoryEmoji(best.key)} Pengeluaran ${name} minggu ini ${dir} ${pct}% dibanding minggu lalu.`;
+  return `${escapeHtml(getCategoryEmoji(best.key))} Pengeluaran ${name} minggu ini ${dir} ${pct}% dibanding minggu lalu.`;
 }
 
 /** Isi popup Financial Check-in dari data aktual (saldo, budget, goal, insight, status). */
@@ -1539,8 +1573,13 @@ function renderTransactionListItems(listEl, transactions, options = {}) {
  * showActions — tombol edit/delete. */
 function renderTransactionItem(tx, showActions = false, options = {}) {
   const { sign, amountClass } = getTransactionAmountMeta(tx.type);
-  const categoryLabel = getCategoryLabel(tx.category);
-  const timeLabel = getTransactionTimeLabel(tx);
+  // Judul, kategori, emoji, dan time berasal dari localStorage -> escape
+  // sekali di sini, lalu dipakai di teks maupun aria-label. id dipaksa
+  // menjadi angka (defense-in-depth untuk atribut data-id).
+  const safeTitle = escapeHtml(tx.title);
+  const safeId = Number(tx.id);
+  const categoryLabel = escapeHtml(getCategoryLabel(tx.category));
+  const timeLabel = escapeHtml(getTransactionTimeLabel(tx));
   const timeMarkup = timeLabel ? `<span class="transaction-time"> · ${timeLabel}</span>` : "";
   // showDate: tanggal ikut di baris meta (dipakai card detail di halaman
   // Analisis yang daftarnya bisa lintas tanggal; di daftar lain tanggal
@@ -1549,16 +1588,16 @@ function renderTransactionItem(tx, showActions = false, options = {}) {
   const actionsMarkup = showActions
     ? `
         <div class="transaction-actions">
-          <button type="button" class="icon-btn-sm" data-action="edit" data-id="${tx.id}" aria-label="Edit transaksi ${tx.title}">${ICON_EDIT}</button>
-          <button type="button" class="icon-btn-sm" data-action="delete" data-id="${tx.id}" aria-label="Hapus transaksi ${tx.title}">${ICON_DELETE}</button>
+          <button type="button" class="icon-btn-sm" data-action="edit" data-id="${safeId}" aria-label="Edit transaksi ${safeTitle}">${ICON_EDIT}</button>
+          <button type="button" class="icon-btn-sm" data-action="delete" data-id="${safeId}" aria-label="Hapus transaksi ${safeTitle}">${ICON_DELETE}</button>
         </div>`
     : "";
 
   return `
-    <li class="transaction-item ${showActions ? "transaction-item--actions" : ""}" data-id="${tx.id}">
-      <span class="transaction-icon transaction-icon--${tx.type}" aria-hidden="true">${getTransactionEmoji(tx)}</span>
+    <li class="transaction-item ${showActions ? "transaction-item--actions" : ""}" data-id="${safeId}">
+      <span class="transaction-icon transaction-icon--${escapeHtml(tx.type)}" aria-hidden="true">${escapeHtml(getTransactionEmoji(tx))}</span>
       <div class="transaction-info">
-        <span class="transaction-title">${tx.title}</span>
+        <span class="transaction-title">${safeTitle}</span>
         <span class="transaction-meta">${categoryLabel}${dateMarkup}${timeMarkup}</span>
       </div>
       <div class="transaction-right">
@@ -1710,7 +1749,7 @@ function getFilteredTransactions() {
     if (category !== "all") {
       // Transaksi yang kategorinya sudah dihapus user dianggap "lainnya",
       // sama seperti tampilannya di kartu transaksi.
-      const key = financeData.categories[tx.category] ? tx.category : FALLBACK_CATEGORY.key;
+      const key = hasCategory(tx.category) ? tx.category : FALLBACK_CATEGORY.key;
       if (key !== category) return false;
     }
     if (from && (!tx.isoDate || tx.isoDate < from)) return false;
@@ -1857,9 +1896,9 @@ function setupTransactionFilters() {
   // Opsi kategori mengikuti kategori user (+ cadangan "Lainnya"), sama
   // seperti form transaksi supaya pilihannya konsisten.
   const options = Object.entries(financeData.categories).map(
-    ([key, cat]) => `<option value="${key}">${cat.emoji} ${cat.name}</option>`
+    ([key, cat]) => `<option value="${escapeHtml(key)}">${escapeHtml(cat.emoji)} ${escapeHtml(cat.name)}</option>`
   );
-  if (!financeData.categories[FALLBACK_CATEGORY.key]) {
+  if (!hasCategory(FALLBACK_CATEGORY.key)) {
     options.push(`<option value="${FALLBACK_CATEGORY.key}">${FALLBACK_CATEGORY.emoji} ${FALLBACK_CATEGORY.name}</option>`);
   }
   categorySelect.innerHTML = `<option value="all">Semua kategori</option>${options.join("")}`;
@@ -2234,15 +2273,15 @@ function setupTransactionModal() {
   // dibuka supaya selalu sinkron; <option> statis di HTML cuma placeholder.
   function populateCategoryOptions(selected) {
     const options = Object.entries(financeData.categories).map(
-      ([key, cat]) => `<option value="${key}">${cat.emoji} ${cat.name}</option>`
+      ([key, cat]) => `<option value="${escapeHtml(key)}">${escapeHtml(cat.emoji)} ${escapeHtml(cat.name)}</option>`
     );
-    if (!financeData.categories[FALLBACK_CATEGORY.key]) {
+    if (!hasCategory(FALLBACK_CATEGORY.key)) {
       options.push(`<option value="${FALLBACK_CATEGORY.key}">${FALLBACK_CATEGORY.emoji} ${FALLBACK_CATEGORY.name}</option>`);
     }
     fieldCategory.innerHTML = `<option value="" disabled ${selected ? "" : "selected"}>Pilih kategori</option>${options.join("")}`;
     if (selected) {
       // Kategori transaksi lama yang sudah dihapus user -> tampil sebagai Lainnya.
-      fieldCategory.value = financeData.categories[selected] ? selected : FALLBACK_CATEGORY.key;
+      fieldCategory.value = hasCategory(selected) ? selected : FALLBACK_CATEGORY.key;
     }
   }
 
@@ -2610,7 +2649,7 @@ function makeCategoryKey(name) {
       .replace(/^-+|-+$/g, "") || "kategori";
   let key = base;
   let n = 2;
-  while (financeData.categories[key]) key = `${base}-${n++}`;
+  while (hasCategory(key)) key = `${base}-${n++}`;
   return key;
 }
 
@@ -2762,7 +2801,7 @@ function setupBudgetEditor() {
     categoryForm.reset();
     fieldName.setCustomValidity("");
     fieldBudget.setCustomValidity("");
-    if (mode === "edit" && financeData.categories[key]) {
+    if (mode === "edit" && hasCategory(key)) {
       const cat = financeData.categories[key];
       const hasBudget = cat.budget > 0;
       fieldKey.value = key;
@@ -2836,8 +2875,8 @@ function setupBudgetEditor() {
   // tidak hilang diam-diam; bulan yang sedang dilihat tidak disentuh.
   clearBudgetBtn.addEventListener("click", () => {
     const key = fieldKey.value;
+    if (!hasCategory(key)) return;
     const cat = financeData.categories[key];
-    if (!cat) return;
     const name = fieldName.value.trim() || cat.name;
     financeData.categories[key] = { name, emoji: selectedEmoji || cat.emoji, budget: 0 };
     persistAndRerender();
@@ -2851,7 +2890,7 @@ function setupBudgetEditor() {
 
   deleteBtn.addEventListener("click", () => {
     const key = fieldKey.value;
-    if (!financeData.categories[key]) return;
+    if (!hasCategory(key)) return;
     pendingDeleteKey = key;
     const cat = financeData.categories[key];
     const count = financeData.transactions.filter((tx) => tx.category === key).length;
