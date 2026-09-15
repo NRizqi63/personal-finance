@@ -79,7 +79,21 @@ const financeData = {
     showCheckin: true,
   },
 
-  // Data goal — ditampilkan di popup Financial Check-in (renderCheckin()).
+  // Target keuangan user (Target Keuangan G-1). Array — bukan objek ber-key
+  // seperti categories — supaya urutan tampil bebas diatur saat render dan
+  // tidak ada key hasil parsing yang perlu dicurigai. Kosong untuk pengguna
+  // baru, lalu diisi dari localStorage (loadGoals()).
+  // Nilai turunan (persen, sisa, selesai/tidak) TIDAK disimpan di sini:
+  // semuanya dihitung dari target & saved lewat getGoalProgress() /
+  // getGoalStatus(), prinsip yang sama dengan "terpakai" pada kategori yang
+  // selalu dihitung ulang dari transaksi — supaya tidak ada dua sumber
+  // kebenaran yang bisa berbeda.
+  goals: [],
+
+  // Data goal CONTOH — ditampilkan di popup Financial Check-in
+  // (renderCheckin()) dengan penanda "contoh". Belum terhubung dengan
+  // financeData.goals di atas; Check-in baru membaca target sungguhan pada
+  // tahap G-8, dan objek ini dihapus di tahap itu.
   goal: {
     name: "Dana Darurat",
     current: 6200000,
@@ -153,6 +167,11 @@ const NAMA_HARI_ID = ["Min", "Sen", "Sel", "Rab", "Kam", "Jum", "Sab"];
 const TRANSACTIONS_STORAGE_KEY = "financeData.transactions";
 const BUDGET_STORAGE_KEY = "financeData.budget";
 const SETTINGS_STORAGE_KEY = "financeData.settings";
+// Target keuangan disimpan di key SENDIRI, bukan menumpang di key budget:
+// "Reset Budget & Kategori" menghapus key budget seluruhnya, jadi target yang
+// ikut di sana akan hilang tanpa diminta. Tiga key di atas tidak diubah nama
+// maupun bentuknya.
+const GOALS_STORAGE_KEY = "financeData.goals";
 
 // Default pengaturan — sumber kebenaran untuk merge di loadSettings() dan
 // fallback di getUserName(). Dibekukan supaya tidak termodifikasi tak sengaja.
@@ -316,9 +335,107 @@ function isSafeObjectKey(key) {
   return typeof key === "string" && key.length > 0 && !UNSAFE_OBJECT_KEYS.includes(key);
 }
 
+/* ---------- Target Keuangan: fondasi data (G-1) ----------
+   Hanya model + helper. Belum ada UI, belum ikut export/import, belum ikut
+   reset, dan belum dipakai Check-in — semuanya menyusul di tahap G-2 s/d G-8. */
+
+// Panjang nama target: batas yang sama dengan nama kategori & nama profil
+// (IMPORT_NAME_MAX / USER_NAME_MAX_LENGTH) supaya satu nada di seluruh app.
+const GOAL_NAME_MAX = 40;
+
+// Batas jumlah target — menjaga localStorage & render tetap wajar. Dipakai
+// form saat MENAMBAH target baru (tahap G-3). Data yang terlanjur tersimpan
+// melebihi batas ini sengaja TIDAK dipotong saat load: menghapus data user
+// diam-diam lebih buruk daripada daftar yang kepanjangan.
+const GOAL_LIMIT = 50;
+
+// Deadline tinggal <= 30 hari (dan target belum tercapai) = "mendesak".
+const GOAL_URGENT_DAYS = 30;
+
+/**
+ * Satu baris goals mentah (localStorage / nanti file backup) -> objek target
+ * yang aman dipakai, atau null kalau tidak bisa diselamatkan. Pemanggil
+ * melewati yang null, persis seperti kategori tidak lengkap di loadBudget():
+ * satu baris rusak tidak boleh menjatuhkan seluruh daftar.
+ *
+ * `fallbackId` dipakai kalau id-nya hilang/rusak — datanya sendiri masih
+ * berguna, jadi jangan dibuang hanya karena penomorannya kacau.
+ */
+function normalizeGoal(raw, fallbackId = 0) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+
+  const name = typeof raw.name === "string" ? raw.name.trim() : "";
+  if (!name || name.length > GOAL_NAME_MAX) return null;
+
+  // Nominal WAJIB number (string angka tidak diterima diam-diam, sama dengan
+  // aturan amount pada import transaksi).
+  if (!Number.isFinite(raw.target) || raw.target <= 0) return null;
+  // saved boleh 0, dan boleh LEBIH BESAR dari target — menabung melebihi
+  // target itu sah, bukan data rusak.
+  if (!Number.isFinite(raw.saved) || raw.saved < 0) return null;
+
+  const id = Number.isInteger(raw.id) && raw.id >= 1 ? raw.id : fallbackId;
+  if (!Number.isInteger(id) || id < 1) return null;
+
+  // Deadline opsional: "" = tanpa tanggal target. Tanggal LAMPAU tetap valid
+  // (target yang terlewat tetap boleh dicatat); yang ditolak hanya format
+  // yang tidak terbaca — jatuh ke "" supaya target itu sendiri tidak hilang.
+  const deadline = isValidIsoDate(raw.deadline) ? raw.deadline : "";
+
+  // createdAt memakai tanggal LOKAL (toIsoDate), bukan toISOString().
+  const createdAt = isValidIsoDate(raw.createdAt) ? raw.createdAt : toIsoDate(new Date());
+
+  return { id, name, target: raw.target, saved: raw.saved, deadline, createdAt };
+}
+
+/** Muat target tersimpan dari localStorage. Tidak ada key / JSON korup /
+ * bentuk bukan array -> daftar tetap kosong dan aplikasi jalan normal
+ * (pola loadTransactions()). Baris rusak dilewati, baris valid tetap dipakai. */
+function loadGoals() {
+  try {
+    const saved = localStorage.getItem(GOALS_STORAGE_KEY);
+    if (!saved) return; // pengguna lama / belum pernah membuat target
+    const parsed = JSON.parse(saved);
+    if (!Array.isArray(parsed)) return;
+
+    const usedIds = new Set();
+    const goals = [];
+    parsed.forEach((raw, index) => {
+      const goal = normalizeGoal(raw, index + 1);
+      if (!goal) return;
+      // id wajib unik: kalau storage membawa duplikat, yang kedua diberi nomor
+      // baru supaya edit & hapus tidak pernah mengenai dua target sekaligus.
+      // Datanya tetap dipertahankan, hanya penomorannya yang dirapikan.
+      if (usedIds.has(goal.id)) goal.id = Math.max(0, ...usedIds) + 1;
+      usedIds.add(goal.id);
+      goals.push(goal);
+    });
+    financeData.goals = goals;
+  } catch (err) {
+    // localStorage tidak tersedia / data korup — tetap pakai daftar kosong.
+  }
+}
+
+/** Simpan financeData.goals saat ini ke localStorage (key sendiri). */
+function saveGoals() {
+  try {
+    localStorage.setItem(GOALS_STORAGE_KEY, JSON.stringify(financeData.goals));
+  } catch (err) {
+    // localStorage tidak tersedia — perubahan tetap berlaku di memori sesi ini.
+  }
+}
+
+/** Id untuk target baru: integer naik, di-seed dari id terbesar yang ada
+ * (pola nextTransactionId). Sengaja dihitung ulang tiap dipanggil, bukan
+ * disimpan sebagai counter, supaya tetap benar setelah import atau reset. */
+function nextGoalId() {
+  return financeData.goals.reduce((max, goal) => Math.max(max, goal.id), 0) + 1;
+}
+
 loadTransactions();
 loadBudget();
 loadSettings();
+loadGoals();
 
 const ICON_EDIT = `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9" /><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" /></svg>`;
 const ICON_DELETE = `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18" /><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /></svg>`;
@@ -473,6 +590,106 @@ function getBudgetStatus(percent) {
   if (percent >= 90) return { key: "danger", label: "Melebihi batas aman" };
   if (percent >= 70) return { key: "warning", label: "Perlu diperhatikan" };
   return { key: "safe", label: "Masih aman" };
+}
+
+/* ---------- Target Keuangan: helper turunan (G-1) ----------
+   Semua nilai di bawah DIHITUNG, tidak pernah disimpan. */
+
+/**
+ * Selisih hari kalender dari hari ini ke `isoDate` (negatif = sudah lewat),
+ * atau null kalau tanggalnya kosong/tidak valid.
+ * Keduanya dibuat sebagai tengah malam LOKAL lewat new Date(y, m, d) — bukan
+ * Date.parse/UTC — supaya tanggal tidak bergeser satu hari di zona waktu
+ * seperti WIB. Math.round menetralkan pergeseran satu jam saat pergantian DST
+ * di zona yang memakainya, sehingga hasilnya selalu bilangan hari bulat.
+ */
+function getDaysUntil(isoDate, today = new Date()) {
+  if (!isValidIsoDate(isoDate)) return null;
+  const [y, m, d] = isoDate.split("-").map(Number);
+  const target = new Date(y, m - 1, d);
+  const start = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  return Math.round((target - start) / 86400000);
+}
+
+/**
+ * Keterangan deadline sebuah target: { key, days, label }.
+ *   none    : tidak ada tanggal target
+ *   overdue : tanggalnya sudah lewat
+ *   today   : jatuh tempo hari ini
+ *   soon    : tinggal <= GOAL_URGENT_DAYS hari
+ *   future  : masih lebih dari itu
+ * `days` ikut dikembalikan supaya pemanggil bisa mengurutkan/menyaring tanpa
+ * mengurai teks labelnya lagi.
+ */
+function describeDeadline(isoDate, today = new Date()) {
+  const days = getDaysUntil(isoDate, today);
+  if (days === null) return { key: "none", days: null, label: "Tanpa tanggal target" };
+  if (days < 0) {
+    const late = -days;
+    return { key: "overdue", days, label: late === 1 ? "Terlewat 1 hari" : `Terlewat ${late} hari` };
+  }
+  if (days === 0) return { key: "today", days, label: "Hari ini" };
+  if (days <= GOAL_URGENT_DAYS) return { key: "soon", days, label: days === 1 ? "Tinggal 1 hari" : `Tinggal ${days} hari` };
+  return { key: "future", days, label: `${days} hari lagi` };
+}
+
+/**
+ * Persen progress untuk TAMPILAN: selalu 0-100, tidak pernah NaN/Infinity.
+ * target <= 0 atau data rusak -> 0 (tanpa progress palsu); saved melebihi
+ * target -> tetap 100 supaya lebar progress bar tidak melampaui kotaknya.
+ * Nominal aslinya tetap bisa dibaca pemanggil langsung dari objek target.
+ */
+function getGoalProgress(goal) {
+  if (!goal || !Number.isFinite(goal.target) || goal.target <= 0) return 0;
+  if (!Number.isFinite(goal.saved) || goal.saved <= 0) return 0;
+  return Math.min((goal.saved / goal.target) * 100, 100);
+}
+
+/**
+ * Status sebuah target — SELALU diturunkan, tidak pernah disimpan:
+ *   saved >= target                -> done    : "Tercapai"
+ *   deadline lewat & belum selesai -> overdue : "Terlewat"
+ *   deadline <= 30 hari & belum    -> urgent  : "Mendesak"
+ *   selain itu                     -> active  : "Aktif"
+ * Bentuk hasilnya mengikuti getCategoryBudgetStatus(): { key, label, percent,
+ * remaining } + keterangan deadline. remaining tidak pernah negatif (kelebihan
+ * tabungan bukan "sisa"), percent sudah dipotong ke 100.
+ */
+function getGoalStatus(goal, today = new Date()) {
+  const target = goal && Number.isFinite(goal.target) ? goal.target : 0;
+  const saved = goal && Number.isFinite(goal.saved) ? goal.saved : 0;
+  const percent = getGoalProgress(goal);
+  const remaining = Math.max(target - saved, 0);
+  const deadline = describeDeadline(goal ? goal.deadline : "", today);
+
+  if (target > 0 && saved >= target) return { key: "done", label: "Tercapai", percent: 100, remaining: 0, deadline };
+  if (deadline.key === "overdue") return { key: "overdue", label: "Terlewat", percent, remaining, deadline };
+  if (deadline.key === "today" || deadline.key === "soon") return { key: "urgent", label: "Mendesak", percent, remaining, deadline };
+  return { key: "active", label: "Aktif", percent, remaining, deadline };
+}
+
+/**
+ * Urutan tampil target: yang belum selesai lebih dulu (deadline terdekat di
+ * atas, target tanpa deadline paling bawah), target yang sudah tercapai
+ * paling akhir. Seri tanggal dipecah oleh id menurun = target terbaru di atas,
+ * sama dengan urutan transaksi.
+ * Mengembalikan array BARU: Array.prototype.sort memutasi array aslinya,
+ * sedangkan financeData.goals dipakai bersama seluruh aplikasi.
+ */
+function sortGoals(goals = financeData.goals, today = new Date()) {
+  return [...goals].sort((a, b) => {
+    const aDone = getGoalStatus(a, today).key === "done";
+    const bDone = getGoalStatus(b, today).key === "done";
+    if (aDone !== bDone) return aDone ? 1 : -1;
+
+    const aDays = getDaysUntil(a.deadline, today);
+    const bDays = getDaysUntil(b.deadline, today);
+    if (aDays === null && bDays === null) return b.id - a.id;
+    if (aDays === null) return 1; // tanpa deadline -> paling bawah
+    if (bDays === null) return -1;
+    if (aDays !== bDays) return aDays - bDays;
+    return b.id - a.id;
+  });
 }
 
 /** Format tanggal "yyyy-mm-dd" dari <input type="date"> menjadi "9 Sep 2026" */
@@ -1532,6 +1749,125 @@ function getSpendingInsight() {
   const pct = Math.abs(Math.round(best.change * 100));
   const dir = best.change >= 0 ? "naik" : "turun";
   return `${escapeHtml(getCategoryEmoji(best.key))} Pengeluaran ${name} minggu ini ${dir} ${pct}% dibanding minggu lalu.`;
+}
+
+/* ---------- Halaman Target Keuangan (goals.html) — G-2: tampilan saja ----------
+   Semua angka berasal dari helper G-1 (getGoalStatus/getGoalProgress/
+   describeDeadline/sortGoals); tidak ada perhitungan ulang di sini. Setiap
+   fungsi no-op kalau elemennya tidak ada (halaman lain). */
+
+/** Markup satu card target. Nama dari localStorage -> escapeHtml, baik
+ * sebagai teks maupun nilai atribut (aria-label). Status memakai kunci
+ * milik target sendiri (done/urgent/overdue/active), BUKAN kunci status
+ * budget: pada budget mendekati 100% = bahaya, pada target = bagus. */
+function renderGoalCard(goal, today = new Date()) {
+  const status = getGoalStatus(goal, today);
+  const safeName = escapeHtml(goal.name);
+  const percentLabel = status.percent.toLocaleString("id-ID", { maximumFractionDigits: 1 });
+  const done = status.key === "done";
+  const over = goal.saved - goal.target;
+
+  // Baris kanan foot: sisa dana, atau "Tercapai" (+ kelebihan kalau ada).
+  let remainingMarkup;
+  if (!done) remainingMarkup = `<span class="goal-remaining">Sisa <strong class="num">${formatRupiah(status.remaining)}</strong></span>`;
+  else if (over > 0) remainingMarkup = `<span class="goal-remaining is-done">Tercapai 🎉 · lebih <strong class="num">${formatRupiah(over)}</strong></span>`;
+  else remainingMarkup = `<span class="goal-remaining is-done">Tercapai 🎉</span>`;
+
+  // Deadline: tanggal + keterangan (Tinggal N hari / Terlewat N hari), atau
+  // "Tanpa tanggal target". Target yang sudah tercapai tidak perlu lagi
+  // diperingatkan soal tenggat — keterangannya dibuat netral.
+  const dl = status.deadline;
+  const deadlineText = dl.key === "none"
+    ? dl.label
+    : `${formatDateID(goal.deadline)} · ${done && dl.key === "overdue" ? "sudah lewat" : dl.label}`;
+
+  return `
+    <article class="category-card goal-card" data-goal-id="${goal.id}" data-status="${status.key}">
+      <div class="category-card-head">
+        <span class="category-name"><span class="category-emoji" aria-hidden="true">🎯</span>${safeName}</span>
+        <span class="category-status goal-status" data-status="${status.key}">${status.label}</span>
+      </div>
+      <div class="category-budget-row">
+        <span>Target: <strong class="num">${formatRupiah(goal.target)}</strong></span>
+        <span class="progress-percent goal-percent">${percentLabel}%</span>
+      </div>
+      <div class="progress-bar progress-bar--goal" role="progressbar" aria-valuenow="${Math.round(status.percent)}" aria-valuemin="0" aria-valuemax="100" aria-label="Progress target ${safeName}">
+        <div class="progress-bar-fill" style="width:${status.percent}%"></div>
+      </div>
+      <div class="category-card-foot goal-card-foot">
+        <span>Terkumpul: <strong class="num">${formatRupiah(goal.saved)}</strong></span>
+        ${remainingMarkup}
+      </div>
+      <p class="goal-deadline" data-deadline="${dl.key}">📅 ${deadlineText}</p>
+    </article>
+  `;
+}
+
+/** Daftar target (urutan dari sortGoals(), array sumber tidak disentuh) +
+ * sub-judul jumlah + empty state. */
+function renderGoalList(today = new Date()) {
+  const list = document.getElementById("goal-list");
+  if (!list) return; // bukan di halaman target
+  const goals = sortGoals(financeData.goals, today);
+  const countSub = document.getElementById("goals-count-sub");
+  const hint = document.getElementById("goals-hint");
+
+  if (!goals.length) {
+    if (countSub) countSub.textContent = "";
+    if (hint) hint.hidden = true;
+    list.innerHTML = `<p class="category-empty goal-empty">🎯 Belum ada target keuangan.<br>Target seperti dana darurat, beli laptop, atau liburan akan tampil di sini.</p>`;
+    return;
+  }
+
+  if (countSub) countSub.textContent = goals.length === 1 ? "1 target" : `${goals.length} target`;
+  if (hint) hint.hidden = false;
+  list.innerHTML = goals.map((goal) => renderGoalCard(goal, today)).join("");
+}
+
+/** Tile ringkasan: total terkumpul vs total target, jumlah aktif, jumlah
+ * tercapai. Section-nya disembunyikan kalau belum ada target. */
+function renderGoalsSummary(today = new Date()) {
+  const el = document.getElementById("goals-summary");
+  if (!el) return; // bukan di halaman target
+  const section = document.getElementById("goals-summary-section");
+  const goals = financeData.goals;
+  if (!goals.length) {
+    if (section) section.hidden = true;
+    el.innerHTML = "";
+    return;
+  }
+
+  const totalTarget = goals.reduce((sum, g) => sum + g.target, 0);
+  const totalSaved = goals.reduce((sum, g) => sum + g.saved, 0);
+  const doneCount = goals.filter((g) => getGoalStatus(g, today).key === "done").length;
+  const activeCount = goals.length - doneCount;
+
+  if (section) section.hidden = false;
+  el.innerHTML = `
+    <div class="stat stat--wide">
+      <span class="stat-label">Total Terkumpul</span>
+      <span class="stat-value num">${formatRupiah(totalSaved)}</span>
+      <span class="stat-sub">dari total target <strong class="num">${formatRupiah(totalTarget)}</strong></span>
+    </div>
+    <div class="stat">
+      <span class="stat-label">Target Aktif</span>
+      <span class="stat-value num">${activeCount}</span>
+      <span class="stat-sub">belum tercapai</span>
+    </div>
+    <div class="stat">
+      <span class="stat-label">Tercapai</span>
+      <span class="stat-value num">${doneCount}</span>
+      <span class="stat-sub">target selesai</span>
+    </div>
+  `;
+}
+
+/** Render seluruh halaman goals.html dengan satu "hari ini" yang sama
+ * supaya status di ringkasan & daftar tidak pernah berbeda. */
+function renderGoalsPage() {
+  const today = new Date();
+  renderGoalsSummary(today);
+  renderGoalList(today);
 }
 
 /** Isi popup Financial Check-in dari data aktual (saldo, budget, goal, insight, status). */
@@ -3252,6 +3588,16 @@ function initBudgetPage() {
   setupBudgetPeriodNav();
 }
 
+/**
+ * Halaman "Target Keuangan" (goals.html) — G-2: daftar target dari
+ * financeData.goals (sudah dimuat loadGoals() saat file ini dieksekusi).
+ * Hanya membaca & merender; tidak ada yang ditulis ke localStorage saat
+ * halaman dibuka. Tambah/edit/hapus menyusul di tahap berikutnya.
+ */
+function initGoalsPage() {
+  renderGoalsPage();
+}
+
 /* ---------- Data & Backup: export (Settings V1 Tahap 3A) ----------
    Semua file dibuat di browser (Blob + <a download>). Tidak ada fetch/
    jaringan, tidak ada eval/new Function, tidak ada data yang dikirim ke
@@ -4244,6 +4590,8 @@ document.addEventListener("DOMContentLoaded", () => {
     initAnalyticsPage();
   } else if (page === "budget") {
     initBudgetPage();
+  } else if (page === "goals") {
+    initGoalsPage();
   } else if (page === "settings") {
     initSettingsPage();
   } else {

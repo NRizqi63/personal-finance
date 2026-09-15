@@ -3551,3 +3551,109 @@ a:focus-visible {
     font-size: 30px;
   }
 }
+
+/* =========================================================
+   TARGET KEUANGAN (goals.html) — G-2
+   Card memakai .category-card + .progress-bar--goal yang sudah ada; yang
+   baru hanya warna status milik target (semantiknya TERBALIK dari budget:
+   mendekati 100% = bagus, bukan bahaya) dan beberapa baris teks.
+   ========================================================= */
+/* Deskripsi singkat di bawah judul halaman. */
+.goals-intro {
+  margin: -2px 0 4px;
+  padding: 0 2px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--color-text-muted);
+  overflow-wrap: anywhere;
+}
+
+/* Chip status target: done = hijau, urgent = kuning, overdue = merah,
+   active = abu netral — palet yang sama dengan chip kategori. */
+.goal-status[data-status="active"] {
+  background: var(--color-bg);
+  color: var(--color-text-muted);
+  border: 1px solid var(--color-border);
+}
+
+.goal-status[data-status="urgent"] {
+  background: var(--color-accent-soft);
+  color: #8A5A16;
+}
+
+.goal-status[data-status="overdue"] {
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
+}
+
+.goal-status[data-status="done"] {
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+}
+
+/* Progress: gold (.progress-bar--goal) selama berjalan, hijau saat tercapai.
+   Deadline terlewat TIDAK memerahkan bar — uang yang sudah terkumpul bukan
+   kegagalan; yang merah hanya baris deadline-nya. */
+.goal-card[data-status="done"] .progress-bar--goal {
+  background: var(--color-primary-soft);
+}
+
+.goal-card[data-status="done"] .progress-bar--goal .progress-bar-fill {
+  background: var(--color-primary);
+}
+
+.goal-card[data-status="done"] .goal-percent,
+.goal-remaining.is-done,
+.goal-remaining.is-done .num {
+  color: var(--color-primary);
+}
+
+/* Dua nominal di foot boleh turun jadi dua baris di layar sempit, bukan
+   melebar keluar card. */
+.goal-card-foot {
+  flex-wrap: wrap;
+  row-gap: 2px;
+}
+
+.goal-remaining {
+  white-space: nowrap;
+}
+
+/* Baris deadline di bawah foot; merah hanya kalau lewat & belum tercapai. */
+.goal-deadline {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--color-text-muted);
+  overflow-wrap: anywhere;
+}
+
+.goal-card[data-status="overdue"] .goal-deadline {
+  color: var(--color-danger);
+}
+
+/* Catatan kejujuran data di bawah daftar (nominal terkumpul dicatat manual). */
+.goals-hint {
+  margin: 10px 0 0;
+  padding: 0 2px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--color-text-muted);
+  overflow-wrap: anywhere;
+}
+
+/* Empty state: kotak dashed .category-empty yang sama, teks dua baris. */
+.goal-empty {
+  padding: 22px 16px;
+}
+
+@media (max-width: 360px) {
+  /* Nominal panjang (Rp10.000.000) + persen: beri ruang bernapas. */
+  .goal-card .category-budget-row {
+    gap: 8px;
+  }
+
+  .goal-remaining {
+    white-space: normal;
+  }
+}
