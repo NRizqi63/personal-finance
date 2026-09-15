@@ -1763,7 +1763,10 @@ function getSpendingInsight() {
 /** Markup satu card target. Nama dari localStorage -> escapeHtml, baik
  * sebagai teks maupun nilai atribut (aria-label). Status memakai kunci
  * milik target sendiri (done/urgent/overdue/active), BUKAN kunci status
- * budget: pada budget mendekati 100% = bahaya, pada target = bagus. */
+ * budget: pada budget mendekati 100% = bahaya, pada target = bagus.
+ * Tombol Edit/Hapus memakai data-action + data-id (delegasi klik di
+ * setupGoalEditor()); id juga dipakai restoreFocus() untuk menemukan tombol
+ * pengganti setelah daftar dirender ulang. */
 function renderGoalCard(goal, today = new Date()) {
   const status = getGoalStatus(goal, today);
   const safeName = escapeHtml(goal.name);
@@ -1803,6 +1806,10 @@ function renderGoalCard(goal, today = new Date()) {
         ${remainingMarkup}
       </div>
       <p class="goal-deadline" data-deadline="${dl.key}">📅 ${deadlineText}</p>
+      <div class="goal-card-actions">
+        <button type="button" class="btn btn--ghost btn--xs" data-action="edit-goal" data-id="${goal.id}" aria-label="Edit target ${safeName}">${ICON_EDIT} Edit</button>
+        <button type="button" class="btn btn--danger-ghost btn--xs" data-action="delete-goal" data-id="${goal.id}" aria-label="Hapus target ${safeName}">${ICON_DELETE} Hapus</button>
+      </div>
     </article>
   `;
 }
@@ -1889,19 +1896,23 @@ function showGoalsFeedback(text, type = "success") {
 }
 
 /**
- * goals.html — G-3A: popup Tambah Target. Modal dikelola
- * createModalController() (fokus awal, focus trap, Escape, klik overlay,
- * scroll lock, kembalikan fokus). Validasi per field memakai
+ * goals.html — G-3A/G-3B: popup Tambah/Edit Target + konfirmasi Hapus.
+ * Modal dikelola createModalController() (fokus awal, focus trap, Escape,
+ * klik overlay, scroll lock, kembalikan fokus). Validasi per field memakai
  * setCustomValidity() + reportValidity() seperti form transaksi & kategori;
  * penjaga terakhir sebelum disimpan tetap normalizeGoal() supaya aturan data
  * G-1 tidak bisa dilewati lewat form. Tidak ada yang ditulis ke
- * financeData.goals maupun localStorage sebelum semua validasi lolos.
+ * financeData.goals maupun localStorage sebelum semua validasi lolos, dan
+ * kegagalan menulis selalu di-rollback ke daftar sebelum aksi.
  */
 function setupGoalEditor() {
   const overlay = document.getElementById("goal-modal-overlay");
   if (!overlay) return; // bukan di halaman target
 
   const form = document.getElementById("goal-form");
+  const modalTitle = document.getElementById("goal-modal-title");
+  const modalSub = document.getElementById("goal-modal-sub");
+  const fieldId = document.getElementById("field-goal-id");
   const fieldName = document.getElementById("field-goal-name");
   const fieldTarget = document.getElementById("field-goal-target");
   const fieldSaved = document.getElementById("field-goal-saved");
@@ -1918,12 +1929,36 @@ function setupGoalEditor() {
 
   function resetForm() {
     form.reset();
+    fieldId.value = "";
     fields.forEach((field) => field.setCustomValidity(""));
     setStatus("");
     submitBtn.disabled = false;
   }
 
   const modal = createModalController(overlay, { onClose: resetForm });
+
+  /** Buka popup: mode "add" (form kosong) atau "edit" (terisi dari target
+   * yang ada; id & createdAt tidak pernah lewat form, hanya id sebagai
+   * penanda). Judul, sub, dan label tombol ikut modenya. */
+  function openGoalModal(mode, goal) {
+    resetForm();
+    if (mode === "edit" && goal) {
+      fieldId.value = String(goal.id);
+      fieldName.value = goal.name;
+      fieldTarget.value = formatAmountDigits(String(goal.target));
+      // Terkumpul 0 dibiarkan kosong (placeholder "0"), seperti budget kategori.
+      fieldSaved.value = goal.saved > 0 ? formatAmountDigits(String(goal.saved)) : "";
+      fieldDeadline.value = goal.deadline || "";
+      modalTitle.textContent = "✏️ Edit Target";
+      modalSub.textContent = "Ubah nama, nominal, atau tanggal target ini.";
+      submitBtn.textContent = "Simpan Perubahan";
+    } else {
+      modalTitle.textContent = "🎯 Tambah Target";
+      modalSub.textContent = "Tentukan nama, nominal target, dan nominal yang sudah terkumpul.";
+      submitBtn.textContent = "Simpan Target";
+    }
+    modal.open();
+  }
 
   /** Nominal dari input "Rp" yang diformat ("1.250.000" -> 1250000). */
   function readAmount(input) {
@@ -1952,9 +1987,23 @@ function setupGoalEditor() {
   fieldDeadline.addEventListener("input", () => fieldDeadline.setCustomValidity(""));
   fieldDeadline.addEventListener("change", () => fieldDeadline.setCustomValidity(""));
 
-  document.getElementById("btn-add-goal").addEventListener("click", () => {
-    resetForm();
-    modal.open();
+  document.getElementById("btn-add-goal").addEventListener("click", () => openGoalModal("add"));
+
+  // Tombol Edit/Hapus di tiap card (daftar sering dirender ulang -> delegasi).
+  document.getElementById("goal-list").addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-action]");
+    if (!btn) return;
+    const id = Number(btn.dataset.id);
+    const goal = financeData.goals.find((g) => g.id === id);
+    if (!goal) {
+      // Sudah hilang (mis. dihapus di tab lain) — jangan buka form untuk
+      // data yang tidak ada; kabari dan segarkan daftar.
+      renderGoalsPage();
+      showGoalsFeedback("Target tidak ditemukan, mungkin sudah dihapus.", "error");
+      return;
+    }
+    if (btn.dataset.action === "edit-goal") openGoalModal("edit", goal);
+    else if (btn.dataset.action === "delete-goal") openDeleteConfirm(goal);
   });
 
   form.addEventListener("submit", (e) => {
@@ -1988,12 +2037,31 @@ function setupGoalEditor() {
 
     if (!form.reportValidity()) return; // fokus & pesan ke field pertama yang gagal
 
-    // ---- 2. Batas jumlah & penjaga data ----
-    if (financeData.goals.length >= GOAL_LIMIT) {
+    // ---- 2. Mode edit: target lama harus masih ada ----
+    const editId = fieldId.value ? Number(fieldId.value) : null;
+    const editIndex = editId === null ? -1 : financeData.goals.findIndex((g) => g.id === editId);
+    if (editId !== null && editIndex < 0) {
+      // Datanya sudah hilang (mis. dihapus dari tab lain) — tutup dengan
+      // aman, jangan membuat target baru dari isian form edit.
+      modal.close();
+      renderGoalsPage();
+      showGoalsFeedback("Target tidak ditemukan, mungkin sudah dihapus.", "error");
+      return;
+    }
+    const previous = editIndex >= 0 ? financeData.goals[editIndex] : null;
+
+    // ---- 3. Batas jumlah (hanya saat menambah) & penjaga data ----
+    if (!previous && financeData.goals.length >= GOAL_LIMIT) {
       setStatus(`Batas maksimal ${GOAL_LIMIT} target sudah tercapai.`);
       return;
     }
-    const goal = normalizeGoal({ id: nextGoalId(), name, target, saved, deadline, createdAt: toIsoDate(new Date()) });
+    // Edit: id & createdAt diambil dari target lama, bukan dari form —
+    // yang boleh berubah hanya name, target, saved, deadline.
+    const goal = normalizeGoal(
+      previous
+        ? { id: previous.id, name, target, saved, deadline, createdAt: previous.createdAt }
+        : { id: nextGoalId(), name, target, saved, deadline, createdAt: toIsoDate(new Date()) }
+    );
     if (!goal) {
       // Seharusnya tidak terjadi setelah validasi di atas; jaga-jaga supaya
       // data yang melanggar aturan G-1 tidak pernah masuk ke daftar.
@@ -2001,23 +2069,86 @@ function setupGoalEditor() {
       return;
     }
 
-    // ---- 3. Simpan: masuk memori -> tulis storage; gagal tulis = batalkan ----
+    // ---- 4. Simpan: masuk memori -> tulis storage; gagal tulis = rollback ----
     submitBtn.disabled = true;
-    financeData.goals.unshift(goal); // terbaru di atas, seperti transaksi
+    if (previous) financeData.goals[editIndex] = goal; // posisi tetap, objek diganti
+    else financeData.goals.unshift(goal); // terbaru di atas, seperti transaksi
     if (!saveGoals()) {
-      financeData.goals.shift(); // jangan mengklaim tersimpan; daftar lama tetap utuh
+      if (previous) financeData.goals[editIndex] = previous; // kembalikan objek lama
+      else financeData.goals.shift(); // jangan mengklaim tersimpan; daftar lama tetap utuh
       submitBtn.disabled = false;
       setStatus("Target tidak bisa disimpan — penyimpanan browser penuh atau tidak tersedia. Coba lagi.");
       return;
     }
 
-    // ---- 4. Sukses: render ulang, tutup (form di-reset lewat onClose), kabari ----
+    // ---- 5. Sukses: render ulang, tutup (form di-reset lewat onClose), kabari ----
     renderGoalsPage();
     modal.close();
-    const message = getGoalStatus(goal).key === "done"
-      ? `Target "${goal.name}" tersimpan — sudah tercapai 🎉`
-      : `Target "${goal.name}" tersimpan.`;
+    const done = getGoalStatus(goal).key === "done";
+    let message;
+    if (previous) message = done ? `Perubahan "${goal.name}" tersimpan — target tercapai 🎉` : `Perubahan "${goal.name}" tersimpan.`;
+    else message = done ? `Target "${goal.name}" tersimpan — sudah tercapai 🎉` : `Target "${goal.name}" tersimpan.`;
     showGoalsFeedback(message);
+  });
+
+  // ---------- Hapus target (konfirmasi custom, bukan window.confirm) ----------
+  const confirmOverlay = document.getElementById("goal-confirm-overlay");
+  const confirmStatus = document.getElementById("goal-confirm-status");
+  const confirmBtn = document.getElementById("btn-goal-confirm-delete");
+  let pendingDeleteId = null;
+
+  function setConfirmStatus(text) {
+    confirmStatus.textContent = text;
+    confirmStatus.dataset.type = "error";
+    confirmStatus.hidden = !text;
+  }
+
+  const confirmModal = createModalController(confirmOverlay, {
+    onClose: () => {
+      pendingDeleteId = null; // Batal/Escape/klik luar: tidak ada yang berubah
+      setConfirmStatus("");
+      confirmBtn.disabled = false;
+    },
+  });
+
+  function openDeleteConfirm(goal) {
+    pendingDeleteId = goal.id;
+    document.getElementById("goal-confirm-title").textContent = `Yakin ingin menghapus target "${goal.name}"?`;
+    document.getElementById("goal-confirm-text").textContent = goal.saved > 0
+      ? `${formatRupiah(goal.saved)} yang tercatat terkumpul dari ${formatRupiah(goal.target)} akan ikut hilang dari daftar. Tindakan ini tidak bisa dibatalkan.`
+      : `Target ${formatRupiah(goal.target)} ini akan dihapus dari daftar. Tindakan ini tidak bisa dibatalkan.`;
+    setConfirmStatus("");
+    confirmModal.open();
+  }
+
+  confirmBtn.addEventListener("click", () => {
+    if (pendingDeleteId === null) return;
+    const index = financeData.goals.findIndex((g) => g.id === pendingDeleteId);
+    if (index < 0) {
+      confirmModal.close();
+      renderGoalsPage();
+      showGoalsFeedback("Target tidak ditemukan, mungkin sudah dihapus.", "error");
+      return;
+    }
+    // Hapus HANYA berdasarkan id; target lain tidak disentuh. Konfirmasi
+    // tetap terbuka sampai penulisan benar-benar berhasil.
+    confirmBtn.disabled = true;
+    const [removed] = financeData.goals.splice(index, 1);
+    if (!saveGoals()) {
+      financeData.goals.splice(index, 0, removed); // kembalikan ke posisi semula
+      confirmBtn.disabled = false;
+      setConfirmStatus("Target tidak bisa dihapus — penyimpanan browser tidak bisa ditulis. Coba lagi.");
+      return;
+    }
+    pendingDeleteId = null;
+    renderGoalsPage();
+    confirmModal.close();
+    // Tombol Hapus pemicunya ikut hilang bersama card-nya, jadi tidak ada
+    // fokus yang bisa dikembalikan — arahkan ke tombol Tambah Target supaya
+    // pengguna keyboard tidak terlempar ke awal halaman.
+    const addBtn = document.getElementById("btn-add-goal");
+    if (addBtn) addBtn.focus({ preventScroll: true });
+    showGoalsFeedback(`Target "${removed.name}" dihapus.`);
   });
 }
 

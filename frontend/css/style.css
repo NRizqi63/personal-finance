@@ -3661,6 +3661,15 @@ a:focus-visible {
   color: var(--color-primary);
 }
 
+/* Baris aksi di bawah card: Edit (ghost) + Hapus (ghost merah), rata kanan,
+   memakai .btn--xs yang sudah punya halo tap 44px. */
+.goal-card-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 10px;
+}
+
 /* Keterangan kecil di bawah field popup ("Boleh dikosongkan"). */
 .form-hint {
   margin: 6px 0 0;
