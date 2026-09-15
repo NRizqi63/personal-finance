@@ -145,6 +145,10 @@
     </div>
   </div>
 
-  <script src="js/app.js"></script>
+  <!-- JS dipisah (refactor tahap 3): core.js (data, helper target, modal,
+       dispatcher) -> goals.js (initGoalsPage). Urutan penting; jangan memuat
+       app.js bersama file ini. -->
+  <script src="js/core.js"></script>
+  <script src="js/goals.js"></script>
 </body>
 </html>
