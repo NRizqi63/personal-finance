@@ -3647,6 +3647,28 @@ a:focus-visible {
   padding: 22px 16px;
 }
 
+.goal-empty strong {
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+/* Tombol "Tambah Target" di bawah daftar — tampilan sama dengan tombol
+   Tambah Kategori di budget.html (dashed, warna primer). */
+.btn-add-goal {
+  width: 100%;
+  margin-top: 12px;
+  border-style: dashed;
+  color: var(--color-primary);
+}
+
+/* Keterangan kecil di bawah field popup ("Boleh dikosongkan"). */
+.form-hint {
+  margin: 6px 0 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--color-text-muted);
+}
+
 @media (max-width: 360px) {
   /* Nominal panjang (Rp10.000.000) + persen: beri ruang bernapas. */
   .goal-card .category-budget-row {

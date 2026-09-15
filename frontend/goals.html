@@ -10,11 +10,11 @@
   <link rel="stylesheet" href="css/style.css" />
 </head>
 <!-- data-page="goals" -> js/app.js menjalankan initGoalsPage().
-     Halaman daftar Target Keuangan (G-2): membaca financeData.goals dari
-     localStorage lewat loadGoals() dan menampilkannya lewat helper G-1
-     (sortGoals, getGoalStatus, getGoalProgress, describeDeadline). Satu
-     app.js & style.css dipakai semua halaman. Tahap ini HANYA tampilan —
-     tambah/edit/hapus target menyusul di tahap berikutnya. -->
+     Halaman Target Keuangan: daftar target dari financeData.goals (G-2) +
+     popup Tambah Target (G-3A, setupGoalEditor()). Semua angka lewat helper
+     G-1 (sortGoals, getGoalStatus, normalizeGoal, nextGoalId). Satu app.js &
+     style.css dipakai semua halaman. Edit/hapus target menyusul di tahap
+     berikutnya. -->
 <body data-page="goals">
   <div class="app app--page">
 
@@ -45,13 +45,72 @@
          akhir). Belum ada target -> empty state (renderGoalList()). -->
     <section class="goals" aria-label="Daftar target">
       <h2 class="section-title">Daftar Target <span class="section-title-sub" id="goals-count-sub"></span></h2>
+      <!-- Status hasil aksi target (diisi showGoalsFeedback()), pola yang
+           sama dengan #transaction-feedback di dashboard. -->
+      <p class="settings-feedback transaction-feedback" id="goals-feedback" role="status" aria-live="polite" hidden></p>
       <div class="category-list goal-list" id="goal-list">
         <!-- Diisi otomatis oleh js/app.js melalui renderGoalList() -->
       </div>
+      <!-- Satu-satunya pemicu popup Tambah Target (setupGoalEditor()). -->
+      <button type="button" class="btn btn--ghost btn--block btn-add-goal" id="btn-add-goal">
+        <span class="btn-icon" aria-hidden="true">+</span> Tambah Target
+      </button>
       <!-- Kejujuran data: nominal terkumpul tidak dihitung dari transaksi. -->
       <p class="goals-hint" id="goals-hint" hidden>ℹ️ Nominal terkumpul dicatat manual dan belum terhubung dengan saldo atau transaksi.</p>
     </section>
 
+  </div>
+
+  <!-- MODAL: TAMBAH TARGET (setupGoalEditor() di app.js). Struktur & kelas
+       sama dengan popup kategori di budget.html; dikelola
+       createModalController() -> fokus awal, focus trap, Escape, klik
+       overlay, scroll lock, dan pengembalian fokus semuanya dari sana. -->
+  <div class="modal-overlay" id="goal-modal-overlay" hidden>
+    <div class="modal modal--form" role="dialog" aria-modal="true" aria-labelledby="goal-modal-title">
+      <div class="modal-header">
+        <h2 id="goal-modal-title">🎯 Tambah Target</h2>
+        <button type="button" class="modal-close" data-modal-close aria-label="Tutup">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M18 6 6 18" />
+            <path d="m6 6 12 12" />
+          </svg>
+        </button>
+      </div>
+      <p class="modal-sub">Tentukan nama, nominal target, dan nominal yang sudah terkumpul.</p>
+      <form id="goal-form" novalidate>
+        <div class="form-field">
+          <label for="field-goal-name">Nama target</label>
+          <input type="text" id="field-goal-name" name="name" placeholder="Contoh: Dana Darurat" maxlength="40" autocomplete="off" required />
+        </div>
+        <div class="form-field">
+          <label for="field-goal-target">Nominal target</label>
+          <div class="input-prefix">
+            <span class="input-prefix-label">Rp</span>
+            <input type="text" inputmode="numeric" id="field-goal-target" name="target" placeholder="0" required />
+          </div>
+        </div>
+        <div class="form-field">
+          <label for="field-goal-saved">Sudah terkumpul</label>
+          <div class="input-prefix">
+            <span class="input-prefix-label">Rp</span>
+            <input type="text" inputmode="numeric" id="field-goal-saved" name="saved" placeholder="0" />
+          </div>
+          <p class="form-hint">Kosongkan kalau belum ada. Dicatat manual, tidak mengurangi saldo.</p>
+        </div>
+        <div class="form-field">
+          <label for="field-goal-deadline">Tanggal target</label>
+          <input type="date" id="field-goal-deadline" name="deadline" />
+          <p class="form-hint">Boleh dikosongkan.</p>
+        </div>
+        <!-- Kegagalan menyimpan (bukan validasi field) ditampilkan di sini,
+             di dalam popup, supaya user tidak kehilangan isian. -->
+        <p class="settings-feedback" id="goal-modal-status" role="status" aria-live="polite" hidden></p>
+        <div class="modal-actions">
+          <button type="button" class="btn btn--ghost" data-modal-close>Batal</button>
+          <button type="submit" class="btn btn--primary" id="goal-modal-submit">Simpan Target</button>
+        </div>
+      </form>
+    </div>
   </div>
 
   <script src="js/app.js"></script>

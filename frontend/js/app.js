@@ -416,12 +416,16 @@ function loadGoals() {
   }
 }
 
-/** Simpan financeData.goals saat ini ke localStorage (key sendiri). */
+/** Simpan financeData.goals saat ini ke localStorage (key sendiri).
+ * Mengembalikan true kalau benar-benar tertulis, false kalau storage tidak
+ * tersedia/penuh — pemanggil (form Tambah Target) memakai ini untuk TIDAK
+ * mengklaim "tersimpan" pada sesuatu yang cuma ada di memori. */
 function saveGoals() {
   try {
     localStorage.setItem(GOALS_STORAGE_KEY, JSON.stringify(financeData.goals));
+    return true;
   } catch (err) {
-    // localStorage tidak tersedia — perubahan tetap berlaku di memori sesi ini.
+    return false; // localStorage tidak tersedia — data tetap ada di memori sesi ini.
   }
 }
 
@@ -1815,7 +1819,7 @@ function renderGoalList(today = new Date()) {
   if (!goals.length) {
     if (countSub) countSub.textContent = "";
     if (hint) hint.hidden = true;
-    list.innerHTML = `<p class="category-empty goal-empty">🎯 Belum ada target keuangan.<br>Target seperti dana darurat, beli laptop, atau liburan akan tampil di sini.</p>`;
+    list.innerHTML = `<p class="category-empty goal-empty">🎯 Belum ada target keuangan.<br>Tekan <strong>Tambah Target</strong> untuk membuat yang pertama — misalnya dana darurat, beli laptop, atau liburan.</p>`;
     return;
   }
 
@@ -1868,6 +1872,153 @@ function renderGoalsPage() {
   const today = new Date();
   renderGoalsSummary(today);
   renderGoalList(today);
+}
+
+/** Pesan singkat hasil aksi target (pola showTransactionFeedback): elemen
+ * role="status" di goals.html; halaman lain tidak punya -> no-op. Hanya
+ * dipanggil SETELAH operasi selesai, bukan untuk validasi field. */
+let goalsFeedbackTimer = 0;
+function showGoalsFeedback(text, type = "success") {
+  const el = document.getElementById("goals-feedback");
+  if (!el) return; // halaman ini tidak punya area status
+  clearTimeout(goalsFeedbackTimer);
+  el.textContent = text;
+  el.dataset.type = type;
+  el.hidden = false;
+  if (type === "success") goalsFeedbackTimer = setTimeout(() => { el.hidden = true; }, 3000);
+}
+
+/**
+ * goals.html — G-3A: popup Tambah Target. Modal dikelola
+ * createModalController() (fokus awal, focus trap, Escape, klik overlay,
+ * scroll lock, kembalikan fokus). Validasi per field memakai
+ * setCustomValidity() + reportValidity() seperti form transaksi & kategori;
+ * penjaga terakhir sebelum disimpan tetap normalizeGoal() supaya aturan data
+ * G-1 tidak bisa dilewati lewat form. Tidak ada yang ditulis ke
+ * financeData.goals maupun localStorage sebelum semua validasi lolos.
+ */
+function setupGoalEditor() {
+  const overlay = document.getElementById("goal-modal-overlay");
+  if (!overlay) return; // bukan di halaman target
+
+  const form = document.getElementById("goal-form");
+  const fieldName = document.getElementById("field-goal-name");
+  const fieldTarget = document.getElementById("field-goal-target");
+  const fieldSaved = document.getElementById("field-goal-saved");
+  const fieldDeadline = document.getElementById("field-goal-deadline");
+  const status = document.getElementById("goal-modal-status");
+  const submitBtn = document.getElementById("goal-modal-submit");
+  const fields = [fieldName, fieldTarget, fieldSaved, fieldDeadline];
+
+  function setStatus(text, type = "error") {
+    status.textContent = text;
+    status.dataset.type = type;
+    status.hidden = !text;
+  }
+
+  function resetForm() {
+    form.reset();
+    fields.forEach((field) => field.setCustomValidity(""));
+    setStatus("");
+    submitBtn.disabled = false;
+  }
+
+  const modal = createModalController(overlay, { onClose: resetForm });
+
+  /** Nominal dari input "Rp" yang diformat ("1.250.000" -> 1250000). */
+  function readAmount(input) {
+    const digits = input.value.replace(/\D/g, "");
+    return digits ? Number(digits) : 0;
+  }
+
+  /** Pesan untuk teks nominal mentah: kosong (kalau wajib), ada minus, atau
+   * karakter selain angka/pemisah ribuan -> tolak dengan kalimat yang jelas
+   * (aturan yang sama dengan budget kategori). */
+  function amountError(raw, label, { required }) {
+    if (!raw) return required ? `Isi ${label}.` : "";
+    if (/-/.test(raw) || !/^[\d.]+$/.test(raw)) return `${label[0].toUpperCase()}${label.slice(1)} harus berupa angka positif, tanpa tanda minus atau huruf.`;
+    return "";
+  }
+
+  // Format nominal live saat diketik + bersihkan pesan validasi field yang
+  // sedang diperbaiki, supaya tidak ada pesan lama yang menempel.
+  [fieldTarget, fieldSaved].forEach((input) => {
+    input.addEventListener("input", () => {
+      input.value = formatAmountDigits(input.value);
+      input.setCustomValidity("");
+    });
+  });
+  fieldName.addEventListener("input", () => fieldName.setCustomValidity(""));
+  fieldDeadline.addEventListener("input", () => fieldDeadline.setCustomValidity(""));
+  fieldDeadline.addEventListener("change", () => fieldDeadline.setCustomValidity(""));
+
+  document.getElementById("btn-add-goal").addEventListener("click", () => {
+    resetForm();
+    modal.open();
+  });
+
+  form.addEventListener("submit", (e) => {
+    e.preventDefault();
+    setStatus("");
+
+    // ---- 1. Validasi per field (tidak ada yang disimpan sebelum semua lolos) ----
+    const name = fieldName.value.trim();
+    if (!name) fieldName.setCustomValidity("Isi nama target.");
+    else if (name.length > GOAL_NAME_MAX) fieldName.setCustomValidity(`Nama target maksimal ${GOAL_NAME_MAX} karakter.`);
+    else fieldName.setCustomValidity("");
+
+    const targetRaw = fieldTarget.value.trim();
+    const target = readAmount(fieldTarget);
+    let targetError = amountError(targetRaw, "nominal target", { required: true });
+    if (!targetError && target <= 0) targetError = "Nominal target harus lebih dari 0.";
+    fieldTarget.setCustomValidity(targetError);
+
+    // Terkumpul boleh kosong (= 0) dan boleh melebihi target (aturan G-1:
+    // menabung lebih itu sah; kartu menampilkannya sebagai "Tercapai · lebih").
+    const savedRaw = fieldSaved.value.trim();
+    const saved = readAmount(fieldSaved);
+    fieldSaved.setCustomValidity(amountError(savedRaw, "nominal terkumpul", { required: false }));
+
+    // Deadline opsional. <input type="date"> memberi "" untuk ketikan yang
+    // bukan tanggal (validity.badInput) — itu ditolak, bukan dianggap kosong.
+    // Nilainya sudah "yyyy-mm-dd" lokal, tidak lewat Date/UTC sama sekali.
+    const deadline = fieldDeadline.value;
+    if (fieldDeadline.validity.badInput || (deadline && !isValidIsoDate(deadline))) fieldDeadline.setCustomValidity("Tanggal target tidak valid.");
+    else fieldDeadline.setCustomValidity("");
+
+    if (!form.reportValidity()) return; // fokus & pesan ke field pertama yang gagal
+
+    // ---- 2. Batas jumlah & penjaga data ----
+    if (financeData.goals.length >= GOAL_LIMIT) {
+      setStatus(`Batas maksimal ${GOAL_LIMIT} target sudah tercapai.`);
+      return;
+    }
+    const goal = normalizeGoal({ id: nextGoalId(), name, target, saved, deadline, createdAt: toIsoDate(new Date()) });
+    if (!goal) {
+      // Seharusnya tidak terjadi setelah validasi di atas; jaga-jaga supaya
+      // data yang melanggar aturan G-1 tidak pernah masuk ke daftar.
+      setStatus("Data target tidak valid. Periksa kembali isiannya.");
+      return;
+    }
+
+    // ---- 3. Simpan: masuk memori -> tulis storage; gagal tulis = batalkan ----
+    submitBtn.disabled = true;
+    financeData.goals.unshift(goal); // terbaru di atas, seperti transaksi
+    if (!saveGoals()) {
+      financeData.goals.shift(); // jangan mengklaim tersimpan; daftar lama tetap utuh
+      submitBtn.disabled = false;
+      setStatus("Target tidak bisa disimpan — penyimpanan browser penuh atau tidak tersedia. Coba lagi.");
+      return;
+    }
+
+    // ---- 4. Sukses: render ulang, tutup (form di-reset lewat onClose), kabari ----
+    renderGoalsPage();
+    modal.close();
+    const message = getGoalStatus(goal).key === "done"
+      ? `Target "${goal.name}" tersimpan — sudah tercapai 🎉`
+      : `Target "${goal.name}" tersimpan.`;
+    showGoalsFeedback(message);
+  });
 }
 
 /** Isi popup Financial Check-in dari data aktual (saldo, budget, goal, insight, status). */
@@ -3596,6 +3747,7 @@ function initBudgetPage() {
  */
 function initGoalsPage() {
   renderGoalsPage();
+  setupGoalEditor();
 }
 
 /* ---------- Data & Backup: export (Settings V1 Tahap 3A) ----------
