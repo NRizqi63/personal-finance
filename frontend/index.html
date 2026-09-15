@@ -258,6 +258,11 @@
     </div>
   </div>
 
-  <script src="js/app.js"></script>
+  <!-- JS dipisah (refactor tahap 2): core.js (data, helper, modal, dispatcher)
+       -> transactions-shared.js (modal transaksi & refresh) -> dashboard.js
+       (initDashboard). Urutan penting; jangan memuat app.js bersama file ini. -->
+  <script src="js/core.js"></script>
+  <script src="js/transactions-shared.js"></script>
+  <script src="js/dashboard.js"></script>
 </body>
 </html>
