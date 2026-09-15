@@ -91,6 +91,10 @@
 
   </div>
 
-  <script src="js/app.js"></script>
+  <!-- JS dipisah (refactor tahap 4): core.js (data, helper rentang bulan,
+       komponen transaksi, dispatcher) -> analytics.js (initAnalyticsPage).
+       Urutan penting; jangan memuat app.js bersama file ini. -->
+  <script src="js/core.js"></script>
+  <script src="js/analytics.js"></script>
 </body>
 </html>
