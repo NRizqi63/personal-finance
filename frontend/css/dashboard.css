@@ -4,9 +4,9 @@
    di dashboard. Catatan: .budget-card, grid desktop .app, dan modal Financial
    Check-in sengaja TETAP di base.css — dipakai halaman lain / bergantung pada
    urutan cascade (.modal--checkin vs .modal).
-   Dipisah dari style.css (refactor tahap 1). Isi rule disalin apa adanya dan
-   urutan aslinya dipertahankan; style.css masih dimuat halaman lain
-   (budget/transactions/settings) sampai tahap berikutnya.
+   Dipisah dari style.css lama (refactor tahap 1 & 6). Isi rule disalin apa
+   adanya dan urutan aslinya dipertahankan. Setiap halaman memuat base.css
+   lalu file halamannya.
    ========================================================= */
 
 /* =========================================================
@@ -137,7 +137,7 @@
    `svgEl.hidden = false` terbukti TIDAK melepas atribut `hidden`-nya
    (beda dari elemen HTML biasa), jadi ikon-eye dan ikon-eye-off bisa
    tampil BERSAMAAN alih-alih bergantian. Dipakai class biasa
-   (is-hidden, di-toggle lewat classList di app.js) sebagai gantinya —
+   (is-hidden, di-toggle lewat classList di dashboard.js) sebagai gantinya —
    classList tidak punya ambiguitas semacam ini di browser manapun. */
 .icon-eye.is-hidden,
 .icon-eye-off.is-hidden {
@@ -227,7 +227,7 @@
   letter-spacing: -0.02em;
 }
 
-/* Masking hide/show saldo ("••••••••", U+2022 × 8) — dipasang app.js ke
+/* Masking hide/show saldo ("••••••••", U+2022 × 8) — dipasang dashboard.js ke
    #balance-value, #income-value, #expense-value saat isBalanceVisible=false.
    Ukuran/berat/warna tetap ikut rule elemen masing-masing. */
 .summary-value.is-masked,

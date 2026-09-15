@@ -1,0 +1,17 @@
+/* =========================================================
+   BUDGET (budget.html)
+   Tombol Tambah Kategori. Card kategori, progress, navigator bulan, popup
+   budget/kategori, dan konfirmasi hapus semuanya komponen bersama di base.css.
+   Dipisah dari style.css lama (refactor tahap 1 & 6). Isi rule disalin apa
+   adanya dan urutan aslinya dipertahankan. Setiap halaman memuat base.css
+   lalu file halamannya.
+   ========================================================= */
+
+/* "+ Tambah Kategori" di bawah daftar kategori: pil ghost putus-putus
+   supaya terbaca sebagai aksi tambah, bukan card kategori. */
+.btn-add-category {
+  width: 100%;
+  margin-top: 12px;
+  border-style: dashed;
+  color: var(--color-primary);
+}

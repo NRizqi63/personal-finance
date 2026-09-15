@@ -1,10 +1,10 @@
 /* =========================================================
    ANALYTICS (analytics.html)
-   Chart batang per tanggal, detail, breakdown kategori, insight,
-   navigator bulan (tombol bulat + judul), list-more.
-   Dipisah dari style.css (refactor tahap 1). Isi rule disalin apa adanya dan
-   urutan aslinya dipertahankan; style.css masih dimuat halaman lain
-   (budget/transactions/settings) sampai tahap berikutnya.
+   Chart batang per tanggal, detail, breakdown kategori, insight.
+   Navigator bulan & list-more ada di base.css (dipakai halaman lain juga).
+   Dipisah dari style.css lama (refactor tahap 1 & 6). Isi rule disalin apa
+   adanya dan urutan aslinya dipertahankan. Setiap halaman memuat base.css
+   lalu file halamannya.
    ========================================================= */
 
 /* =========================================================
@@ -326,121 +326,13 @@
 .insight-item[data-level="good"] { border-left-color: var(--color-income-text); }
 .insight-item[data-level="neutral"] { border-left-color: var(--color-border); }
 
-.calendar-title {
-  font-size: 14.5px;
-  font-weight: 600;
-  color: var(--color-text);
-  text-align: center;
-  white-space: nowrap;
-}
-
-.calendar-nav {
-  position: relative;
-  width: 36px;
-  height: 36px;
-  flex-shrink: 0;
-  display: grid;
-  place-items: center;
-  border: 1px solid var(--color-border);
-  border-radius: 999px;
-  background: var(--color-surface);
-  color: var(--color-text);
-  transition: background-color 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
-}
-
-.calendar-nav::before {
-  content: "";
-  position: absolute;
-  inset: -4px; /* area tap efektif 44px */
-}
-
-/* Navigator bulan di budget.html: memakai tombol bulat & judul yang sama
-   dengan kalender, plus tombol "Bulan Ini" di kanan. Judul mengisi sisa
-   ruang (rata tengah) dan tidak pernah terpotong (nowrap + wrap baris). */
-.budget-period-nav {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.budget-period-title {
-  flex: 1 1 auto;
-  min-width: 0;
-}
-
-.budget-period-today {
-  margin-left: auto;
-}
-
-.budget-period-hint {
-  margin: 8px 0 0;
-  padding: 0 2px;
-  font-size: 12px;
-  line-height: 1.45;
-  color: var(--color-text-muted);
-}
-
-.calendar-nav.is-pressed,
-.calendar-day:not(.is-selected).is-pressed {
-  background: var(--color-primary-soft);
-}
-
 .bar-col.is-pressed .bar-fill {
   background: var(--color-primary-dark);
-}
-
-.section-hint {
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--color-primary);
-  background: var(--color-primary-soft);
-  padding: 3px 9px;
-  border-radius: 999px;
-  white-space: nowrap;
-}
-
-.section-hint[hidden] {
-  display: none;
-}
-
-/* "+ N transaksi lainnya" + tombol perluas/ringkas di bawah daftar. */
-.list-more {
-  margin-top: 10px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.list-more-note {
-  text-align: center;
-  font-size: 12.5px;
-  font-weight: 500;
-  color: var(--color-text-muted);
-}
-
-.list-more[hidden],
-.list-more-note[hidden] {
-  display: none;
-}
-
-.list-more .btn {
-  width: 100%;
 }
 
 @media (min-width: 900px) {
   .bar-track {
     height: 150px;
     max-width: 44px;
-  }
-}
-
-@media (max-width: 360px) {
-  /* Navigator bulan budget: "Bulan Ini" turun ke baris kedua (rata kanan)
-     supaya ‹ Bulan › tetap satu baris utuh di 320px. */
-  .budget-period-today {
-    flex-basis: 100%;
-    max-width: max-content;
-    margin-left: auto;
   }
 }

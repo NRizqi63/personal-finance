@@ -7,7 +7,8 @@
  *   - komponen render bersama (sapaan, card budget, daftar transaksi, feedback)
  *   - tumpukan modal + focus trap + press feedback + dispatcher DOMContentLoaded
  * Harus dimuat PERTAMA (sebelum transactions-shared.js dan file halaman).
- * Jangan dimuat bersama app.js di halaman yang sama (deklarasi const/let ganda).
+ * app.js lama sudah dihapus (refactor tahap 6); file ini dan file halaman
+ * tidak boleh dimuat dua kali di halaman yang sama (deklarasi const/let ganda).
  */
 
 /* =========================================================

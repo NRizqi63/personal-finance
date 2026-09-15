@@ -2,9 +2,9 @@
    GOALS (goals.html)
    Halaman daftar target: intro, chip status target, card target, baris
    aksi, empty state, tombol Tambah Target, hint field popup.
-   Dipisah dari style.css (refactor tahap 1). Isi rule disalin apa adanya dan
-   urutan aslinya dipertahankan; style.css masih dimuat halaman lain
-   (budget/transactions/settings) sampai tahap berikutnya.
+   Dipisah dari style.css lama (refactor tahap 1 & 6). Isi rule disalin apa
+   adanya dan urutan aslinya dipertahankan. Setiap halaman memuat base.css
+   lalu file halamannya.
    ========================================================= */
 
 /* =========================================================

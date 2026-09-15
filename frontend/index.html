@@ -34,7 +34,7 @@
               <h3>Notifikasi</h3>
             </div>
             <ul class="notification-list" id="notification-list">
-              <!-- Diisi otomatis oleh js/app.js melalui renderNotifications() -->
+              <!-- Diisi otomatis oleh js/dashboard.js melalui renderNotifications() -->
             </ul>
           </div>
         </div>
@@ -107,7 +107,7 @@
         <a class="link-see-all" href="budget.html">Lihat Detail <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14" /><path d="m12 5 7 7-7 7" /></svg></a>
       </div>
       <div class="budget-card" id="budget-card">
-        <!-- Diisi otomatis oleh js/app.js melalui renderBudgetSummary() -->
+        <!-- Diisi otomatis oleh js/core.js melalui renderBudgetSummary() -->
       </div>
     </section>
 
@@ -125,7 +125,7 @@
         <a class="link-see-all" id="link-goals-all" href="goals.html" hidden>Lihat Semua Target <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14" /><path d="m12 5 7 7-7 7" /></svg></a>
       </div>
       <div class="budget-card goals-card" id="goals-card">
-        <!-- Diisi otomatis oleh js/app.js melalui renderGoalsDashboard() -->
+        <!-- Diisi otomatis oleh js/dashboard.js melalui renderGoalsDashboard() -->
       </div>
     </section>
 
@@ -163,14 +163,14 @@
       <!-- Status hasil CRUD transaksi (diisi showTransactionFeedback()). -->
       <p class="settings-feedback transaction-feedback" id="transaction-feedback" role="status" aria-live="polite" hidden></p>
       <ul class="transaction-list" id="transaction-list">
-        <!-- Diisi otomatis oleh js/app.js melalui renderRecentTransactions() -->
+        <!-- Diisi otomatis oleh js/dashboard.js melalui renderRecentTransactions() -->
       </ul>
     </section>
 
   </div>
 
   <!-- MODAL: FINANCIAL CHECK-IN
-       Tampil sekali per sesi saat dashboard dibuka (setupCheckin() di app.js).
+       Tampil sekali per sesi saat dashboard dibuka (setupCheckin() di dashboard.js).
        Isinya dirender dari data aktual: saldo, pemasukan/pengeluaran, budget,
        goal, insight mingguan, dan status keuangan rule-based. Menggantikan
        section "Insight Keuangan" & "Pengingat Goals" yang dulu ada di
@@ -187,7 +187,7 @@
         </button>
       </div>
       <div class="checkin-body" id="checkin-body">
-        <!-- Diisi otomatis oleh js/app.js melalui renderCheckin() -->
+        <!-- Diisi otomatis oleh js/dashboard.js melalui renderCheckin() -->
       </div>
       <div class="modal-actions modal-actions--single">
         <button type="button" class="btn btn--primary btn--block" id="checkin-cta">✓ Mengerti, Lanjut ke Dashboard</button>
@@ -260,7 +260,7 @@
 
   <!-- JS dipisah (refactor tahap 2): core.js (data, helper, modal, dispatcher)
        -> transactions-shared.js (modal transaksi & refresh) -> dashboard.js
-       (initDashboard). Urutan penting; jangan memuat app.js bersama file ini. -->
+       (initDashboard). Urutan penting. app.js lama sudah dihapus (refactor tahap 6). -->
   <script src="js/core.js"></script>
   <script src="js/transactions-shared.js"></script>
   <script src="js/dashboard.js"></script>

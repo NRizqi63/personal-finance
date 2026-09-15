@@ -7,9 +7,12 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="css/style.css" />
+  <!-- CSS dipisah (refactor tahap 6): base.css = token/reset/komponen bersama,
+       lalu gaya khusus halaman ini. Urutan penting: base dulu. -->
+  <link rel="stylesheet" href="css/base.css" />
+  <link rel="stylesheet" href="css/settings.css" />
 </head>
-<!-- data-page="settings" -> js/app.js menjalankan initSettingsPage().
+<!-- data-page="settings" -> dispatcher di js/core.js menjalankan initSettingsPage() (js/settings.js).
      Settings V1: Profil Akun (nama panggilan) & Preferensi Aplikasi disimpan
      ke localStorage["financeData.settings"] (key terpisah; transaksi &
      budget tidak disentuh). Pengaturan Keuangan = tautan ke budget.html.
@@ -139,7 +142,7 @@
           <input type="file" id="import-file" accept=".json,application/json" hidden />
           <button type="button" class="btn btn--ghost btn--xs settings-row-action" id="btn-import-pick">Pilih File…</button>
         </div>
-        <!-- Ringkasan isi file hasil pemeriksaan (diisi app.js lewat textContent). -->
+        <!-- Ringkasan isi file hasil pemeriksaan (diisi settings.js lewat textContent). -->
         <dl class="settings-meta" id="import-summary" hidden></dl>
         <!-- SATU area status untuk seluruh aksi data (export, import, reset):
              pesan terbaru selalu menggantikan yang lama, tidak menumpuk. -->
@@ -234,7 +237,7 @@
 
   </div>
 
-  <!-- MODAL: KONFIRMASI IMPORT BACKUP (setupSettingsImport() di app.js).
+  <!-- MODAL: KONFIRMASI IMPORT BACKUP (setupSettingsImport() di settings.js).
        Muncul setelah file lolos pemeriksaan; sampai tombol "Timpa Data"
        ditekan, tidak ada satu pun data yang ditulis. Semua angka di dalamnya
        diisi lewat textContent, tidak pernah innerHTML. -->
@@ -287,7 +290,7 @@
 
   <!-- JS dipisah (refactor tahap 5C): core.js (data, loader/saver, modal,
        dispatcher) -> settings.js (export/import/reset, profil & preferensi,
-       initSettingsPage). Urutan penting; jangan memuat app.js bersama file ini. -->
+       initSettingsPage). Urutan penting. app.js lama sudah dihapus (refactor tahap 6). -->
   <script src="js/core.js"></script>
   <script src="js/settings.js"></script>
 </body>

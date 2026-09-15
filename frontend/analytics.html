@@ -12,7 +12,7 @@
   <link rel="stylesheet" href="css/base.css" />
   <link rel="stylesheet" href="css/analytics.css" />
 </head>
-<!-- data-page="analytics" -> js/app.js menjalankan initAnalyticsPage().
+<!-- data-page="analytics" -> dispatcher di js/core.js menjalankan initAnalyticsPage() (js/analytics.js).
      Halaman untuk memahami pola penggunaan uang: ringkasan, chart per waktu &
      per kategori, dan Insight Keuangan. Semua angka dihitung dari transaksi +
      budget yang sama di localStorage (tidak ada dataset terpisah); chart
@@ -34,7 +34,7 @@
 
     <!-- NAVIGATOR BULAN — periode yang dianalisis: ‹ Bulan › + "Bulan Ini".
          Struktur & kelasnya sama persis dengan navigator di budget.html.
-         Hanya state halaman (analyticsViewDate di app.js), tidak disimpan ke
+         Hanya state halaman (analyticsViewDate di analytics.js), tidak disimpan ke
          localStorage; bulan masa depan tidak bisa dipilih (tombol › disabled). -->
     <section class="budget-period" aria-label="Periode analisis">
       <div class="budget-period-nav">
@@ -53,7 +53,7 @@
          perubahan vs bulan sebelumnya (renderAnalyticsSummary()) -->
     <section class="analytics-summary" aria-label="Ringkasan analisis">
       <div class="stat-grid" id="analytics-summary">
-        <!-- Diisi otomatis oleh js/app.js -->
+        <!-- Diisi otomatis oleh js/analytics.js melalui renderAnalyticsSummary() -->
       </div>
     </section>
 
@@ -64,10 +64,10 @@
     <section class="analytics-time" aria-label="Pengeluaran per tanggal">
       <h2 class="section-title">Pengeluaran per Tanggal <span class="section-title-sub" id="time-chart-sub"></span></h2>
       <div class="budget-card chart-card" id="time-chart">
-        <!-- Diisi otomatis oleh js/app.js melalui renderTimeChart() -->
+        <!-- Diisi otomatis oleh js/analytics.js melalui renderTimeChart() -->
       </div>
       <div class="budget-card chart-detail" id="chart-detail">
-        <!-- Diisi otomatis oleh js/app.js melalui renderChartDetail() -->
+        <!-- Diisi otomatis oleh js/analytics.js melalui renderChartDetail() -->
       </div>
     </section>
 
@@ -75,7 +75,7 @@
     <section class="analytics-category" aria-label="Pengeluaran per kategori">
       <h2 class="section-title">Pengeluaran per Kategori</h2>
       <div class="budget-card chart-card" id="category-chart">
-        <!-- Diisi otomatis oleh js/app.js melalui renderCategoryChart() -->
+        <!-- Diisi otomatis oleh js/analytics.js melalui renderCategoryChart() -->
       </div>
     </section>
 
@@ -85,7 +85,7 @@
     <section class="analytics-insight" aria-label="Insight keuangan">
       <h2 class="section-title">Insight Keuangan <span class="section-title-sub" id="insight-period-sub">bulan ini</span></h2>
       <ul class="insight-list" id="insight-list">
-        <!-- Diisi otomatis oleh js/app.js melalui renderInsights() -->
+        <!-- Diisi otomatis oleh js/analytics.js melalui renderInsights() -->
       </ul>
     </section>
 
@@ -93,7 +93,7 @@
 
   <!-- JS dipisah (refactor tahap 4): core.js (data, helper rentang bulan,
        komponen transaksi, dispatcher) -> analytics.js (initAnalyticsPage).
-       Urutan penting; jangan memuat app.js bersama file ini. -->
+       Urutan penting. app.js lama sudah dihapus (refactor tahap 6). -->
   <script src="js/core.js"></script>
   <script src="js/analytics.js"></script>
 </body>

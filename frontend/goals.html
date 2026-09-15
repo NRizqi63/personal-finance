@@ -12,12 +12,12 @@
   <link rel="stylesheet" href="css/base.css" />
   <link rel="stylesheet" href="css/goals.css" />
 </head>
-<!-- data-page="goals" -> js/app.js menjalankan initGoalsPage().
+<!-- data-page="goals" -> dispatcher di js/core.js menjalankan initGoalsPage() (js/goals.js).
      Halaman Target Keuangan: daftar target dari financeData.goals (G-2),
      popup Tambah/Edit Target + konfirmasi Hapus (G-3A/G-3B,
      setupGoalEditor()). Semua angka lewat helper G-1 (sortGoals,
-     getGoalStatus, normalizeGoal, nextGoalId). Satu app.js & style.css
-     dipakai semua halaman. -->
+     getGoalStatus, normalizeGoal, nextGoalId) di js/core.js. CSS: base.css
+     (bersama) + goals.css (halaman ini). -->
 <body data-page="goals">
   <div class="app app--page">
 
@@ -39,7 +39,7 @@
          target — empty state di daftar sudah cukup menjelaskan. -->
     <section class="goals-summary" id="goals-summary-section" aria-label="Ringkasan target" hidden>
       <div class="stat-grid" id="goals-summary">
-        <!-- Diisi otomatis oleh js/app.js melalui renderGoalsSummary() -->
+        <!-- Diisi otomatis oleh js/goals.js melalui renderGoalsSummary() -->
       </div>
     </section>
 
@@ -52,7 +52,7 @@
            sama dengan #transaction-feedback di dashboard. -->
       <p class="settings-feedback transaction-feedback" id="goals-feedback" role="status" aria-live="polite" hidden></p>
       <div class="category-list goal-list" id="goal-list">
-        <!-- Diisi otomatis oleh js/app.js melalui renderGoalList() -->
+        <!-- Diisi otomatis oleh js/goals.js melalui renderGoalList() -->
       </div>
       <!-- Satu-satunya pemicu popup Tambah Target (setupGoalEditor()). -->
       <button type="button" class="btn btn--ghost btn--block btn-add-goal" id="btn-add-goal">
@@ -64,7 +64,7 @@
 
   </div>
 
-  <!-- MODAL: TAMBAH / EDIT TARGET (setupGoalEditor() di app.js). Satu form
+  <!-- MODAL: TAMBAH / EDIT TARGET (setupGoalEditor() di goals.js). Satu form
        untuk dua mode — #field-goal-id kosong = tambah, terisi = edit (pola
        #field-id pada form transaksi). Struktur & kelas sama dengan popup
        kategori di budget.html; dikelola createModalController() -> fokus
@@ -146,8 +146,8 @@
   </div>
 
   <!-- JS dipisah (refactor tahap 3): core.js (data, helper target, modal,
-       dispatcher) -> goals.js (initGoalsPage). Urutan penting; jangan memuat
-       app.js bersama file ini. -->
+       dispatcher) -> goals.js (initGoalsPage). Urutan penting. app.js lama sudah
+       dihapus (refactor tahap 6). -->
   <script src="js/core.js"></script>
   <script src="js/goals.js"></script>
 </body>

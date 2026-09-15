@@ -7,12 +7,15 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="css/style.css" />
+  <!-- CSS dipisah (refactor tahap 6): base.css = token/reset/komponen bersama,
+       lalu gaya khusus halaman ini. Urutan penting: base dulu. -->
+  <link rel="stylesheet" href="css/base.css" />
+  <link rel="stylesheet" href="css/budget.css" />
 </head>
-<!-- data-page="budget" -> js/app.js menjalankan initBudgetPage().
+<!-- data-page="budget" -> dispatcher di js/core.js menjalankan initBudgetPage() (js/budget.js).
      Halaman pengaturan budget: budget bulanan + budget/nama/emoji tiap
-     kategori (tambah/edit/hapus). Satu app.js & style.css dipakai semua
-     halaman; data dibaca dari localStorage yang sama. Analisis pola
+     kategori (tambah/edit/hapus). CSS: base.css (bersama) + budget.css
+     (halaman ini); data dibaca dari localStorage yang sama. Analisis pola
      pengeluaran ada di analytics.html, bukan di sini. -->
 <body data-page="budget">
   <div class="app app--page">
@@ -29,7 +32,7 @@
     </header>
 
     <!-- NAVIGATOR BULAN (V2.2) — periode yang dilihat: ‹ Bulan › + "Bulan Ini".
-         Hanya state halaman (budgetViewDate di app.js), tidak disimpan ke
+         Hanya state halaman (budgetViewDate di budget.js), tidak disimpan ke
          localStorage. Budget yang tersimpan = budget saat ini dan dipakai
          untuk semua bulan; yang berubah hanya pengeluaran yang dibandingkan.
          Bulan masa depan tidak bisa dipilih (tombol › disabled). -->
@@ -58,7 +61,7 @@
         <button type="button" class="btn btn--ghost btn--xs" id="btn-edit-budget" aria-label="Edit budget bulan ini"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9" /><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" /></svg> Edit</button>
       </div>
       <div class="budget-card" id="budget-card">
-        <!-- Diisi otomatis oleh js/app.js melalui renderBudgetSummary() -->
+        <!-- Diisi otomatis oleh js/core.js melalui renderBudgetSummary() -->
       </div>
       <!-- Catatan ringan kalau total budget kategori > budget bulanan -->
       <p class="budget-note" id="budget-note" hidden></p>
@@ -73,7 +76,7 @@
            melebihi budget pada periode ini (renderCategoryList()). -->
       <p class="budget-note budget-note--over" id="category-note" hidden></p>
       <div class="category-list" id="category-list">
-        <!-- Diisi otomatis oleh js/app.js melalui renderCategoryList():
+        <!-- Diisi otomatis oleh js/budget.js melalui renderCategoryList():
              satu card per kategori + baris "Pengeluaran lain tanpa budget"
              (kategori Lainnya / kategori yang sudah dihapus). -->
       </div>
@@ -84,7 +87,7 @@
 
   </div>
 
-  <!-- MODAL: ATUR BUDGET BULAN INI (setupBudgetEditor() di app.js) -->
+  <!-- MODAL: ATUR BUDGET BULAN INI (setupBudgetEditor() di budget.js) -->
   <div class="modal-overlay" id="budget-modal-overlay" hidden>
     <div class="modal modal--form" role="dialog" aria-modal="true" aria-labelledby="budget-modal-title">
       <div class="modal-header">
@@ -106,7 +109,7 @@
           </div>
         </div>
         <div class="quick-amounts" id="budget-quick-amounts" aria-label="Pilihan cepat">
-          <!-- Diisi oleh app.js (renderQuickAmounts()) -->
+          <!-- Diisi oleh budget.js (renderQuickAmounts()) -->
         </div>
         <div class="modal-actions">
           <button type="button" class="btn btn--ghost" data-modal-close>Batal</button>
@@ -145,7 +148,7 @@
         <div class="form-field">
           <span class="form-field-label" id="emoji-picker-label">Emoji kategori</span>
           <div class="emoji-picker" id="emoji-picker" role="radiogroup" aria-labelledby="emoji-picker-label">
-            <!-- Diisi oleh app.js (renderEmojiPicker()) -->
+            <!-- Diisi oleh budget.js (renderEmojiPicker()) -->
           </div>
         </div>
         <div class="modal-actions">
@@ -184,7 +187,7 @@
 
   <!-- JS dipisah (refactor tahap 5A): core.js (data, kalkulasi budget, card
        Budget Bulan Ini, modal, dispatcher) -> budget.js (initBudgetPage).
-       Urutan penting; jangan memuat app.js bersama file ini. -->
+       Urutan penting. app.js lama sudah dihapus (refactor tahap 6). -->
   <script src="js/core.js"></script>
   <script src="js/budget.js"></script>
 </body>

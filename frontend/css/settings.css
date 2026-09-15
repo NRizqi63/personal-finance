@@ -1,0 +1,364 @@
+/* =========================================================
+   SETTINGS (settings.html)
+   Section & card pengaturan, baris tautan/aksi, badge, info, meta,
+   form profil, switch preferensi, tautan inline, dan responsive-nya.
+   .settings-feedback & .transaction-feedback ada di base.css (dipakai
+   halaman lain juga).
+   Dipisah dari style.css lama (refactor tahap 1 & 6). Isi rule disalin apa
+   adanya dan urutan aslinya dipertahankan. Setiap halaman memuat base.css
+   lalu file halamannya.
+   ========================================================= */
+
+/* =========================================================
+   PENGATURAN (settings.html, Settings V1)
+   Card putih berisi baris-baris pengaturan: ikon + judul/deskripsi +
+   (chevron untuk tautan). Baris tautan = <a> selebar penuh dengan area
+   klik >= 52px, hover/active/focus-visible mengikuti bahasa tombol
+   ghost. Info tambahan (.settings-info) & badge "Segera hadir".
+   ========================================================= */
+.settings-section .section-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.settings-card {
+  background: var(--color-surface);
+  border: 1px solid rgba(225, 228, 221, 0.7);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-card);
+  padding: 4px 0;
+  overflow: hidden; /* hover/active baris mengikuti sudut card */
+}
+
+.settings-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 52px;
+  padding: 12px 16px;
+  color: var(--color-text);
+}
+
+.settings-row + .settings-row {
+  border-top: 1px solid var(--color-border);
+}
+
+.settings-row-icon {
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-sm);
+  background: var(--color-primary-soft);
+  font-size: 17px;
+  line-height: 1;
+}
+
+.settings-row-body {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.settings-row-title {
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.settings-row-desc {
+  font-size: 12.5px;
+  font-weight: 500;
+  line-height: 1.45;
+  color: var(--color-text-muted);
+  overflow-wrap: anywhere;
+}
+
+/* Baris tautan (mis. ke budget.html): seluruh baris bisa diklik. */
+.settings-row-link {
+  position: relative;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background-color 0.15s ease, transform 0.15s ease;
+}
+
+.settings-row-chevron {
+  flex-shrink: 0;
+  color: var(--color-text-muted);
+  transition: transform 0.15s ease, color 0.15s ease;
+}
+
+@media (hover: hover) {
+  .settings-row-link:hover {
+    background: var(--color-primary-soft);
+  }
+
+  .settings-row-link:hover .settings-row-chevron {
+    color: var(--color-primary);
+    transform: translateX(2px);
+  }
+}
+
+.settings-row-link:is(:active, .is-pressed) {
+  background: var(--color-primary-soft);
+}
+
+/* Focus ring di DALAM card (outline luar akan terpotong overflow:hidden). */
+.settings-row-link:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
+  border-radius: var(--radius-sm);
+}
+
+/* Baris pengaturan dengan tombol aksi di kanan (Export JSON/CSV). Di layar
+   sempit tombolnya turun ke baris sendiri, rata kanan, supaya teks
+   deskripsi tidak terjepit. */
+/* Baris dengan tombol aksi: ikon + teks + tombol sejajar dalam satu baris,
+   tombol menempel ke kanan. Jaraknya sedikit lebih rapat daripada baris
+   informasi biasa supaya daftar aksi tidak terlalu tinggi. */
+.settings-row--action {
+  flex-wrap: wrap;
+  gap: 10px;
+  min-height: 48px;
+  padding-top: 10px;
+  padding-bottom: 10px;
+}
+
+/* flex-basis 0: teks tidak lagi "mendorong" tombol ke baris berikutnya —
+   kolom judul/deskripsi menyesuaikan sisa ruang, tombol tetap sebaris. */
+.settings-row--action .settings-row-body {
+  flex: 1 1 0;
+}
+
+.settings-row-action {
+  flex-shrink: 0;
+  margin-left: auto;
+  padding: 6px 10px;
+  font-size: 12px;
+  color: var(--color-primary);
+}
+
+/* Layar sangat sempit: tombol turun ke barisnya sendiri (rata kanan) supaya
+   judul & deskripsi tidak terjepit. Di atas 360px tetap sejajar. */
+@media (max-width: 360px) {
+  /* Teks mengambil satu baris penuh, tombol turun ke bawahnya (rata kanan). */
+  .settings-row--action .settings-row-body {
+    flex-basis: 100%;
+  }
+
+  .settings-row-action {
+    max-width: max-content;
+    margin-left: auto;
+  }
+}
+
+/* Judul card kedua di dalam satu section (mis. "Zona Berbahaya"). */
+.settings-subtitle {
+  margin-top: 20px;
+}
+
+/* Tombol aksi berbahaya di baris pengaturan: warna merah menang atas warna
+   hijau .settings-row-action (specificity sama, jadi ditulis setelahnya). */
+.settings-row-action.btn--danger-ghost {
+  color: var(--color-danger);
+  border-color: var(--color-danger-soft);
+}
+
+/* Badge "Segera hadir": pil kuning lembut, dipakai di judul section & baris. */
+.badge-soon {
+  flex-shrink: 0;
+  display: inline-block;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: var(--color-accent-soft);
+  color: #8A5A16;
+  font-size: 11.5px;
+  font-weight: 500;
+  line-height: 1.3;
+  white-space: nowrap;
+}
+
+/* Catatan tambahan di bawah baris-baris dalam satu card. */
+.settings-info {
+  margin: 0;
+  padding: 10px 16px 12px;
+  border-top: 1px solid var(--color-border);
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--color-text-muted);
+  overflow-wrap: anywhere;
+}
+
+/* Pasangan label–nilai (Tentang Aplikasi). */
+.settings-meta {
+  margin: 0;
+  padding: 4px 16px 10px;
+  border-top: 1px solid var(--color-border);
+}
+
+.settings-meta-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0;
+  font-size: 13px;
+}
+
+.settings-meta-row + .settings-meta-row {
+  border-top: 1px dashed var(--color-border);
+}
+
+.settings-meta dt {
+  flex-shrink: 0;
+  font-weight: 500;
+  color: var(--color-text-muted);
+}
+
+.settings-meta dd {
+  margin: 0;
+  min-width: 0;
+  text-align: right;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+/* ---- Profil Akun: form nama di dalam card ---- */
+.settings-form {
+  padding: 12px 16px 14px;
+}
+
+.settings-form .form-field {
+  margin-bottom: 10px;
+}
+
+.settings-preview {
+  margin: 2px 0 0;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--color-text-muted);
+  overflow-wrap: anywhere;
+}
+
+.settings-preview strong {
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.settings-form-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* Tombol simpan selebar penuh di layar sempit supaya mudah ditekan. */
+@media (max-width: 430px) {
+  .settings-form-actions .btn {
+    width: 100%;
+  }
+}
+
+.settings-field input[aria-invalid="true"] {
+  border-color: var(--color-danger);
+  box-shadow: 0 0 0 3px rgba(179, 65, 58, 0.12);
+}
+
+/* ---- Preferensi: baris switch (seluruh baris = label, bisa ditap) ---- */
+.settings-row-switch {
+  cursor: pointer;
+  -webkit-user-select: none;
+  user-select: none;
+  transition: background-color 0.15s ease;
+}
+
+@media (hover: hover) {
+  .settings-row-switch:hover {
+    background: var(--color-bg);
+  }
+}
+
+.switch {
+  position: relative;
+  flex-shrink: 0;
+  width: 46px;
+  height: 26px;
+  display: inline-block;
+}
+
+/* Checkbox asli tetap ada (fokus keyboard & screen reader), tapi tak
+   terlihat; visualnya .switch-track + .switch-thumb. */
+.switch-input {
+  position: absolute;
+  /* Diperluas melewati track (46x26) supaya area tap checkbox-nya sendiri
+     >= 44px tinggi; seluruh baris <label> juga sudah bisa ditap. */
+  inset: -9px -4px;
+  width: auto;
+  height: auto;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.switch-track {
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  background: var(--color-border);
+  transition: background-color 0.15s ease;
+}
+
+.switch-thumb {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--color-surface);
+  box-shadow: 0 1px 3px rgba(31, 36, 33, 0.25);
+  transition: transform 0.15s ease;
+}
+
+.switch-input:checked + .switch-track {
+  background: var(--color-primary);
+}
+
+.switch-input:checked + .switch-track .switch-thumb {
+  transform: translateX(20px);
+}
+
+.switch-input:focus-visible + .switch-track {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.switch-input:active + .switch-track .switch-thumb {
+  transform: scale(0.94);
+}
+
+.switch-input:checked:active + .switch-track .switch-thumb {
+  transform: translateX(20px) scale(0.94);
+}
+
+.settings-inline-link {
+  /* Padding vertikal + margin negatif: area tap >= 36px tanpa menambah
+     tinggi baris (teksnya sendiri hanya ~19px). */
+  display: inline-block;
+  padding: 9px 0;
+  margin: -9px 0;
+  color: var(--color-primary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  transition: color 0.15s ease;
+}
+
+@media (hover: hover) {
+  .settings-inline-link:hover {
+    color: var(--color-primary-dark);
+  }
+}

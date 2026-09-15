@@ -7,11 +7,15 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="css/style.css" />
+  <!-- CSS dipisah (refactor tahap 6): base.css = token/reset/komponen bersama,
+       lalu gaya khusus halaman ini. Urutan penting: base dulu. -->
+  <link rel="stylesheet" href="css/base.css" />
+  <link rel="stylesheet" href="css/transactions.css" />
 </head>
-<!-- data-page memberi tahu js/app.js untuk menjalankan initTransactionsPage()
-     alih-alih initDashboard(). Satu app.js dipakai kedua halaman; data
-     transaksi dibagi lewat localStorage (lihat loadTransactions()). -->
+<!-- data-page memberi tahu dispatcher di js/core.js untuk menjalankan
+     initTransactionsPage() (js/transactions.js) alih-alih initDashboard().
+     core.js + transactions-shared.js dipakai kedua halaman; data transaksi
+     dibagi lewat localStorage (lihat loadTransactions() di core.js). -->
 <body data-page="transactions">
   <div class="app app--page">
 
@@ -76,7 +80,7 @@
         <div class="form-field">
           <label for="filter-category">Kategori</label>
           <select id="filter-category">
-            <!-- Opsi diisi js/app.js dari financeData.categories -->
+            <!-- Opsi diisi js/transactions.js dari financeData.categories -->
             <option value="all">Semua kategori</option>
           </select>
         </div>
@@ -109,17 +113,17 @@
 
     <!-- KALENDER (custom, bukan kalender bawaan browser) — pilih tanggal
          untuk memfilter daftar di bawahnya. Default: hari ini.
-         Dirender oleh renderCalendar() di app.js. -->
+         Dirender oleh renderCalendar() di transactions.js. -->
     <section class="calendar-section" aria-label="Kalender transaksi">
       <div class="calendar" id="calendar">
-        <!-- Diisi otomatis oleh js/app.js -->
+        <!-- Diisi otomatis oleh js/transactions.js melalui renderCalendar() -->
       </div>
     </section>
 
     <!-- TRANSAKSI PADA TANGGAL TERPILIH
          Maks. 3 card; kalau lebih, muncul "Lihat semua transaksi" (tetap
          hanya tanggal itu). Edit/hapus lewat handler yang sama dengan
-         sebelumnya (handleTransactionListClick di app.js). -->
+         sebelumnya (handleTransactionListClick di transactions-shared.js). -->
     <section class="transactions" aria-label="Transaksi pada tanggal terpilih">
       <div class="section-header-row">
         <h2 class="section-title" id="selected-date-title">Hari ini</h2>
@@ -128,7 +132,7 @@
       <!-- Status hasil CRUD transaksi (diisi showTransactionFeedback()). -->
       <p class="settings-feedback transaction-feedback" id="transaction-feedback" role="status" aria-live="polite" hidden></p>
       <ul class="transaction-list" id="all-transaction-list">
-        <!-- Diisi otomatis oleh js/app.js melalui renderAllTransactionsList() -->
+        <!-- Diisi otomatis oleh js/transactions.js melalui renderAllTransactionsList() -->
       </ul>
       <div class="list-more" id="transaction-list-more" hidden>
         <p class="list-more-note" id="transaction-list-more-note"></p>
@@ -204,7 +208,7 @@
 
   <!-- MODAL: KONFIRMASI HAPUS TRANSAKSI
        Markup & gaya sama dengan konfirmasi hapus kategori di budget.html —
-       isinya diisi oleh setupTransactionModal() di app.js. -->
+       isinya diisi oleh setupTransactionModal() di transactions-shared.js. -->
   <div class="modal-overlay" id="confirm-modal-overlay" hidden>
     <div class="modal modal--form modal--confirm" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
       <div class="modal-header">
@@ -227,8 +231,8 @@
   <!-- JS dipisah (refactor tahap 5B): core.js (data, helper, komponen item
        transaksi, modal, dispatcher) -> transactions-shared.js (state halaman,
        modal tambah/edit/hapus, refresh) -> transactions.js (kalender, filter,
-       daftar, initTransactionsPage). Urutan penting; jangan memuat app.js
-       bersama file ini. -->
+       daftar, initTransactionsPage). Urutan penting. app.js lama sudah dihapus
+       (refactor tahap 6). -->
   <script src="js/core.js"></script>
   <script src="js/transactions-shared.js"></script>
   <script src="js/transactions.js"></script>

@@ -2,10 +2,11 @@
    BASE
    Token, reset, tipografi, app shell, header, tombol, komponen bersama
    (card kategori/progress, daftar transaksi, modal & form, feedback,
-   press feedback), dan responsive untuk komponen bersama.
-   Dipisah dari style.css (refactor tahap 1). Isi rule disalin apa adanya dan
-   urutan aslinya dipertahankan; style.css masih dimuat halaman lain
-   (budget/transactions/settings) sampai tahap berikutnya.
+   navigator bulan, list-more, press feedback), dan responsive untuk
+   komponen bersama.
+   Dipisah dari style.css lama (refactor tahap 1 & 6). Isi rule disalin apa
+   adanya dan urutan aslinya dipertahankan. Setiap halaman memuat base.css
+   lalu file halamannya.
    ========================================================= */
 
 /* =========================================================
@@ -133,7 +134,7 @@ a {
   -webkit-tap-highlight-color: transparent;
 }
 
-/* Dipasang app.js saat modal Check-in terbuka: latar tidak bisa di-scroll
+/* Dipasang core.js (createModalController) saat modal Check-in terbuka: latar tidak bisa di-scroll
    (dan karena overlay menutup seluruh viewport, tidak bisa ditekan). */
 body.is-modal-open {
   overflow: hidden;
@@ -453,7 +454,7 @@ a:focus-visible {
 
 /* =========================================================
    4. BUDGET BULAN INI
-   Card putih, angka dari penjumlahan seluruh kategori (app.js).
+   Card putih, angka dari penjumlahan seluruh kategori (renderBudgetSummary di core.js).
    ========================================================= */
 .budget-card {
   background: var(--color-surface);
@@ -980,7 +981,7 @@ a:focus-visible {
 }
 
 /* Nominal yang tertanam di dalam kalimat/label (Budget: Rp…, Terpakai: Rp…,
-   teks Pengingat Goals) dibungkus <strong class="num"> oleh app.js supaya
+   teks Pengingat Goals) dibungkus <strong class="num"> oleh JS (core.js/dashboard.js) supaya
    hanya ANGKA-nya yang 700 — teks di sekitarnya tetap 500. */
 .num {
   font-family: var(--font-numeric);
@@ -1383,7 +1384,7 @@ a:focus-visible {
    pill indicator" ala iOS: 2 opsi selalu di posisi tetap (flex:1 rata),
    TIDAK PERNAH discroll/overflow. Pil putihnya sendiri adalah elemen
    terpisah (.type-toggle-indicator, position:absolute) yang meluncur di
-   BELAKANG tombol-tombol — posisinya dihitung & digerakkan dari app.js
+   BELAKANG tombol-tombol — posisinya dihitung & digerakkan dari core.js
    (offsetLeft/offsetWidth tombol aktif, atau posisi jari saat drag).
    position:relative di sini jadi containing block untuk indikator itu. */
 .type-toggle {
@@ -1394,7 +1395,7 @@ a:focus-visible {
   margin-bottom: 18px;
   background: var(--color-bg);
   border-radius: 999px;
-  /* Drag Pointer Events yang menangani semuanya sendiri (lihat app.js) —
+  /* Drag Pointer Events yang menangani semuanya sendiri (lihat core.js) —
      touch-action:none supaya browser TIDAK mencoba menafsirkan gesture apa
      pun (scroll/zoom) yang dimulai dari sentuhan di sini, termasuk yang
      dimulai tepat di atas salah satu tombol (touch-action anak mewarisi
@@ -1420,7 +1421,7 @@ a:focus-visible {
   transition: left 0.22s cubic-bezier(0.4, 0, 0.2, 1), width 0.22s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-/* Dua class sementara yang dipasang app.js, sama-sama mematikan transisi:
+/* Dua class sementara yang dipasang core.js, sama-sama mematikan transisi:
    - .is-dragging   -> selama jari/mouse masih ditekan & digeser, indikator
                        harus mengikuti posisi jari real-time tanpa delay
                        easing. Dilepas saat pointerup supaya gerakan
@@ -1691,13 +1692,13 @@ a:focus-visible {
    - transisi 120ms dua arah: cepat saat ditekan, halus saat dilepas.
    - Berlaku selama pointer/jari masih menahan tombol (:active native),
      lepas -> kembali normal. Untuk iOS Safari lama yang tidak memicu
-     :active pada sentuhan, app.js memasang listener touchstart no-op.
+     :active pada sentuhan, core.js memasang listener touchstart no-op.
    Per-komponen (warna/background/opacity saat ditekan) tetap di rule
    masing-masing; di sini hanya geometri + elevasi + timing.
    ========================================================= */
 /* Dua pemicu, satu tampilan:
    - :active  -> mouse/keyboard & browser yang memang memicunya saat touch.
-   - .is-pressed -> dipasang app.js lewat Pointer Events saat jari menyentuh
+   - .is-pressed -> dipasang core.js lewat Pointer Events saat jari menyentuh
      (iOS Safari sering tidak/terlambat memicu :active pada tap), dan
      ditahan minimal ~120ms supaya tap secepat apa pun tetap terlihat
      "masuk" lalu kembali. Dilepas saat pointerup/pointercancel (scroll).
@@ -1874,6 +1875,65 @@ a:focus-visible {
   margin: 4px 16px 10px;
 }
 
+/* Navigator bulan (tombol bulat .calendar-nav + judul .calendar-title +
+   .budget-period-*): dipakai analytics.html, budget.html, dan kalender
+   transactions.html. */
+
+.calendar-title {
+  font-size: 14.5px;
+  font-weight: 600;
+  color: var(--color-text);
+  text-align: center;
+  white-space: nowrap;
+}
+
+.calendar-nav {
+  position: relative;
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: var(--color-surface);
+  color: var(--color-text);
+  transition: background-color 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+}
+
+.calendar-nav::before {
+  content: "";
+  position: absolute;
+  inset: -4px; /* area tap efektif 44px */
+}
+
+/* Navigator bulan di budget.html: memakai tombol bulat & judul yang sama
+   dengan kalender, plus tombol "Bulan Ini" di kanan. Judul mengisi sisa
+   ruang (rata tengah) dan tidak pernah terpotong (nowrap + wrap baris). */
+.budget-period-nav {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.budget-period-title {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.budget-period-today {
+  margin-left: auto;
+}
+
+.budget-period-hint {
+  margin: 8px 0 0;
+  padding: 0 2px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--color-text-muted);
+}
+
 
 /* Tombol nonaktif (› di bulan berjalan, "Bulan Ini" saat sudah di bulan
    berjalan): tetap terlihat, tapi jelas tidak bisa ditekan. */
@@ -1891,6 +1951,52 @@ a:focus-visible {
   transform: none;
 }
 
+.calendar-nav.is-pressed,
+.calendar-day:not(.is-selected).is-pressed {
+  background: var(--color-primary-soft);
+}
+
+/* .section-hint & .list-more: dipakai transactions.html dan detail chart
+   analytics.html. */
+
+.section-hint {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-primary);
+  background: var(--color-primary-soft);
+  padding: 3px 9px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.section-hint[hidden] {
+  display: none;
+}
+
+/* "+ N transaksi lainnya" + tombol perluas/ringkas di bawah daftar. */
+.list-more {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.list-more-note {
+  text-align: center;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--color-text-muted);
+}
+
+.list-more[hidden],
+.list-more-note[hidden] {
+  display: none;
+}
+
+.list-more .btn {
+  width: 100%;
+}
+
 @media (min-width: 900px) {
   .stat-grid {
     grid-template-columns: 1.4fr 1fr 1fr;
@@ -1898,5 +2004,15 @@ a:focus-visible {
 
   .stat--wide {
     grid-column: auto;
+  }
+}
+
+@media (max-width: 360px) {
+  /* Navigator bulan budget: "Bulan Ini" turun ke baris kedua (rata kanan)
+     supaya ‹ Bulan › tetap satu baris utuh di 320px. */
+  .budget-period-today {
+    flex-basis: 100%;
+    max-width: max-content;
+    margin-left: auto;
   }
 }
