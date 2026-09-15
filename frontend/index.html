@@ -108,7 +108,25 @@
       </div>
     </section>
 
-    <!-- 5. SPENDING CHART
+    <!-- 5. TARGET KEUANGAN (G-4)
+         Ringkasan financeData.goals lewat helper G-1/G-2 (sortGoals,
+         getGoalStatus, getGoalProgress) — hanya membaca, tidak menulis.
+         Isi card dirender renderGoalsDashboard(): total terkumpul vs total
+         target, jumlah target/aktif/tercapai, dua target paling relevan.
+         Belum ada target -> empty state + "Buat Target Pertama"; link
+         "Lihat Semua Target" di header hanya tampil kalau ada target
+         (supaya tidak ada dua tautan ke halaman yang sama sekaligus). -->
+    <section class="goals-dashboard" aria-label="Target keuangan">
+      <div class="section-header-row">
+        <h2 class="section-title">Target Keuangan</h2>
+        <a class="link-see-all" id="link-goals-all" href="goals.html" hidden>Lihat Semua Target <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14" /><path d="m12 5 7 7-7 7" /></svg></a>
+      </div>
+      <div class="budget-card goals-card" id="goals-card">
+        <!-- Diisi otomatis oleh js/app.js melalui renderGoalsDashboard() -->
+      </div>
+    </section>
+
+    <!-- 6. SPENDING CHART
          Dinonaktifkan sementara di M1 (fokus mobile: input transaksi harus
          cepat dijangkau tanpa scroll panjang). Markup, CSS, dan placeholder
          tetap dipertahankan — tinggal hapus atribut `hidden` di bawah untuk
@@ -124,7 +142,7 @@
       </div>
     </section>
 
-    <!-- 6. RECENT TRANSACTIONS -->
+    <!-- 7. RECENT TRANSACTIONS -->
     <section class="transactions" aria-label="Transaksi terbaru">
       <div class="section-header-row">
         <h2 class="section-title">Transaksi Terbaru</h2>

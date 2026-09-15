@@ -1881,6 +1881,87 @@ function renderGoalsPage() {
   renderGoalList(today);
 }
 
+// Berapa target yang ditampilkan di card dashboard (sisanya "+N lainnya").
+const DASHBOARD_GOAL_LIMIT = 2;
+
+/**
+ * Dashboard (index.html) — G-4: card ringkasan Target Keuangan. Hanya
+ * MEMBACA financeData.goals (tidak menulis, tidak mengubah isi target):
+ * total terkumpul vs total target, jumlah target/aktif/tercapai, dan
+ * DASHBOARD_GOAL_LIMIT target paling relevan menurut urutan sortGoals()
+ * (belum selesai & deadline terdekat di atas). Status per target dari
+ * getGoalStatus() — kunci yang sama dengan goals.html. No-op di halaman
+ * tanpa #goals-card.
+ */
+function renderGoalsDashboard(today = new Date()) {
+  const card = document.getElementById("goals-card");
+  if (!card) return; // bukan di dashboard
+  const link = document.getElementById("link-goals-all");
+  const goals = financeData.goals;
+
+  if (!goals.length) {
+    if (link) link.hidden = true; // satu-satunya tautan = tombol di empty state
+    card.innerHTML = `
+      <div class="goals-card-empty">
+        <p class="goals-card-empty-text">🎯 Kamu belum membuat target keuangan. Tentukan hal yang ingin dicapai — dana darurat, laptop baru, atau liburan — lalu pantau progresnya di sini.</p>
+        <a class="btn btn--ghost btn--xs goals-card-cta" href="goals.html">Buat Target Pertama</a>
+      </div>
+    `;
+    return;
+  }
+
+  const totalTarget = goals.reduce((sum, g) => sum + g.target, 0);
+  const totalSaved = goals.reduce((sum, g) => sum + g.saved, 0);
+  const doneCount = goals.filter((g) => getGoalStatus(g, today).key === "done").length;
+  const activeCount = goals.length - doneCount;
+  // Persen keseluruhan: aman dari NaN/Infinity (totalTarget selalu > 0 di
+  // sini karena tiap target lolos normalizeGoal), dipotong ke 100 untuk bar.
+  const percent = totalTarget > 0 ? Math.min((totalSaved / totalTarget) * 100, 100) : 0;
+  const percentLabel = percent.toLocaleString("id-ID", { maximumFractionDigits: 1 });
+  const allDone = doneCount === goals.length;
+
+  const shown = sortGoals(goals, today).slice(0, DASHBOARD_GOAL_LIMIT);
+  const rest = goals.length - shown.length;
+  const items = shown
+    .map((goal) => {
+      const status = getGoalStatus(goal, today);
+      const safeName = escapeHtml(goal.name);
+      const pct = status.percent.toLocaleString("id-ID", { maximumFractionDigits: 0 });
+      return `
+      <li class="goals-card-item" data-status="${status.key}">
+        <div class="goals-card-item-row">
+          <span class="goals-card-item-name">${safeName}</span>
+          <span class="goals-card-item-status" data-status="${status.key}">${status.label}</span>
+          <span class="goals-card-item-pct num">${pct}%</span>
+        </div>
+        <div class="progress-bar progress-bar--goal progress-bar--thin" role="progressbar" aria-valuenow="${Math.round(status.percent)}" aria-valuemin="0" aria-valuemax="100" aria-label="Progress target ${safeName}">
+          <div class="progress-bar-fill" style="width:${status.percent}%"></div>
+        </div>
+      </li>`;
+    })
+    .join("");
+
+  if (link) link.hidden = false;
+  card.innerHTML = `
+    <div class="budget-amounts">
+      <div>
+        <span class="budget-used">${formatRupiah(totalSaved)}</span>
+        <span class="budget-total"> / ${formatRupiah(totalTarget)}</span>
+      </div>
+      <span class="budget-percent">${percentLabel}%</span>
+    </div>
+    <div class="progress-bar progress-bar--goal${allDone ? " is-done" : ""}">
+      <div class="progress-bar-fill" style="width:${percent}%"></div>
+    </div>
+    <div class="budget-foot goals-card-foot">
+      <span><strong class="num">${goals.length}</strong> target</span>
+      <span><strong class="num">${activeCount}</strong> aktif · <strong class="num goals-card-done">${doneCount}</strong> tercapai</span>
+    </div>
+    <ul class="goals-card-list">${items}</ul>
+    ${rest > 0 ? `<p class="goals-card-more">+${rest} target lainnya</p>` : ""}
+  `;
+}
+
 /** Pesan singkat hasil aksi target (pola showTransactionFeedback): elemen
  * role="status" di goals.html; halaman lain tidak punya -> no-op. Hanya
  * dipanggil SETELAH operasi selesai, bukan untuk validasi field. */
@@ -3834,6 +3915,7 @@ function initDashboard() {
   // Setelah itu tombol mata tetap bebas mengubah isBalanceVisible sementara.
   setBalanceVisible(!financeData.settings.hideBalanceOnOpen);
   renderBudgetSummary();
+  renderGoalsDashboard(); // G-4: hanya membaca financeData.goals
   renderRecentTransactions();
   renderNotifications();
 

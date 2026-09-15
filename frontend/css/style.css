@@ -1530,7 +1530,7 @@ a:focus-visible {
       "header       header"
       "summary      summary"
       "quick        budget"
-      "transactions transactions";
+      "transactions goals";
     padding: 32px 32px calc(48px + env(safe-area-inset-bottom, 0px));
   }
 
@@ -1539,6 +1539,8 @@ a:focus-visible {
   .quick-actions { grid-area: quick; }
   .budget { grid-area: budget; }
   .transactions { grid-area: transactions; }
+  /* G-4: card Target Keuangan di kolom kanan, sejajar daftar transaksi. */
+  .goals-dashboard { grid-area: goals; align-self: start; }
 
 
   /* AKAR MASALAH overflow desktop: grid item default min-width:auto =
@@ -3668,6 +3670,138 @@ a:focus-visible {
   justify-content: flex-end;
   gap: 8px;
   margin-top: 10px;
+}
+
+/* ---------- Card Target Keuangan di dashboard (G-4) ----------
+   Memakai .budget-card + .budget-amounts/.budget-foot yang sama dengan card
+   Budget Bulan Ini; yang baru hanya daftar mini target & empty state. */
+.goals-card-foot {
+  flex-wrap: wrap;
+  row-gap: 2px;
+}
+
+.goals-card-foot strong.num {
+  color: var(--color-text);
+}
+
+.goals-card-done {
+  color: var(--color-primary);
+}
+
+/* Bar keseluruhan jadi hijau kalau SEMUA target tercapai. */
+.progress-bar--goal.is-done {
+  background: var(--color-primary-soft);
+}
+
+.progress-bar--goal.is-done .progress-bar-fill {
+  background: var(--color-primary);
+}
+
+/* Daftar mini: dua target paling relevan, tiap baris nama + status + persen
+   di atas bar tipis. */
+.goals-card-list {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 12px 0 0;
+  border-top: 1px dashed var(--color-border);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.goals-card-item-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 5px;
+  font-size: 12.5px;
+}
+
+.goals-card-item-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-weight: 600;
+  color: var(--color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Chip status kecil — palet yang sama dengan .goal-status di goals.html. */
+.goals-card-item-status {
+  flex-shrink: 0;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.3;
+  white-space: nowrap;
+  background: var(--color-bg);
+  color: var(--color-text-muted);
+  border: 1px solid var(--color-border);
+}
+
+.goals-card-item-status[data-status="urgent"] {
+  background: var(--color-accent-soft);
+  color: #8A5A16;
+  border-color: transparent;
+}
+
+.goals-card-item-status[data-status="overdue"] {
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
+  border-color: transparent;
+}
+
+.goals-card-item-status[data-status="done"] {
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+  border-color: transparent;
+}
+
+.goals-card-item-pct {
+  flex-shrink: 0;
+  font-size: 12.5px;
+  color: var(--color-text);
+}
+
+.goals-card-item[data-status="done"] .progress-bar--goal {
+  background: var(--color-primary-soft);
+}
+
+.goals-card-item[data-status="done"] .progress-bar-fill {
+  background: var(--color-primary);
+}
+
+.progress-bar--thin {
+  height: 5px;
+}
+
+.goals-card-more {
+  margin: 10px 0 0;
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+/* Empty state di dalam card: teks + satu tombol ke goals.html. */
+.goals-card-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.goals-card-empty-text {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--color-text-muted);
+  overflow-wrap: anywhere;
+}
+
+.goals-card-cta {
+  color: var(--color-primary);
+  border-color: var(--color-primary-soft);
 }
 
 /* Keterangan kecil di bawah field popup ("Boleh dikosongkan"). */
