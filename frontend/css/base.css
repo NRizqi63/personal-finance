@@ -1,0 +1,1902 @@
+/* =========================================================
+   BASE
+   Token, reset, tipografi, app shell, header, tombol, komponen bersama
+   (card kategori/progress, daftar transaksi, modal & form, feedback,
+   press feedback), dan responsive untuk komponen bersama.
+   Dipisah dari style.css (refactor tahap 1). Isi rule disalin apa adanya dan
+   urutan aslinya dipertahankan; style.css masih dimuat halaman lain
+   (budget/transactions/settings) sampai tahap berikutnya.
+   ========================================================= */
+
+/* =========================================================
+   DESIGN TOKENS
+   ========================================================= */
+:root {
+  /* Color */
+  --color-bg: #F2F4F1;
+  --color-surface: #FFFFFF;
+  --color-primary: #14532D;
+  --color-primary-dark: #0E3D21;
+  --color-primary-soft: #E4EEE7;
+  --color-accent: #C8862B;
+  --color-accent-soft: #F6E9D4;
+  --color-danger: #B3413A;
+  --color-danger-soft: #F5E2E0;
+  /* Warna teks Pemasukan/Pengeluaran di dalam pill putih .summary-item —
+     sengaja soft/muda, BUKAN --color-primary atau --color-danger yang
+     lebih tua/gelap. Dinaikkan sedikit lebih gelap dari usulan awal
+     (#4C8C63 / #C1615A) supaya tetap >=4.5:1 kontras di atas putih
+     (WCAG AA teks normal) — di ukuran 12-17px, keduanya di bawah ambang
+     "teks besar" yang boleh puas dengan 3:1 saja. */
+  --color-income-text: #457D58; /* ~4.9:1 di atas putih */
+  --color-expense-text: #B85850; /* ~4.6:1 di atas putih */
+  --color-text: #1F2421;
+  --color-text-muted: #656F69; /* 4.7:1 di atas --color-bg (sebelumnya 4.3:1) */
+  --color-text-on-primary: #F2F4F1;
+  --color-border: #E1E4DD;
+
+  /* Type — satu keluarga font untuk seluruh app (Poppins).
+     Dua alias dipertahankan supaya rule lama yang memakai --font-heading
+     (judul & angka) dan --font-body (teks) tidak perlu diubah; hierarki
+     murni lewat font-weight, tiga tingkat saja:
+       700 = H1 (greeting) + SEMUA nominal uang/angka,
+       600 = H2/H3 (judul section, judul card, judul modal),
+       500 = teks lainnya (label, tombol, form, body, metadata). */
+  --font-heading: "Poppins", -apple-system, sans-serif;
+  --font-body: "Poppins", -apple-system, sans-serif;
+  /* Nominal (Rp…): keluarga yang sama supaya tidak terasa asing, tapi
+     dipisah jadi alias sendiri + angka tabular/lining + tracking rapat
+     (lihat .summary-value dkk.) supaya tiap nominal terbaca sebagai satu
+     blok yang tegas. Ganti alias ini kalau nanti mau numeral display khusus. */
+  --font-numeric: "Poppins", -apple-system, sans-serif;
+
+  /* Layout */
+  --radius-lg: 20px;
+  --radius-md: 14px;
+  --radius-sm: 10px;
+  --gap: 16px;
+  --page-padding: 20px;
+  --shadow-card: 0 1px 2px rgba(31, 36, 33, 0.06), 0 1px 1px rgba(31, 36, 33, 0.04);
+
+}
+
+/* =========================================================
+   RESET & BASE
+   ========================================================= */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  max-width: 100%;
+  overflow-x: hidden;
+  /* Matikan double-tap-to-zoom bawaan iOS Safari (dan hapus delay ~300ms
+     sebelum tap dianggap "bukan bagian dari double-tap") di elemen apapun.
+     "manipulation" TIDAK mematikan pinch-to-zoom manual (itu cuma bisa
+     dimatikan lewat meta viewport user-scalable=no, yang sengaja tidak kita
+     pakai) dan TIDAK mematikan scroll vertikal — keduanya (pan & pinch-zoom)
+     tetap diizinkan, cuma gesture double-tap-zoom yang dihilangkan. */
+  touch-action: manipulation;
+}
+
+body {
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-body);
+  font-size: 15px;
+  /* Body text 500 (bukan 400): di 400 Poppins terasa tipis di
+     layar HP. Semua teks tanpa bobot eksplisit (insight, goals, notice,
+     isi input) ikut naik dari sini. Hierarki tetap: 700 angka utama,
+     600 judul/tombol/nav, 500 body + label/metadata. */
+  font-weight: 500;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1,
+h2,
+h3 {
+  font-family: var(--font-heading);
+  margin: 0;
+  font: bold;
+}
+
+p {
+  margin: 0;
+}
+
+ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+button {
+  font-family: inherit;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  /* iOS Safari keeps native control chrome (padding/centering metrics)
+     on <button> unless appearance is explicitly reset, even when
+     background/border are overridden — causes subtle text misalignment
+     that Chrome doesn't show (e.g. the type-toggle segmented control). */
+  appearance: none;
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+a {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Dipasang app.js saat modal Check-in terbuka: latar tidak bisa di-scroll
+   (dan karena overlay menutup seluruh viewport, tidak bisa ditekan). */
+body.is-modal-open {
+  overflow: hidden;
+}
+
+/* Kontrol yang ditekan-tahan di iOS tidak boleh memunculkan seleksi teks /
+   kaca pembesar / sheet preview link — itu bikin press feedback tersamar. */
+button,
+.link-see-all,
+.icon-btn {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+button:focus-visible,
+a:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+/* =========================================================
+   APP SHELL (mobile-first: single column stack)
+   ========================================================= */
+.app {
+  max-width: 480px;
+  margin: 0 auto;
+  /* env(safe-area-inset-bottom) menambah jarak di iPhone dengan home
+     indicator supaya baris terakhir tidak mepet ke tepi bawah layar. */
+  padding: var(--page-padding) var(--page-padding)
+    calc(40px + env(safe-area-inset-bottom, 0px));
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+/* Hierarki: greeting (21/700) > section-title (15/600) = judul card
+   (.category-name 600) > body & label (500). */
+.section-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--color-text);
+  letter-spacing: -0.01em;
+  margin-bottom: 10px;
+  line-height: 1.25;
+}
+
+.section-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 7px;
+}
+ 
+.section-header-row .section-title {
+  margin-bottom: 0;
+}
+ 
+.link-see-all {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: none;
+  border: none;
+  text-decoration: none; /* sekarang <a> ke transactions.html, bukan <button> */
+  min-height: 36px;
+  padding: 4px 2px;
+  font-family: var(--font-body);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-primary);
+  white-space: nowrap;
+  transition: color 0.15s ease, transform 0.15s ease;
+}
+ 
+@media (hover: hover) {
+  .link-see-all:hover {
+    color: var(--color-primary-dark);
+    transform: translateX(1px);
+  }
+}
+
+.link-see-all:active {
+  color: var(--color-primary-dark);
+}
+
+.link-see-all[hidden] {
+  display: none;
+}
+
+/* =========================================================
+   1. HEADER
+   ========================================================= */
+/* Sapaan sekarang cuma 1 baris (subtitle sudah dihapus), jadi align-items
+   center supaya teksnya sejajar vertikal dengan tombol notifikasi &
+   pengaturan — bukan flex-start seperti waktu masih ada 2 baris. */
+.app-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 2px;
+  margin-bottom: 0; /* header -> Saldo 20px, section lain tetap 24px (gap .app) */
+}
+
+/* font-family ditulis eksplisit (walau <h1> sudah kena rule h1,h2,h3 di
+   bagian RESET) supaya satu keluarga font untuk sapaan + semua nominal di
+   Financial Summary terbaca jelas di satu tempat. */
+.greeting-text {
+  font-family: var(--font-heading);
+  font-size: 21px;
+  font-weight: 700;
+  color: var(--color-text);
+  letter-spacing: -0.015em;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.greeting {
+  min-width: 0; /* boleh menyusut & membungkus teks, bukan mendorong .header-actions keluar */
+}
+
+.header-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.icon-btn {
+  position: relative;
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text);
+  text-decoration: none; /* dipakai juga sebagai <a> (tombol kembali di halaman Semua Transaksi) */
+  transition: background-color 0.15s ease, border-color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+/* Header halaman sekunder (mis. Semua Transaksi): tombol kembali di kiri,
+   judul tepat di sebelahnya — bukan rata kiri-kanan seperti header dashboard. */
+.page-header {
+  justify-content: flex-start;
+}
+
+/* Tombol kembali tidak boleh menyusut kalau judul halaman panjang. */
+.page-header .icon-btn {
+  flex-shrink: 0;
+}
+
+@media (hover: hover) {
+  .icon-btn:hover {
+    background: var(--color-primary-soft);
+    border-color: var(--color-primary-soft);
+    transform: scale(1.03);
+    box-shadow: 0 3px 10px rgba(31, 36, 33, 0.12);
+  }
+}
+
+.icon-btn-dot {
+  position: absolute;
+  top: 8px;
+  right: 9px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--color-accent);
+  border: 1.5px solid var(--color-surface);
+}
+
+/* =========================================================
+   1b. BUTTONS (premium, reusable — dipakai di CTA & modal)
+   ========================================================= */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  text-decoration: none; /* dipakai juga sebagai <a> (Lihat Analisis, CTA modal) */
+  min-height: 44px;
+  font-family: var(--font-body);
+  font-weight: 500;
+  font-size: 13.5px;
+  padding: 10px 16px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  white-space: nowrap;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease,
+    border-color 0.15s ease, color 0.15s ease;
+}
+ 
+@media (hover: hover) {
+  .btn:hover {
+    transform: scale(1.02);
+  }
+}
+ 
+
+ 
+.btn-icon {
+  font-size: 15px;
+  line-height: 1;
+}
+ 
+.btn--primary {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  color: var(--color-text-on-primary);
+}
+ 
+@media (hover: hover) {
+  .btn--primary:hover {
+    background: var(--color-primary-dark);
+    border-color: var(--color-primary-dark);
+    box-shadow: 0 6px 16px rgba(20, 83, 45, 0.22);
+  }
+}
+ 
+.btn--ghost {
+  background: var(--color-surface);
+  border-color: var(--color-border);
+  color: var(--color-text);
+}
+ 
+@media (hover: hover) {
+  .btn--ghost:not(:disabled):hover {
+    border-color: var(--color-primary);
+    background: var(--color-primary-soft);
+    box-shadow: 0 3px 10px rgba(31, 36, 33, 0.08);
+  }
+}
+ 
+.btn--sm {
+  padding: 9px 14px;
+  font-size: 13px;
+}
+
+.btn--block {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+/* Atribut hidden harus menang atas display:inline-flex di .btn (mis. tombol
+   "Hapus Kategori" yang hanya tampil di mode edit). */
+.btn[hidden] {
+  display: none;
+}
+
+/* Tombol "Edit" compact (header Budget Bulan Ini & card kategori): pil
+   ghost 36px dengan ikon pensil 14px; area tap efektif 44px lewat halo
+   ::before (lihat aturan bersama di bagian press feedback). */
+.btn--xs {
+  position: relative;
+  min-height: 36px;
+  padding: 6px 11px;
+  gap: 5px;
+  font-size: 12.5px;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+
+.btn--xs::before {
+  content: "";
+  position: absolute;
+  inset: -4px;
+}
+
+.btn--xs svg {
+  flex-shrink: 0;
+}
+
+/* Aksi destruktif: "Hapus Kategori" di popup edit (ghost merah, sekunder)
+   dan tombol konfirmasi (solid merah). */
+.btn--danger-ghost {
+  background: var(--color-surface);
+  border-color: var(--color-danger-soft);
+  color: var(--color-danger);
+}
+
+.btn--danger {
+  background: var(--color-danger);
+  border-color: var(--color-danger);
+  color: #fff;
+}
+
+@media (hover: hover) {
+  .btn--danger-ghost:hover {
+    background: var(--color-danger-soft);
+    border-color: var(--color-danger-soft);
+  }
+
+  .btn--danger:hover {
+    background: #9c352f;
+    border-color: #9c352f;
+    box-shadow: 0 6px 16px rgba(179, 65, 58, 0.22);
+  }
+}
+
+.btn--danger-ghost:is(:active, .is-pressed) {
+  background: var(--color-danger-soft);
+}
+
+/* Card budget (.budget-card dkk.): dipakai card Budget Bulan Ini & Target
+   Keuangan di dashboard, DAN card chart/detail di analytics.html. */
+
+/* =========================================================
+   4. BUDGET BULAN INI
+   Card putih, angka dari penjumlahan seluruh kategori (app.js).
+   ========================================================= */
+.budget-card {
+  background: var(--color-surface);
+  border: 1px solid rgba(225, 228, 221, 0.7);
+  border-radius: var(--radius-md);
+  padding: 16px;
+  box-shadow: var(--shadow-card);
+}
+
+.budget-amounts {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.budget-used {
+  font-family: var(--font-numeric);
+  font-size: 19px;
+  font-weight: 700;
+  color: var(--color-text);
+  font-variant-numeric: tabular-nums;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  letter-spacing: -0.02em;
+}
+
+.budget-total {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap; /* "/ Rp2.400.000" pindah baris sebagai satu kesatuan di 320px */
+}
+
+.budget-percent {
+  flex-shrink: 0;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--color-text);
+  font-variant-numeric: tabular-nums;
+}
+
+.budget-foot {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 10px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--color-text-muted);
+}
+
+.budget-remaining {
+  font-weight: 700;
+  color: var(--color-text);
+  font-variant-numeric: tabular-nums;
+}
+
+.modal-actions--single .btn {
+  flex: 1 1 auto;
+}
+
+/* Catatan ringan di bawah card Budget Bulan Ini (analytics.html) — bukan
+   error: hanya memberi tahu total budget kategori > budget bulanan. */
+.budget-note {
+  margin-top: 8px;
+  padding: 0 2px;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: #8A5A16; /* warna teks status "warning" yang sudah dipakai chip kategori */
+  overflow-wrap: anywhere;
+}
+
+/* =========================================================
+   FINANCIAL CHECK-IN (popup saat dashboard dibuka)
+   Varian .modal yang hampir memenuhi viewport di HP (sisa 12px tepi supaya
+   tetap terasa sebagai modal di atas dashboard), overlay lebih pekat,
+   isi bisa di-scroll di dalam modal kalau lebih tinggi dari layar.
+   ========================================================= */
+.modal-overlay--checkin {
+  padding: 12px;
+  background: rgba(15, 23, 18, 0.62);
+}
+
+.modal--checkin {
+  max-width: 520px;
+  max-height: calc(100vh - 24px);
+  max-height: calc(100dvh - 24px);
+  padding: 20px 18px calc(18px + env(safe-area-inset-bottom, 0px));
+  display: flex;
+  flex-direction: column;
+}
+
+.modal--checkin .modal-header {
+  margin-bottom: 12px;
+}
+
+.modal--checkin .modal-actions {
+  margin-top: 14px;
+  flex-shrink: 0;
+}
+
+.modal--checkin .modal-actions .btn {
+  white-space: normal; /* label CTA panjang boleh membungkus di layar sempit */
+  line-height: 1.3;
+}
+
+.checkin-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+  overflow-y: auto; /* konten yang scroll, header & CTA tetap terlihat */
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+}
+
+.checkin-greeting {
+  font-family: var(--font-heading);
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--color-text);
+  line-height: 1.25;
+}
+
+.checkin-sub {
+  margin-top: -6px;
+  font-size: 13.5px;
+  color: var(--color-text-muted);
+}
+
+/* Kartu saldo: identitas yang sama dengan card Saldo dashboard */
+.checkin-hero {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 14px 16px;
+  background: var(--color-primary);
+  color: var(--color-text-on-primary);
+  border-radius: var(--radius-md);
+}
+
+.checkin-hero .checkin-label {
+  color: rgba(242, 244, 241, 0.78);
+}
+
+.checkin-balance {
+  font-size: 28px;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+}
+
+.checkin-label {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--color-text-muted);
+}
+
+.checkin-stats {
+  display: flex;
+  flex-wrap: wrap; /* di layar sangat sempit dua tile turun jadi satu kolom */
+  gap: 8px;
+}
+
+.checkin-stat {
+  flex: 1 1 130px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 12px 14px;
+  background: var(--color-surface);
+  border: 1px solid rgba(225, 228, 221, 0.7);
+  border-radius: var(--radius-md);
+}
+
+.checkin-stat-value {
+  font-size: 16px;
+  letter-spacing: -0.01em;
+  overflow-wrap: anywhere;
+}
+
+.checkin-stat--income .checkin-stat-value { color: var(--color-income-text); }
+.checkin-stat--expense .checkin-stat-value { color: var(--color-expense-text); }
+
+.checkin-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  background: var(--color-surface);
+  border: 1px solid rgba(225, 228, 221, 0.7);
+  border-radius: var(--radius-md);
+}
+
+/* Goal: warna cream/gold yang dulu dipakai card Pengingat Goals */
+.checkin-block--goal {
+  background: var(--color-accent-soft);
+  border-color: transparent;
+}
+
+.checkin-block--goal .checkin-label,
+.checkin-block--goal .checkin-row--muted {
+  color: #6B4A14;
+}
+
+.progress-bar--goal {
+  background: rgba(200, 134, 43, 0.22);
+}
+
+.progress-bar--goal .progress-bar-fill {
+  background: var(--color-accent);
+}
+
+.checkin-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--color-text);
+}
+
+.checkin-row--muted {
+  flex-wrap: wrap;
+  font-size: 12.5px;
+  color: var(--color-text-muted);
+}
+
+.checkin-row .num {
+  white-space: nowrap;
+}
+
+/* Insight: hijau sangat lembut (warna card Insight Keuangan yang lama) */
+.checkin-insight {
+  padding: 12px 14px;
+  background: var(--color-primary-soft);
+  border-radius: var(--radius-md);
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--color-text);
+}
+
+/* Status rule-based: tiga kondisi memakai token warna yang sudah ada */
+.checkin-status {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 12px 14px;
+  border-radius: var(--radius-md);
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+
+.checkin-status-title {
+  font-family: var(--font-heading);
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.checkin-status[data-status="safe"] {
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+}
+
+.checkin-status[data-status="warning"] {
+  background: var(--color-accent-soft);
+  color: #8A5A16;
+}
+
+.checkin-status[data-status="danger"] {
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
+}
+
+.checkin-status-text {
+  color: inherit;
+  opacity: 0.9;
+}
+
+@media (min-width: 900px) {
+  .modal-overlay--checkin {
+    padding: 24px;
+  }
+
+  .modal--checkin {
+    padding: 24px;
+  }
+}
+
+/* =========================================================
+   3. CATEGORY ANALYSIS (halaman analytics.html)
+   ========================================================= */
+
+.category-card {
+  background: var(--color-surface);
+  border: 1px solid rgba(225, 228, 221, 0.7);
+  border-radius: var(--radius-md);
+  padding: 16px;
+  box-shadow: var(--shadow-card);
+}
+
+/* budget.html: semua kategori ditumpuk vertikal, card yang sama. */
+.category-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.category-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+/* Nama mengisi sisa ruang (ellipsis kalau panjang); chip status dan tombol
+   Edit tidak menyusut. */
+.category-name {
+  flex: 1 1 auto;
+  font-weight: 600;
+  font-size: 15px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.category-emoji {
+  display: inline-block;
+  margin-right: 6px;
+  font-size: 16px;
+  line-height: 1;
+  vertical-align: -1px;
+}
+
+.category-empty {
+  padding: 18px 16px;
+  text-align: center;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--color-text-muted);
+  background: var(--color-surface);
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.category-status {
+  flex-shrink: 0;
+  white-space: nowrap;
+  font-size: 11.5px;
+  font-weight: 500;
+  line-height: 1.3;
+  padding: 3px 9px;
+  border-radius: 999px;
+}
+
+.category-status[data-status="safe"] {
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+}
+
+.category-status[data-status="warning"] {
+  background: var(--color-accent-soft);
+  color: #8A5A16;
+}
+
+.category-status[data-status="danger"] {
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
+}
+
+/* V2.2 — status 4 level untuk card kategori (getCategoryBudgetStatus()):
+   watch = kuning lembut (sama seperti "warning" lama), near = jingga lebih
+   pekat, over = merah, unset = abu netral (belum ada budget, bukan masalah). */
+.category-status[data-status="watch"] {
+  background: var(--color-accent-soft);
+  color: #8A5A16;
+}
+
+.category-status[data-status="near"] {
+  background: #F9E0CC;
+  color: #9A4A0E;
+}
+
+.category-status[data-status="over"] {
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
+}
+
+.category-status[data-status="unset"] {
+  background: var(--color-bg);
+  color: var(--color-text-muted);
+  border: 1px solid var(--color-border);
+}
+
+.category-budget-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--color-text-muted);
+  margin-bottom: 7px;
+}
+
+.progress-bar {
+  width: 100%;
+  height: 6px;
+  background: var(--color-primary-soft);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.progress-bar-fill {
+  height: 100%;
+  background: var(--color-primary);
+  border-radius: 999px;
+  transition: width 0.3s ease;
+}
+
+.progress-bar-fill[data-status="warning"] {
+  background: var(--color-accent);
+}
+
+.progress-bar-fill[data-status="danger"] {
+  background: var(--color-danger);
+}
+
+.progress-bar-fill[data-status="watch"] {
+  background: var(--color-accent);
+}
+
+.progress-bar-fill[data-status="near"] {
+  background: #D9702A;
+}
+
+.progress-bar-fill[data-status="over"] {
+  background: var(--color-danger);
+}
+
+/* Persen & "Lebih Rp…" ikut merah saat melebihi budget. */
+.progress-percent[data-status="over"],
+.remaining-budget.is-over,
+.remaining-budget.is-over .num {
+  color: var(--color-danger);
+}
+
+/* Card kategori tanpa budget: lebih tenang (tanpa progress bar). */
+.category-card--unset {
+  border-style: dashed;
+  box-shadow: none;
+}
+
+/* Tombol "Atur Budget" di card tanpa budget (handler = tombol Edit). */
+.btn-set-budget {
+  flex-shrink: 0;
+  color: var(--color-primary);
+  border-color: var(--color-primary-soft);
+}
+
+/* Card tanpa budget: foot menyejajarkan teks & tombol secara vertikal. */
+.category-card--unset .category-card-foot {
+  align-items: center;
+}
+
+/* Empty state "belum ada budget": banner di atas card (card tetap ada
+   supaya tombol Atur Budget/Edit bisa dipakai). */
+.category-empty--budget {
+  text-align: left;
+  border-style: solid;
+  background: var(--color-primary-soft);
+  border-color: var(--color-primary-soft);
+  color: var(--color-primary);
+}
+
+.category-empty--budget strong {
+  font-weight: 600;
+}
+
+/* Baris "Pengeluaran lain tanpa budget" di bawah daftar kategori. */
+.category-card--other {
+  background: var(--color-bg);
+  box-shadow: none;
+}
+
+.category-card--other .category-card-head {
+  margin-bottom: 4px;
+}
+
+.category-other-amount {
+  flex-shrink: 0;
+  font-size: 14px;
+  color: var(--color-text);
+}
+
+.category-other-hint {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--color-text-muted);
+}
+
+/* Peringatan "N kategori melebihi budget" di atas daftar. */
+.budget-note--over {
+  margin: 0 0 10px;
+  color: var(--color-danger);
+}
+
+.category-card-foot {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 7px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-text-muted);
+}
+
+/* Nominal yang tertanam di dalam kalimat/label (Budget: Rp…, Terpakai: Rp…,
+   teks Pengingat Goals) dibungkus <strong class="num"> oleh app.js supaya
+   hanya ANGKA-nya yang 700 — teks di sekitarnya tetap 500. */
+.num {
+  font-family: var(--font-numeric);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums lining-nums;
+}
+
+.progress-percent {
+  font-weight: 700;
+  color: var(--color-text);
+  font-variant-numeric: tabular-nums;
+}
+
+/* =========================================================
+   8. RECENT TRANSACTIONS
+   ========================================================= */
+/* Satu card per transaksi (background putih, radius & shadow sama dengan
+   card lain), jarak antar card 8px, ikon kategori di kiri. */
+.transaction-list {
+  margin-top: 2px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* Label kelompok tanggal ("Hari ini" / "Kemarin" / "5 Sep 2026").
+   Sengaja <li> biasa di dalam <ul> yang sama supaya delegasi klik tombol
+   edit/delete di parent list tidak perlu diubah. */
+.transaction-day-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-text-muted);
+  padding: 6px 2px 0;
+}
+
+.transaction-list > .transaction-day-label:first-child {
+  padding-top: 0;
+}
+
+.transaction-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  background: var(--color-surface);
+  border: 1px solid rgba(225, 228, 221, 0.7);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-card);
+}
+
+/* Ikon kategori: kotak lembut 36px (ikon 18px di dalamnya), menggantikan
+   garis vertikal berwarna. Hijau lembut untuk pemasukan, merah lembut untuk
+   pengeluaran — warna teks ikonnya sama dengan warna nominalnya. */
+.transaction-icon {
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-sm);
+  background: var(--color-primary-soft);
+  color: var(--color-income-text);
+}
+
+.transaction-icon {
+  font-size: 18px;
+  line-height: 1;
+}
+
+.transaction-icon--expense {
+  background: var(--color-danger-soft);
+  color: var(--color-expense-text);
+}
+
+.transaction-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.transaction-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.transaction-meta {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-text-muted);
+  /* Satu baris seperti judulnya supaya tinggi card seragam. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Jam transaksi (" · 12:30") disembunyikan di mobile supaya card lebih
+   bersih; hanya tampil di desktop (lihat media query di bawah). Markup-nya
+   satu, tidak ada data yang diduplikasi. */
+.transaction-time {
+  display: none;
+}
+
+/* Grup kanan (nominal + aksi) tidak boleh menyusut/terpotong;
+   .transaction-info yang menyusut duluan lewat min-width:0 + ellipsis di atas */
+.transaction-right {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.transaction-amount {
+  font-size: 13.5px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  font-family: var(--font-numeric);
+  letter-spacing: -0.01em;
+}
+
+.transaction-amount--income {
+  color: var(--color-primary);
+}
+
+.transaction-amount--expense {
+  color: var(--color-danger);
+}
+
+.transaction-actions {
+  display: flex;
+  align-items: center;
+  gap: 0; /* dua target tap terpisah jelas, tidak ada zona ambigu */
+  /* Kotak tap 44px jauh lebih lebar dari ikon 15px-nya; margin negatif
+     menggeser kotak terakhir ke kanan supaya IKON hapus tetap rata dengan
+     tepi kanan konten (bukan menjorok ~14px ke dalam), sementara area
+     tapnya meminjam gutter halaman yang memang kosong. */
+  margin-right: -12px;
+  margin-top: -6px; /* kotak tap 44px > tinggi konten card; jangan menambah tinggi card */
+  margin-bottom: -6px;
+}
+
+/* Halaman Semua Transaksi di mobile: nominal + tombol edit/delete tidak muat
+   satu baris di samping judul (di 320px judul tinggal 2-3 huruf), jadi grup
+   kanan ditumpuk — nominal di atas, edit/delete rapat di bawahnya, rata
+   kanan. Margin negatif tombol menjaga card tetap compact (~72px) sambil
+   mempertahankan kotak tap 44px. Di desktop kembali satu baris. */
+.transaction-item--actions .transaction-right {
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0;
+}
+
+.transaction-item--actions .transaction-actions {
+  margin-top: -4px;
+  margin-bottom: -10px;
+}
+
+/* Tombol edit/delete: sengaja dibuat kecil & tidak mencolok,
+   hanya berubah warna saat hover — tanpa efek scale seperti CTA utama */
+/* Kotak tap 36px (ikon di dalamnya tetap 15px) — cukup nyaman di jempol
+   tanpa membesarkan ikonnya sendiri. */
+.icon-btn-sm {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border: none;
+  background: transparent;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
+  transition: background-color 0.15s ease, color 0.15s ease, transform 0.12s ease;
+}
+
+@media (hover: hover) {
+  .icon-btn-sm:hover {
+    background: var(--color-primary-soft);
+    color: var(--color-primary);
+  }
+}
+
+/* Tombol edit/delete kecil (30px) — :hover saja tidak konsisten ter-trigger
+   di touch device, jadi tap di mobile butuh :active sendiri. Scale-nya
+   dibuat sedikit lebih kecil (0.9) daripada tombol normal (0.95-0.97)
+   supaya efeknya tetap proporsional di elemen sekecil ini. */
+.icon-btn-sm:active {
+  background: var(--color-primary-soft);
+}
+
+@media (hover: hover) {
+  .icon-btn-sm[data-action="delete"]:hover {
+    background: var(--color-danger-soft);
+    color: var(--color-danger);
+  }
+}
+
+.icon-btn-sm[data-action="delete"]:active {
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
+}
+ 
+.transaction-empty {
+  padding: 24px 16px;
+  text-align: center;
+  color: var(--color-text-muted);
+  font-size: 13px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+/* Desktop (>= 900px): grid dashboard didefinisikan di sini karena rule .app
+   ini juga memberi padding 32px ke SEMUA halaman; .app--page (halaman
+   sekunder) hanya menimpa display & max-width-nya. */
+
+@media (min-width: 900px) {
+  .app {
+    max-width: 1080px;
+    display: grid;
+    grid-template-columns: 2fr 1fr;
+    column-gap: 24px;
+    row-gap: 18px;
+    /* Baris "filters" dihapus bersama section chip filter-nya — kalau
+       nama areanya ditinggal, grid tetap membuat satu baris kosong
+       (plus row-gap) yang kelihatan seperti celah nganggur. */
+    grid-template-areas:
+      "header       header"
+      "summary      summary"
+      "quick        budget"
+      "transactions goals";
+    padding: 32px 32px calc(48px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .app-header { grid-area: header; }
+  .summary { grid-area: summary; }
+  .quick-actions { grid-area: quick; }
+  .budget { grid-area: budget; }
+  .transactions { grid-area: transactions; }
+  /* G-4: card Target Keuangan di kolom kanan, sejajar daftar transaksi. */
+  .goals-dashboard { grid-area: goals; align-self: start; }
+
+  /* AKAR MASALAH overflow desktop: grid item default min-width:auto =
+     lebar min-content isinya. Untuk .category-analysis itu berarti lima
+     panel carousel (masing-masing flex-basis 100%) dijumlahkan, sehingga
+     kolom "2fr" dipaksa melebar melewati max-width .app dan card Saldo +
+     kolom kanan terpotong di tepi viewport. min-width:0 membuat tiap item
+     mengikuti lebar kolom; carousel-nya sendiri sudah overflow-x:auto. */
+  .app > * {
+    min-width: 0;
+  }
+
+  /* Halaman sekunder (transactions.html) cuma punya header + satu daftar —
+     tidak ikut grid bernama milik dashboard (kalau ikut, area summary/
+     category yang kosong tetap bikin baris + row-gap nganggur). Tetap satu
+     kolom, cuma dilebarkan sedikit supaya baris transaksi lega di desktop. */
+  .app--page {
+    display: flex;
+    flex-direction: column;
+    max-width: 640px;
+  }
+
+  .app--page .transactions {
+    grid-area: auto;
+  }
+
+  .greeting-text {
+    font-size: 24px;
+  }
+
+  .transaction-item {
+    padding: 14px 16px;
+    gap: 14px;
+  }
+
+  /* Desktop cukup lega: jam transaksi ikut tampil di samping kategori,
+     dan nominal + edit/delete (Semua Transaksi) kembali satu baris. */
+  .transaction-time {
+    display: inline;
+  }
+
+  .transaction-item--actions .transaction-right {
+    flex-direction: row;
+    align-items: center;
+    gap: 2px;
+  }
+
+  .transaction-item--actions .transaction-actions {
+    margin-top: -6px;
+    margin-bottom: -6px;
+  }
+}
+
+/* =========================================================
+   MODAL: TAMBAH / EDIT TRANSAKSI
+   ========================================================= */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(15, 23, 18, 0.5);
+  overflow-y: auto;
+  /* Scroll yang mentok di ujung overlay/modal tidak "menular" ke halaman di
+     belakangnya (scroll chaining, terutama iOS) — body memang sudah dikunci
+     saat modal terbuka, ini pengaman keduanya. */
+  overscroll-behavior: contain;
+  /* Pengaman: overlay tidak boleh pernah bisa digeser horizontal, apa pun
+     yang terjadi di dalam .modal (lihat juga .modal & .type-toggle). */
+  overflow-x: hidden;
+}
+
+.modal-overlay[hidden] {
+  display: none;
+}
+
+.modal {
+  width: 100%;
+  max-width: 420px;
+  /* dvh = tinggi viewport yang benar-benar terlihat di iOS Safari (100vh
+     ikut menghitung area di balik toolbar, jadi dasar modal bisa terpotong).
+     Baris 100vh di atasnya adalah fallback untuk browser tanpa dvh. */
+  max-height: calc(100vh - 40px);
+  max-height: calc(100dvh - 40px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  /* Pengaman kedua: bug lama (modal bisa digeser kanan-kiri) datang dari
+     .type-toggle yang melebihi lebar modal. Sekarang .type-toggle sudah
+     tidak mungkin overflow lagi (3 tombol flex:1 rata, tidak discroll —
+     lihat komentarnya di bawah), tapi overflow-x:hidden di sini tetap
+     dipertahankan sebagai jaring pengaman supaya .modal TIDAK PERNAH bisa
+     digeser horizontal, apa pun isi yang ditambahkan ke dalamnya nanti. */
+  overflow-x: hidden;
+  background: var(--color-surface);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 24px 60px rgba(15, 23, 18, 0.28), 0 4px 14px rgba(15, 23, 18, 0.12);
+  padding: 24px;
+  box-sizing: border-box;
+  transform: translateY(10px) scale(0.98);
+  opacity: 0;
+  transition: transform 0.24s ease, opacity 0.24s ease;
+}
+ 
+.modal-overlay.is-open .modal {
+  transform: translateY(0) scale(1);
+  opacity: 1;
+}
+ 
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+ 
+.modal-header h2 {
+  font-size: 17px;
+  font-weight: 600; /* sekunder — jangan sama beratnya dengan greeting (800) */
+  letter-spacing: -0.01em;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+ 
+.modal-close {
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  border-radius: 999px;
+  color: var(--color-text-muted);
+  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease, transform 0.12s ease;
+}
+
+@media (hover: hover) {
+  .modal-close:hover {
+    background: var(--color-primary-soft);
+    border-color: var(--color-primary-soft);
+    color: var(--color-primary);
+  }
+}
+
+.modal-close:active {
+  background: var(--color-primary-soft);
+  border-color: var(--color-primary-soft);
+  color: var(--color-primary);
+}
+ 
+/* Segmented control Pemasukan / Pengeluaran — gaya "draggable
+   pill indicator" ala iOS: 2 opsi selalu di posisi tetap (flex:1 rata),
+   TIDAK PERNAH discroll/overflow. Pil putihnya sendiri adalah elemen
+   terpisah (.type-toggle-indicator, position:absolute) yang meluncur di
+   BELAKANG tombol-tombol — posisinya dihitung & digerakkan dari app.js
+   (offsetLeft/offsetWidth tombol aktif, atau posisi jari saat drag).
+   position:relative di sini jadi containing block untuk indikator itu. */
+.type-toggle {
+  position: relative;
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  margin-bottom: 18px;
+  background: var(--color-bg);
+  border-radius: 999px;
+  /* Drag Pointer Events yang menangani semuanya sendiri (lihat app.js) —
+     touch-action:none supaya browser TIDAK mencoba menafsirkan gesture apa
+     pun (scroll/zoom) yang dimulai dari sentuhan di sini, termasuk yang
+     dimulai tepat di atas salah satu tombol (touch-action anak mewarisi
+     efek dari leluhur terdekat). Ini yang mencegah drag horizontal di
+     toggle "bocor" jadi scroll vertikal .modal. */
+  touch-action: none;
+}
+
+.type-toggle-indicator {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  left: 2px;
+  width: 0;
+  z-index: 0;
+  border-radius: 999px;
+  background: var(--color-surface);
+  box-shadow: var(--shadow-card);
+  /* pointer-events:none supaya indikator (walau visualnya "pil" yang
+     mengambang) tidak pernah mencuri tap/drag dari tombol di atasnya —
+     interaksi tetap sepenuhnya ditangani listener di .type-toggle. */
+  pointer-events: none;
+  transition: left 0.22s cubic-bezier(0.4, 0, 0.2, 1), width 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Dua class sementara yang dipasang app.js, sama-sama mematikan transisi:
+   - .is-dragging   -> selama jari/mouse masih ditekan & digeser, indikator
+                       harus mengikuti posisi jari real-time tanpa delay
+                       easing. Dilepas saat pointerup supaya gerakan
+                       terakhir (snap ke opsi terdekat) kembali beranimasi.
+   - .no-transition -> saat modal baru dibuka: indikator "teleport" langsung
+                       ke opsi yang benar, tanpa animasi nyelonong dari
+                       posisi sebelumnya. */
+.type-toggle-indicator.is-dragging,
+.type-toggle-indicator.no-transition {
+  transition: none;
+}
+
+.type-toggle-btn {
+  position: relative;
+  z-index: 1;
+  flex: 1;
+  min-width: 0;
+  min-height: 36px; /* tap target; ukuran teks tetap 13px */
+  padding: 9px 6px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  font-size: 13px;
+  letter-spacing: -0.01em;
+  font-weight: 500;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: color 0.15s ease, transform 0.12s ease;
+}
+
+.type-toggle-btn[data-type="income"].is-active {
+  color: var(--color-primary);
+}
+
+.type-toggle-btn[data-type="expense"].is-active {
+  color: var(--color-danger);
+}
+
+.form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 16px;
+}
+ 
+.form-field label {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--color-text-muted);
+}
+ 
+.form-field input[type="text"],
+.form-field input[type="search"],
+.form-field input[type="date"],
+.form-field select {
+  width: 100%;
+  appearance: none;
+  -webkit-appearance: none;
+  font-family: var(--font-body);
+  font-weight: 500; /* kontrol form tidak mewarisi bobot body (UA stylesheet) */
+  /* 16px, bukan 14px: di bawah 16px iOS Safari otomatis men-zoom halaman
+     saat field difokus (dan tidak selalu zoom balik saat blur). */
+  font-size: 16px;
+  /* line-height & min-height ditulis eksplisit supaya ketiga jenis kontrol
+     menghasilkan tinggi kotak yang IDENTIK (14px × 1.25 + padding 22 +
+     border 2 = 41.5px) — tanpa ini tiap platform (terutama <input
+     type="date"> di iOS) memakai metrik bawaannya sendiri dan tingginya
+     jadi beda-beda tipis dari input teks di atasnya. */
+  line-height: 1.25;
+  min-height: 44px; /* 16×1.25 + 22 padding + 2 border = 44 -> tap target pas */
+  text-align: left;
+  color: var(--color-text);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 11px 12px;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+/* <input type="date"> di Safari iOS punya rendering bawaan yang menyimpang
+   dari input teks: display inline-flex (mengabaikan width:100% -> melebar
+   melewati tepi modal), lebar intrinsik dari konten, dan nilai tanggalnya
+   digambar lewat pseudo-element internal yang rata TENGAH. Semua di-reset
+   di sini supaya teks tanggal mulai dari posisi horizontal yang persis sama
+   dengan "Contoh: Makan siang" di field Nama Transaksi (padding-left 12px
+   dari rule bersama di atas). */
+.form-field input[type="date"] {
+  appearance: none;
+  -webkit-appearance: none;
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.form-field input[type="date"]::-webkit-date-and-time-value {
+  text-align: left;
+  width: 100%;
+  margin: 0;
+}
+
+.form-field input[type="text"]:focus,
+.form-field input[type="search"]:focus,
+.form-field input[type="date"]:focus,
+.form-field select:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px rgba(20, 83, 45, 0.12);
+}
+ 
+.form-field select {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 34px;
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%236B7570' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+}
+ 
+.input-prefix {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+ 
+.input-prefix-label {
+  position: absolute;
+  left: 12px;
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--color-text-muted);
+  pointer-events: none;
+}
+ 
+.input-prefix input {
+  padding-left: 34px !important;
+}
+ 
+.modal-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 6px;
+}
+ 
+/* flex-basis auto (bukan 0) supaya label "Simpan Transaksi" tidak dipaksa
+   muat di setengah lebar: kedua tombol berbagi sisa ruang, dan kalau benar-
+   benar tidak muat sejajar (layar sangat sempit) tombolnya turun baris —
+   bukan teksnya yang keluar dari pil. */
+.modal-actions .btn {
+  flex: 1 1 auto;
+  min-height: 44px;
+}
+
+/* Popup form pendek (budget / kategori / konfirmasi): sedikit lebih rapat
+   daripada modal transaksi, bahasa visual sama. */
+.modal--form .modal-header {
+  margin-bottom: 8px;
+}
+
+.modal-sub {
+  margin: 0 0 16px;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--color-text-muted);
+}
+
+.modal--confirm {
+  max-width: 360px;
+}
+
+.form-field-label {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--color-text-muted);
+}
+
+/* Pilihan cepat nominal budget bulanan: chip pil 36px, aktif = hijau lembut. */
+.quick-amounts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: -6px 0 18px;
+}
+
+.quick-amounts:empty {
+  display: none;
+}
+
+.quick-amount {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 36px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  font-family: var(--font-body);
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--color-text);
+  white-space: nowrap;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.15s ease;
+}
+
+.quick-amount .num {
+  font-weight: 700;
+}
+
+.quick-amount.is-active {
+  background: var(--color-primary-soft);
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+/* Pilihan emoji kategori: grid kotak 44px (tap target penuh), aktif =
+   hijau lembut + border hijau. */
+.emoji-picker {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(44px, 1fr));
+  gap: 8px;
+}
+
+.emoji-option {
+  height: 44px;
+  min-width: 0;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  font-size: 20px;
+  line-height: 1;
+  transition: background-color 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+}
+
+.emoji-option.is-active {
+  background: var(--color-primary-soft);
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 2px rgba(20, 83, 45, 0.12);
+}
+
+@media (hover: hover) {
+  .quick-amount:hover,
+  .emoji-option:hover {
+    border-color: var(--color-primary);
+    background: var(--color-primary-soft);
+  }
+}
+
+/* Aksi sekunder di bawah pasangan Batal/Simpan (mis. Hapus Kategori). */
+.modal-secondary {
+  width: 100%;
+  margin-top: 10px;
+}
+
+/* =========================================================
+   PRESS FEEDBACK (:active) — SATU aturan untuk semua kontrol yang bisa
+   ditekan. Ditaruh di akhir cascade supaya selalu menang atas :hover
+   (mis. .btn--primary:hover yang memberi shadow ditulis SETELAH .btn:active
+   — tanpa blok ini, di desktop tombol yang sedang ditekan masih memakai
+   elevasi hover-nya).
+   - scale(0.97): terasa "masuk" tapi tidak lebay; transform tidak
+     memengaruhi layout, jadi elemen di sebelahnya tidak ikut bergeser.
+   - transisi 120ms dua arah: cepat saat ditekan, halus saat dilepas.
+   - Berlaku selama pointer/jari masih menahan tombol (:active native),
+     lepas -> kembali normal. Untuk iOS Safari lama yang tidak memicu
+     :active pada sentuhan, app.js memasang listener touchstart no-op.
+   Per-komponen (warna/background/opacity saat ditekan) tetap di rule
+   masing-masing; di sini hanya geometri + elevasi + timing.
+   ========================================================= */
+/* Dua pemicu, satu tampilan:
+   - :active  -> mouse/keyboard & browser yang memang memicunya saat touch.
+   - .is-pressed -> dipasang app.js lewat Pointer Events saat jari menyentuh
+     (iOS Safari sering tidak/terlambat memicu :active pada tap), dan
+     ditahan minimal ~120ms supaya tap secepat apa pun tetap terlihat
+     "masuk" lalu kembali. Dilepas saat pointerup/pointercancel (scroll).
+   Press-in 60ms (cepat, supaya sempat terlihat di tap singkat), release
+   memakai transition dasar tiap elemen (120–150ms, halus). */
+/* Catatan: kedua :is() harus BERSAMBUNG tanpa spasi — spasi/baris baru di
+   antaranya berarti descendant combinator, dan rule ini tidak akan pernah
+   cocok. */
+:is(.btn, .icon-btn, .icon-btn-sm, .modal-close, .type-toggle-btn, .filter-chip, .link-see-all, .balance-toggle, .quick-amount, .emoji-option, .calendar-nav, .calendar-day, .bar-col, .search-clear):is(:active, .is-pressed) {
+  transform: scale(0.97);
+  transition-duration: 60ms;
+  transition-timing-function: ease-out;
+}
+
+/* Elevasi turun saat ditekan (hanya kontrol yang memang punya shadow). */
+:is(.btn, .icon-btn, .filter-chip):is(:active, .is-pressed) {
+  box-shadow: none;
+}
+
+/* Tombol ghost/primary di modal: :hover-nya memberi shadow, pastikan saat
+   ditekan shadow-nya tetap hilang (specificity sama, jadi urutan menentukan). */
+:is(.btn--primary, .btn--ghost):is(:active, .is-pressed) {
+  box-shadow: none;
+}
+
+/* Feedback warna per-komponen juga harus ikut saat .is-pressed (rule
+   aslinya hanya :active). */
+.icon-btn-sm.is-pressed,
+.quick-amount.is-pressed,
+.emoji-option.is-pressed {
+  background: var(--color-primary-soft);
+}
+
+.icon-btn-sm[data-action="delete"].is-pressed {
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
+}
+
+.modal-close.is-pressed {
+  background: var(--color-primary-soft);
+  border-color: var(--color-primary-soft);
+  color: var(--color-primary);
+}
+
+.link-see-all.is-pressed {
+  color: var(--color-primary-dark);
+}
+
+.balance-toggle.is-pressed {
+  opacity: 0.6;
+}
+
+/* Area tap 44px untuk kontrol kecil TANPA mengubah ukuran visualnya:
+   pseudo-element transparan meluas di sekeliling tombol. */
+.icon-btn::before,
+.modal-close::before,
+.balance-toggle::before,
+.link-see-all::before {
+  content: "";
+  position: absolute;
+  inset: -4px;
+}
+
+.modal-close,
+.link-see-all {
+  position: relative; /* .icon-btn & .balance-toggle sudah relative */
+}
+
+/* Tile statistik (.stat-grid dkk.): dipakai ringkasan Analisis dan
+   ringkasan Target Keuangan (goals.html). */
+
+.stat-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.stat {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  padding: 14px 16px;
+  background: var(--color-surface);
+  border: 1px solid rgba(225, 228, 221, 0.7);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-card);
+}
+
+.stat--wide {
+  grid-column: 1 / -1;
+}
+
+.stat-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-text-muted);
+}
+
+.stat-value {
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--color-text);
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stat--wide .stat-value {
+  font-size: 22px;
+  font-family: var(--font-numeric);
+  font-variant-numeric: tabular-nums;
+}
+
+.stat-value--text {
+  font-size: 14px;
+  white-space: normal;
+}
+
+/* Tile bertipe teks ("Belum cukup data"): sub-teksnya boleh membungkus. */
+.stat-value--text + .stat-sub {
+  white-space: normal;
+}
+
+.stat-sub {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.section-title-sub {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-text-muted);
+  margin-left: 4px;
+}
+
+/* Status hasil CRUD transaksi di dashboard & halaman Semua Transaksi:
+   memakai gaya .settings-feedback yang sama, hanya jaraknya disesuaikan
+   dengan daftar transaksi di bawahnya. */
+.transaction-feedback {
+  margin: 0 0 10px;
+}
+
+/* Feedback inline sukses/error (role=status). */
+.settings-feedback {
+  margin: 0 0 10px;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  font-size: 12.5px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.settings-feedback[data-type="success"] {
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+}
+
+.settings-feedback[data-type="error"] {
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
+}
+
+.settings-feedback[hidden] {
+  display: none;
+}
+
+.settings-feedback--inset {
+  margin: 4px 16px 10px;
+}
+
+
+/* Tombol nonaktif (› di bulan berjalan, "Bulan Ini" saat sudah di bulan
+   berjalan): tetap terlihat, tapi jelas tidak bisa ditekan. */
+.calendar-nav:disabled,
+.btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.calendar-nav:disabled,
+.btn--ghost:disabled {
+  background: var(--color-surface);
+  border-color: var(--color-border);
+  transform: none;
+}
+
+@media (min-width: 900px) {
+  .stat-grid {
+    grid-template-columns: 1.4fr 1fr 1fr;
+  }
+
+  .stat--wide {
+    grid-column: auto;
+  }
+}

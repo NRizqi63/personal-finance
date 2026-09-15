@@ -1,0 +1,591 @@
+/* =========================================================
+   DASHBOARD (index.html)
+   Aksi cepat, ringkasan saldo, dropdown notifikasi, dan card Target Keuangan
+   di dashboard. Catatan: .budget-card, grid desktop .app, dan modal Financial
+   Check-in sengaja TETAP di base.css — dipakai halaman lain / bergantung pada
+   urutan cascade (.modal--checkin vs .modal).
+   Dipisah dari style.css (refactor tahap 1). Isi rule disalin apa adanya dan
+   urutan aslinya dipertahankan; style.css masih dimuat halaman lain
+   (budget/transactions/settings) sampai tahap berikutnya.
+   ========================================================= */
+
+/* =========================================================
+   3. AKSI CEPAT
+   Dua tombol berbagi satu baris. Label "+ Tambah Transaksi" butuh ~133px,
+   jadi basis 160px per tombol: sejajar mulai 375px (konten 335px), dan di
+   320/360px keduanya turun jadi dua baris selebar penuh — bukan teksnya
+   yang dipaksa keluar dari pil.
+   ========================================================= */
+.quick-actions-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.quick-actions-row .btn {
+  flex: 1 1 160px;
+  padding-left: 12px;
+  padding-right: 12px;
+}
+
+/* =========================================================
+   2. FINANCIAL SUMMARY
+   ========================================================= */
+.summary {
+  background: var(--color-primary);
+  border-radius: var(--radius-lg);
+  /* Nilai pasti (bukan relatif) — jarak tepi lengkung card ke konten di
+     dalamnya (teks "Saldo Anda" & 2 pill putih) dibuat tipis tapi tetap
+     ada, tidak nempel ke border-radius. */
+  padding: 7px;
+  color: var(--color-text-on-primary);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+/* gap ini satu-satunya pengatur jarak Saldo <-> baris card pill (.summary-main
+   sudah tidak punya padding-bottom/border-bottom sendiri — lihat komentar di
+   bawah). Dikembalikan lebih compact (13px, dari 20px) mengikuti tema
+   "lebih ringkas" di revisi ini — instruksi lama yang minta
+   .summary-main.padding-bottom dikecilkan jadi 12-14px sudah tidak berlaku
+   karena padding itu sudah dihapus duluan di revisi sebelumnya, jadi
+   intent-nya dialihkan ke gap ini yang sekarang jadi satu-satunya kontrol
+   jarak tersebut. */
+.summary-primary {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+/* Tanpa border-bottom & padding-bottom: dua card pill putih di bawahnya
+   sudah cukup jadi pemisah visual dari blok Saldo, garis tambahan terasa
+   berlebihan. Jarak Saldo <-> baris pill sekarang murni diatur oleh
+   gap milik .summary-primary. */
+.summary-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 4px 0; /* teks Saldo sedikit masuk, tidak menempel ke tepi lengkung */
+}
+
+.summary-label-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.summary-label {
+  font-size: 13.5px;
+  font-weight: 500;
+  color: rgba(242, 244, 241, 0.72);
+}
+
+/* Tombol hide/show saldo — kecil, transparan, menyatu dengan summary.
+   Kotak tombol dibuat 36x36 (bukan 26x26) supaya target tap nyaman di
+   layar sentuh (di bawah ~40px gampang meleset); ikon di dalamnya tetap
+   15x15 lewat atribut SVG, jadi tampilan visualnya tidak berubah.
+   Margin vertikal negatif (bukan di semua sisi) supaya kotak tap 36px
+   tidak menambah tinggi baris "Saldo Anda" — barisnya tetap setinggi
+   teks label, dan jarak ke teks label tidak ikut termakan. Efek
+   sampingnya, kotak yang membesar ke bawah itu jadi tumpang tindih
+   dengan baris nominal saldo di bawahnya secara geometris — tanpa
+   position+z-index, tap di area tumpang tindih itu jatuh ke teks
+   nominal (yang datang belakangan di flow), bukan ke tombolnya.
+   position:relative + z-index memastikan tombol selalu menang di area
+   yang tumpang tindih itu. */
+.balance-toggle {
+  position: relative;
+  z-index: 1;
+  width: 36px;
+  height: 36px;
+  margin: -10px 0;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  border: none;
+  background: transparent;
+  border-radius: 999px;
+  color: rgba(242, 244, 241, 0.75);
+  transition: color 0.15s ease, opacity 0.15s ease, transform 0.15s ease;
+}
+
+/* Tombol ini SENGAJA tidak pernah punya background di state manapun —
+   lingkaran abu/hijau muda di belakang ikon terasa mengganggu di atas card
+   hijau. Feedback tekannya cukup lewat opacity + scale (pola :active yang
+   sama seperti tombol lain di app ini). Ditulis eksplisit sebagai pagar
+   supaya tidak diam-diam balik lagi lewat rule lain di kemudian hari. */
+.balance-toggle:hover,
+.balance-toggle:active,
+.balance-toggle:focus,
+.balance-toggle:focus-visible {
+  background: transparent;
+}
+
+/* Outline fokus keyboard TETAP ADA (jangan dihapus — itu jalur navigasi
+   non-mouse). Warnanya saja yang di-override: --color-primary dari rule
+   global button:focus-visible adalah hijau tua yang praktis tak terlihat
+   di atas card .summary yang juga hijau tua. */
+.balance-toggle:focus-visible {
+  outline-color: var(--color-text-on-primary);
+}
+
+/* Bug: refleksi properti `.hidden` (IDL) ke atribut HTML `hidden` tidak
+   bisa diandalkan di elemen <svg> inline — pada environment ini,
+   `svgEl.hidden = false` terbukti TIDAK melepas atribut `hidden`-nya
+   (beda dari elemen HTML biasa), jadi ikon-eye dan ikon-eye-off bisa
+   tampil BERSAMAAN alih-alih bergantian. Dipakai class biasa
+   (is-hidden, di-toggle lewat classList di app.js) sebagai gantinya —
+   classList tidak punya ambiguitas semacam ini di browser manapun. */
+.icon-eye.is-hidden,
+.icon-eye-off.is-hidden {
+  display: none;
+}
+ 
+/* @media (hover: hover) supaya di layar sentuh state :hover tidak "nyangkut"
+   menempel setelah tap (browser mobile sering mempertahankan :hover sampai
+   user menyentuh tempat lain). */
+@media (hover: hover) {
+  .balance-toggle:hover {
+    color: var(--color-text-on-primary);
+    transform: scale(1.05);
+  }
+}
+
+.balance-toggle:active {
+  opacity: 0.6;
+}
+
+.summary-value {
+  font-family: var(--font-numeric);
+  font-size: 36px;
+  font-weight: 700;
+  letter-spacing: -0.025em;
+  font-variant-numeric: tabular-nums lining-nums;
+  line-height: 1.1;
+  min-width: 0;
+  overflow-wrap: anywhere; /* saldo 10 digit+ di 320px: membungkus, bukan keluar card */
+}
+
+/* Baris statistik: 2 card putih terpisah (Pemasukan & Pengeluaran) yang
+   duduk berdampingan di atas card hijau — bukan lagi kolom polos yang
+   dipisah garis vertikal. Tinggal 2 item (kolom Investasi dihapus dari
+   card ini), jadi ruangnya lebih longgar dari sebelumnya. */
+.summary-grid {
+  display: flex;
+  gap: 8px;
+}
+
+/* Padding tepi dikecilkan (16px -> 13px) supaya pill-nya sendiri lebih
+   ramping, tapi gap dinaikkan (5px -> 6px) supaya label & nominal di
+   dalamnya justru lebih lega/tidak nempel — dua arah perubahan yang
+   sengaja berlawanan. */
+.summary-item {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 7px 10px;
+  background: var(--color-surface);
+  border-radius: var(--radius-md);
+}
+
+/* Teks di dalam card ini gelap (di atas putih), bukan terang seperti teks
+   lain di dalam .summary yang duduk langsung di atas hijau.
+   font-weight dinaikkan ke bold supaya beratnya senada dengan nominal di
+   bawahnya (.summary-item-value sudah bold sejak awal). */
+.summary-item-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--color-text-muted);
+}
+
+/* Warna khusus per jenis — soft/muda (var(--color-income-text) /
+   --color-expense-text), diterapkan ke label MAUPUN nominal supaya
+   satu pill terasa senada warnanya, bukan cuma nominalnya saja. */
+.summary-item--income .summary-item-label,
+.summary-item--income .summary-item-value {
+  color: var(--color-income-text);
+}
+
+.summary-item--expense .summary-item-label,
+.summary-item--expense .summary-item-value {
+  color: var(--color-expense-text);
+}
+
+/* Angka utama card: bobot 700 (sama dengan nominal Saldo). */
+.summary-item-value {
+  font-family: var(--font-numeric);
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--color-text);
+  font-variant-numeric: tabular-nums lining-nums;
+  overflow-wrap: break-word;
+  letter-spacing: -0.02em;
+}
+
+/* Masking hide/show saldo ("••••••••", U+2022 × 8) — dipasang app.js ke
+   #balance-value, #income-value, #expense-value saat isBalanceVisible=false.
+   Ukuran/berat/warna tetap ikut rule elemen masing-masing. */
+.summary-value.is-masked,
+.summary-item-value.is-masked {
+  letter-spacing: 0.08em; /* deretan bulatan sedikit renggang */
+}
+
+/* =========================================================
+   6. SPENDING CHART (placeholder)
+   ========================================================= */
+/* .chart-placeholder {
+  background: var(--color-surface);
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-md);
+  min-height: 160px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--color-text-muted);
+  text-align: center;
+  padding: 20px;
+}
+
+.chart-placeholder-icon {
+  color: var(--color-text-muted);
+}
+
+.chart-placeholder p {
+  font-size: 13px;
+} */
+
+/* Desktop (>= 900px): ringkasan saldo lebih lega. Grid dua kolomnya
+   sendiri ada di base.css (app shell). */
+
+@media (min-width: 900px) {
+  .summary {
+    align-items: stretch;
+    gap: 16px;
+    padding: 18px;
+  }
+
+  /* .summary-primary sekarang satu-satunya isi .summary (panel "Goals
+     Keuangan" sudah dihapus) — tidak perlu lagi flex:2 di sebelah panel
+     lain, cukup lebar penuh. */
+  .summary-primary {
+    min-width: 0;
+  }
+
+  /* Card statistik dikasih napas lebih lega di layar lebar (padding saja —
+     gap label/nominal 6px sudah sama dengan base sejak revisi ini). */
+  .summary-item {
+    padding: 16px 18px;
+  }
+
+  .summary-item-value {
+    font-size: 17px;
+  }
+}
+
+/* =========================================================
+   DROPDOWN: NOTIFIKASI & PENGATURAN
+   Wrapper (position: relative) jadi anchor untuk panel (position:
+   absolute) supaya panel selalu nempel tepat di bawah tombolnya
+   sendiri, apa pun posisi header di halaman.
+   ========================================================= */
+.dropdown-wrapper {
+  position: relative;
+}
+
+.dropdown-panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 1000;
+  width: 280px;
+  max-width: calc(100vw - 40px);
+  background: var(--color-surface);
+  border-radius: var(--radius-md);
+  box-shadow: 0 24px 60px rgba(15, 23, 18, 0.28), 0 4px 14px rgba(15, 23, 18, 0.12);
+  padding: 10px;
+  box-sizing: border-box;
+  transform-origin: top right; /* mengecil ke arah tombol pemicunya */
+  transform: translateY(6px);
+  opacity: 0;
+  transition: transform 0.2s ease, opacity 0.2s ease;
+  will-change: transform, opacity;
+}
+
+.dropdown-panel[hidden] {
+  display: none;
+}
+
+.dropdown-panel.is-open {
+  transform: translateY(0);
+  opacity: 1;
+}
+
+/* Animasi keluar (dipicu scroll halaman, klik di luar, Escape, toggle):
+   memudar sambil naik sedikit & mengecil ke arah tombolnya, ~220ms, lalu
+   JS memberi display:none setelah transitionend. Hanya transform + opacity
+   -> tidak ada layout shift dan tetap ringan saat halaman sedang digulir. */
+.dropdown-panel.is-closing {
+  transform: translateY(-6px) scale(0.96);
+  opacity: 0;
+  transition: transform 0.22s cubic-bezier(0.4, 0, 1, 1), opacity 0.22s cubic-bezier(0.4, 0, 1, 1);
+  pointer-events: none;
+}
+
+.dropdown-panel-header {
+  padding: 6px 8px 10px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.dropdown-panel-header h3 {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+/* Daftar notifikasi */
+.notification-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 320px;
+  overflow-y: auto;
+  /* Scroll di dalam daftar tidak "menular" ke halaman saat mentok di ujung
+     (scroll chaining, terutama iOS) — kalau menular, halaman ikut bergeser
+     dan panel akan menutup sendiri padahal user cuma menggulir isinya. */
+  overscroll-behavior: contain;
+}
+
+.notification-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 8px;
+  border-radius: var(--radius-sm);
+  transition: background-color 0.15s ease;
+}
+
+@media (hover: hover) {
+  .notification-item:hover {
+    background: var(--color-primary-soft);
+  }
+}
+
+.notification-item-dot {
+  flex-shrink: 0;
+  width: 7px;
+  height: 7px;
+  margin-top: 5px;
+  border-radius: 50%;
+  background: var(--color-accent);
+  visibility: hidden;
+}
+
+.notification-item.is-unread .notification-item-dot {
+  visibility: visible;
+}
+
+.notification-item-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.notification-item-title {
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--color-text);
+}
+
+.notification-item-time {
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.notification-empty {
+  padding: 18px 8px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--color-text-muted);
+}
+
+/* Penanda data contoh/demo (notifikasi mock & goal di Check-in). */
+.notification-demo {
+  margin-top: 4px;
+  padding: 8px 8px 4px;
+  border-top: 1px dashed var(--color-border);
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: var(--color-text-muted);
+}
+
+.demo-tag {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--color-accent-soft);
+  color: #8A5A16;
+  font-size: 10.5px;
+  font-weight: 500;
+  vertical-align: 1px;
+}
+
+@media (max-width: 360px) {
+  .summary-item {
+    padding: 14px 10px;
+  }
+
+  .summary-item-value {
+    font-size: 14px;
+  }
+
+  .summary-item-label {
+    font-size: 11.5px;
+  }
+
+  .summary-value {
+    font-size: 30px;
+  }
+}
+
+/* ---------- Card Target Keuangan di dashboard (G-4) ----------
+   Memakai .budget-card + .budget-amounts/.budget-foot yang sama dengan card
+   Budget Bulan Ini; yang baru hanya daftar mini target & empty state. */
+.goals-card-foot {
+  flex-wrap: wrap;
+  row-gap: 2px;
+}
+
+.goals-card-foot strong.num {
+  color: var(--color-text);
+}
+
+.goals-card-done {
+  color: var(--color-primary);
+}
+
+/* Bar keseluruhan jadi hijau kalau SEMUA target tercapai. */
+.progress-bar--goal.is-done {
+  background: var(--color-primary-soft);
+}
+
+.progress-bar--goal.is-done .progress-bar-fill {
+  background: var(--color-primary);
+}
+
+/* Daftar mini: dua target paling relevan, tiap baris nama + status + persen
+   di atas bar tipis. */
+.goals-card-list {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 12px 0 0;
+  border-top: 1px dashed var(--color-border);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.goals-card-item-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 5px;
+  font-size: 12.5px;
+}
+
+.goals-card-item-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-weight: 600;
+  color: var(--color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Chip status kecil — palet yang sama dengan .goal-status di goals.html. */
+.goals-card-item-status {
+  flex-shrink: 0;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.3;
+  white-space: nowrap;
+  background: var(--color-bg);
+  color: var(--color-text-muted);
+  border: 1px solid var(--color-border);
+}
+
+.goals-card-item-status[data-status="urgent"] {
+  background: var(--color-accent-soft);
+  color: #8A5A16;
+  border-color: transparent;
+}
+
+.goals-card-item-status[data-status="overdue"] {
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
+  border-color: transparent;
+}
+
+.goals-card-item-status[data-status="done"] {
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+  border-color: transparent;
+}
+
+.goals-card-item-pct {
+  flex-shrink: 0;
+  font-size: 12.5px;
+  color: var(--color-text);
+}
+
+.goals-card-item[data-status="done"] .progress-bar--goal {
+  background: var(--color-primary-soft);
+}
+
+.goals-card-item[data-status="done"] .progress-bar-fill {
+  background: var(--color-primary);
+}
+
+.progress-bar--thin {
+  height: 5px;
+}
+
+.goals-card-more {
+  margin: 10px 0 0;
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+/* Empty state di dalam card: teks + satu tombol ke goals.html. */
+.goals-card-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.goals-card-empty-text {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--color-text-muted);
+  overflow-wrap: anywhere;
+}
+
+.goals-card-cta {
+  color: var(--color-primary);
+  border-color: var(--color-primary-soft);
+}
