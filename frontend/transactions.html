@@ -224,6 +224,13 @@
     </div>
   </div>
 
-  <script src="js/app.js"></script>
+  <!-- JS dipisah (refactor tahap 5B): core.js (data, helper, komponen item
+       transaksi, modal, dispatcher) -> transactions-shared.js (state halaman,
+       modal tambah/edit/hapus, refresh) -> transactions.js (kalender, filter,
+       daftar, initTransactionsPage). Urutan penting; jangan memuat app.js
+       bersama file ini. -->
+  <script src="js/core.js"></script>
+  <script src="js/transactions-shared.js"></script>
+  <script src="js/transactions.js"></script>
 </body>
 </html>
