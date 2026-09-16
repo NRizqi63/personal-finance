@@ -1,0 +1,211 @@
+<!doctype html>
+<meta charset="utf-8">
+<pre id="r">running…</pre>
+<script>
+const out = []; const ok = (n, c, x = "") => out.push(`${c ? "PASS" : "FAIL"} ${n}${x ? "  (" + x + ")" : ""}`);
+const wait = (ms) => new Promise(r => setTimeout(r, ms));
+const BASE = new URL("../../frontend/", location.href).href;
+// JS-6: app.js sudah dihapus. Sumber kode HIDUP untuk pemeriksaan regex = gabungan 8 file split (urutan muat).
+const APP_SPLIT_FILES = ["core.js", "transactions-shared.js", "dashboard.js", "goals.js", "analytics.js", "budget.js", "transactions.js", "settings.js"];
+async function fetchAppJs(base) { const parts = []; for (const f of APP_SPLIT_FILES) parts.push(`/* ==== ${f} ==== */\n` + await (await fetch(base + "js/" + f)).text()); return parts.join("\n"); }
+
+const pad = (n) => String(n).padStart(2, "0");
+const today = new Date();
+const isoToday = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`;
+
+// Data aplikasi yang sedang aktif (harus TIDAK berubah oleh proses import).
+const LIVE_TX = [{ id: 7, title: "Kopi Aktif", category: "makanan", type: "expense", amount: 18000, isoDate: isoToday, time: "" }];
+const LIVE_BUDGET = { monthly: 1234000, categories: { makanan: { name: "Makanan", emoji: "🍜", budget: 800000 } } };
+const LIVE_SETTINGS = { name: "Rizqi Aktif", hideBalanceOnOpen: true, showCheckin: false };
+
+const backup = (data, over = {}) => JSON.stringify(Object.assign({
+  app: "personal-finance", appName: "Personal Finance", schema: 1, appVersion: "V2.2",
+  exportedAt: "2026-09-14T01:32:11.281Z", counts: { transactions: 99, categories: 99 }, data,
+}, over));
+const tx = (o = {}) => Object.assign({ id: 1, title: "Makan", category: "makanan", type: "expense", amount: 25000, isoDate: isoToday, time: "Hari ini, 12:30" }, o);
+const BUDGET_OK = { monthly: 2000000, categories: { makanan: { name: "Makanan", emoji: "🍜", budget: 800000 } } };
+const SETTINGS_OK = { name: "Dina", hideBalanceOnOpen: true, showCheckin: false };
+
+let frame = null;
+async function load(page = "settings.html", width = 390) {
+  if (frame) frame.remove();
+  frame = document.createElement("iframe"); frame.width = width; frame.height = 1600; frame.src = BASE + page;
+  document.body.appendChild(frame);
+  await new Promise(r => frame.onload = r); await wait(400);
+  return { d: frame.contentDocument, w: frame.contentWindow };
+}
+const txt = (el) => (el ? el.textContent.replace(/\s+/g, " ").trim() : "");
+const snapshotLS = (w) => JSON.stringify(["financeData.transactions", "financeData.budget", "financeData.settings"].map(k => w.localStorage.getItem(k)));
+/** Pilih file lewat input asli: DataTransfer + event change (jalur user nyata). */
+async function pickFile(d, w, name, content, type = "application/json") {
+  const input = d.getElementById("import-file");
+  const fb = d.getElementById("settings-data-status");
+  const before = fb.textContent;
+  const dt = new w.DataTransfer();
+  dt.items.add(new w.File([content], name, { type }));
+  input.files = dt.files;
+  input.dispatchEvent(new w.Event("change", { bubbles: true }));
+  // FileReader asinkron: tunggu sampai status berubah ATAU hasil pemeriksaan
+  // terisi (maks. 8 detik) — headless kadang lambat untuk file besar.
+  const pendingBefore = w.getPendingImport();
+  for (let i = 0; i < 80; i += 1) {
+    if (fb.textContent !== before) break;
+    if (w.getPendingImport() !== pendingBefore) break;
+    await wait(100);
+  }
+  await wait(150);
+}
+
+(async () => {
+  let { d, w } = await load();
+  try {
+    w.localStorage.clear(); w.sessionStorage.clear();
+    w.localStorage.setItem("financeData.transactions", JSON.stringify(LIVE_TX));
+    w.localStorage.setItem("financeData.budget", JSON.stringify(LIVE_BUDGET));
+    w.localStorage.setItem("financeData.settings", JSON.stringify(LIVE_SETTINGS));
+  } catch (e) {}
+  ({ d, w } = await load());
+  const errors = []; w.addEventListener("error", e => errors.push(e.message));
+  const V = w.validateBackup;
+  const before = snapshotLS(w);
+
+  // ================= 1. UI =================
+  ok("1a. section Data & Backup: tombol 'Pilih File…' + input file accept .json (hidden)", !!d.getElementById("btn-import-pick") && d.getElementById("import-file").accept === ".json,application/json" && d.getElementById("import-file").hidden);
+  // Copy baris Import (copy produk diubah pemilik produk: kalimat jaminan
+  // dipindah ke status runtime — lihat 1b2). Dicocokkan PERSIS, bukan sekadar
+  // "mengandung", supaya perubahan copy berikutnya tetap tertangkap.
+  const importRow = d.getElementById("btn-import-pick").closest(".settings-row");
+  const importDesc = () => txt(importRow.querySelector(".settings-row-desc"));
+  ok("1b. deskripsi Import (copy aktual): sumber file dibatasi ke backup aplikasi ini + batas 5 MB", importDesc() === "Hanya menerima file backup JSON dari aplikasi ini, maksimal 5 MB." && /backup JSON dari aplikasi ini/i.test(importDesc()) && /maksimal 5 MB/.test(importDesc()), importDesc());
+  ok("1b1. perubahan hanya copy: struktur, selector, dan a11y baris Import tetap", importRow.querySelector(".settings-row-title").textContent.trim() === "Import Backup (JSON)" && importRow.querySelector(".settings-row-body") !== null && importRow.querySelector("[aria-hidden=\"true\"]") !== null && d.getElementById("import-file").hidden && d.getElementById("import-file").accept === ".json,application/json" && d.getElementById("settings-data-status").getAttribute("role") === "status" && d.getElementById("settings-data-status").getAttribute("aria-live") === "polite");
+  ok("1b1b. sebelum ada file: status & ringkasan kosong (tidak ada klaim apa pun lebih dulu)", txt(d.getElementById("settings-data-status")) === "" && txt(d.getElementById("import-summary")) === "");
+  ok("1c. area status & ringkasan ada dan tersembunyi sebelum ada file", d.getElementById("settings-data-status").hidden && d.getElementById("import-summary").hidden);
+  ok("1d. reset tersedia sebagai tiga aksi parsial di Zona Berbahaya (reset seluruh data belum ada)", d.querySelectorAll("#reset-actions [data-reset-target]").length === 3 && !d.querySelector('[data-reset-target="all"]') && d.querySelectorAll("#data .badge-soon").length === 0);
+  ok("1e. export JSON/CSV tidak terganggu", !!d.getElementById("btn-export-json") && !!d.getElementById("btn-export-csv"));
+
+  // ================= 2. validator: root =================
+  ok("2a. JSON malformed ditolak", (() => { const r = V("{bukan json"); return !r.ok && r.data === null && /bukan file backup JSON/.test(r.errors[0]); })());
+  ok("2b. root array ditolak", !V("[1,2,3]").ok && /tidak sesuai format/.test(V("[1,2,3]").errors[0]));
+  ok("2c. root null / string / angka ditolak", !V("null").ok && !V('"teks"').ok && !V("42").ok);
+  ok("2d. app mismatch ditolak (backup aplikasi lain)", (() => { const r = V(backup({ transactions: [] }, { app: "other-app" })); return !r.ok && /aplikasi lain/.test(r.errors[0]); })());
+  ok("2e. schema hilang / bukan angka ditolak", !V(backup({ transactions: [] }, { schema: undefined })).ok && !V(backup({ transactions: [] }, { schema: "1" })).ok);
+  ok("2f. schema lebih tinggi ditolak dengan pesan versi", (() => { const r = V(backup({ transactions: [] }, { schema: 2 })); return !r.ok && /versi aplikasi yang lebih baru \(format 2\)/.test(r.errors[0]); })());
+  ok("2g. data hilang / bukan object ditolak", !V(backup(undefined)).ok && !V(backup([])).ok);
+  ok("2h. transactions hilang / bukan array ditolak", !V(backup({})).ok && !V(backup({ transactions: {} })).ok && /data transaksi tidak ditemukan/.test(V(backup({})).errors[0]));
+
+  // ================= 3. validator: file valid =================
+  const empty = V(backup({ transactions: [], budget: BUDGET_OK, settings: SETTINGS_OK }));
+  ok("3a. transactions [] = VALID (backup sah tanpa transaksi)", empty.ok && empty.counts.totalRows === 0 && empty.counts.validRows === 0 && empty.data.transactions.length === 0);
+  const inc = V(backup({ transactions: [tx({ type: "income", title: "Gaji", amount: 5000000 })], budget: BUDGET_OK, settings: SETTINGS_OK }));
+  ok("3b. satu transaksi income diterima apa adanya (7 field, type income)", inc.ok && inc.counts.validRows === 1 && inc.data.transactions[0].type === "income" && inc.data.transactions[0].amount === 5000000 && Object.keys(inc.data.transactions[0]).sort().join() === "amount,category,id,isoDate,time,title,type");
+  const exp = V(backup({ transactions: [tx()], budget: BUDGET_OK, settings: SETTINGS_OK }));
+  ok("3c. satu transaksi expense diterima; judul di-trim; time dipertahankan", exp.ok && exp.data.transactions[0].type === "expense" && exp.data.transactions[0].title === "Makan" && exp.data.transactions[0].time === "Hari ini, 12:30");
+  ok("3d. judul dengan spasi berlebih di-trim", V(backup({ transactions: [tx({ title: "   Nasi Goreng   " })] })).data.transactions[0].title === "Nasi Goreng");
+  const invst = V(backup({ transactions: [tx({ type: "investment" })] }));
+  ok("3e. type 'investment' dipetakan ke 'expense' (kompatibilitas data lama)", invst.ok && invst.counts.validRows === 1 && invst.data.transactions[0].type === "expense");
+  ok("3f. hasil membawa data budget & settings yang sudah dinormalisasi", exp.data.budget.monthly === 2000000 && exp.data.budget.categories.makanan.budget === 800000 && JSON.stringify(exp.data.settings) === JSON.stringify(SETTINGS_OK));
+
+  // ================= 4. validator: baris invalid =================
+  const rowCase = (over) => V(backup({ transactions: [tx(over), tx({ title: "Valid" })], budget: BUDGET_OK }));
+  const skipOne = (over, reason) => { const r = rowCase(over); return r.ok && r.counts.totalRows === 2 && r.counts.validRows === 1 && r.counts.skippedRows === 1 && r.skipped[reason] === 1 && r.data.transactions[0].title === "Valid"; };
+  ok("4a. title kosong / hanya spasi / bukan string dilewati", skipOne({ title: "" }, "title") && skipOne({ title: "   " }, "title") && skipOne({ title: 123 }, "title"));
+  ok("4b. title > 120 karakter dilewati (121), tepat 120 diterima", skipOne({ title: "A".repeat(121) }, "title") && V(backup({ transactions: [tx({ title: "A".repeat(120) })] })).counts.validRows === 1);
+  ok("4c. amount string ditolak ('25000' & ' 25000 ')", skipOne({ amount: "25000" }, "amount") && skipOne({ amount: " 25000 " }, "amount"));
+  ok("4d. amount 0 / negatif ditolak", skipOne({ amount: 0 }, "amount") && skipOne({ amount: -5000 }, "amount"));
+  ok("4e. amount NaN / Infinity / -Infinity / null ditolak", skipOne({ amount: NaN }, "amount") && skipOne({ amount: Infinity }, "amount") && skipOne({ amount: -Infinity }, "amount") && skipOne({ amount: null }, "amount"));
+  ok("4f. type asing dilewati", skipOne({ type: "saving" }, "type") && skipOne({ type: 1 }, "type"));
+  ok("4g. isoDate invalid dilewati (format salah, 2026-02-30, kosong, angka)", skipOne({ isoDate: "14/09/2026" }, "isoDate") && skipOne({ isoDate: "2026-02-30" }, "isoDate") && skipOne({ isoDate: "" }, "isoDate") && skipOne({ isoDate: 20260914 }, "isoDate"));
+  ok("4h. elemen bukan object (null / string / array) dilewati", (() => { const r = V(backup({ transactions: [null, "x", [], tx()] })); return r.ok && r.counts.validRows === 1 && r.skipped.shape === 3; })());
+  ok("4i. semua baris invalid -> DITOLAK (file berisi tapi tak ada yang valid)", (() => { const r = V(backup({ transactions: [tx({ amount: 0 }), tx({ title: "" })] })); return !r.ok && /Tidak ada transaksi yang bisa dibaca/.test(r.errors[0]) && r.data === null; })());
+  ok("4j. rincian alasan dilewati tersedia untuk ringkasan", (() => { const r = V(backup({ transactions: [tx({ amount: 0 }), tx({ type: "x" }), tx()] })); return r.counts.skippedRows === 2 && r.skipped.amount === 1 && r.skipped.type === 1; })());
+
+  // ================= 5. kategori & id =================
+  ok("5a. category hilang / bukan string -> 'lainnya'", V(backup({ transactions: [tx({ category: undefined })] })).data.transactions[0].category === "lainnya" && V(backup({ transactions: [tx({ category: 5 })] })).data.transactions[0].category === "lainnya");
+  ok("5b. category tidak aman (kutip/HTML/spasi/__proto__) -> 'lainnya'", ['x" onmouseover="alert(1)', "<b>k</b>", "ada spasi", "__proto__", "constructor", "prototype", ""].every(k => V(backup({ transactions: [tx({ category: k })] })).data.transactions[0].category === "lainnya"));
+  ok("5c. category aman dipertahankan apa adanya", V(backup({ transactions: [tx({ category: "kopi-jajan_2" })] })).data.transactions[0].category === "kopi-jajan_2");
+  ok("5d. kategori transaksi di luar daftar budget dilaporkan sebagai 'tidak dikenal'", (() => { const r = V(backup({ transactions: [tx({ category: "lainnya" })], budget: BUDGET_OK })); return r.meta.unknownCategories.includes("lainnya") && r.warnings.some(x => /tidak ada di daftar budget/.test(x)); })());
+  const ids = V(backup({ transactions: [tx({ id: 99, title: "A" }), tx({ id: 99, title: "B" }), tx({ id: "x", title: "C" }), tx({ id: undefined, title: "D" })] }));
+  ok("5e. id lama TIDAK dipakai: dinomori ulang menurun 4,3,2,1 sesuai urutan file", ids.data.transactions.map(t => t.id).join() === "4,3,2,1" && ids.data.transactions.map(t => t.title).join() === "A,B,C,D");
+  ok("5f. id duplikat & id tidak valid dicatat di meta", ids.meta.duplicateIds === 1 && ids.meta.invalidIds === 2 && ids.meta.idsRenumbered === true);
+
+  // ================= 6. budget & settings defensif =================
+  const badBudget = (b) => V(backup({ transactions: [tx()], budget: b, settings: SETTINGS_OK }));
+  ok("6a. budget hilang / null / array / string -> default aplikasi, tidak crash, transaksi tetap valid", [undefined, null, [], "x", 5].every(b => { const r = badBudget(b); return r.ok && r.counts.validRows === 1 && r.meta.budgetFallback && r.data.budget.monthly === 2400000 && Object.keys(r.data.budget.categories).length === 5; }));
+  ok("6b. monthly invalid (NaN/negatif/string) -> default 2.400.000, kategori dari file tetap dipakai", (() => { const r = badBudget({ monthly: -5, categories: BUDGET_OK.categories }); return r.ok && r.data.budget.monthly === 2400000 && r.data.budget.categories.makanan && r.meta.budgetFallback; })());
+  ok("6c. monthly 0 valid (bukan fallback)", (() => { const r = badBudget({ monthly: 0, categories: {} }); return r.ok && r.data.budget.monthly === 0 && !r.meta.budgetFallback; })());
+  ok("6d. categories {} valid (user memang menghapus semua kategori)", (() => { const r = badBudget({ monthly: 100000, categories: {} }); return r.ok && Object.keys(r.data.budget.categories).length === 0; })());
+  ok("6e. kategori invalid dilewati & dihitung (name kosong, budget NaN, bukan object)", (() => { const r = badBudget({ monthly: 1, categories: { a: { name: "", budget: 1 }, b: { name: "B", budget: NaN }, c: "bukan-objek", d: { name: "D", emoji: "💡", budget: 5000 } } }); return r.ok && r.meta.categoriesSkipped === 3 && Object.keys(r.data.budget.categories).join() === "d"; })());
+  ok("6f. emoji hilang/aneh -> emoji fallback 💼; nama di-trim", (() => { const r = badBudget({ monthly: 1, categories: { a: { name: "  Ada  ", emoji: 5, budget: 100 } } }); return r.data.budget.categories.a.emoji === "💼" && r.data.budget.categories.a.name === "Ada"; })());
+  ok("6g. key kategori berbahaya/tidak aman dibuang dari budget", (() => { const r = badBudget({ monthly: 1, categories: JSON.parse('{"__proto__":{"name":"P","emoji":"x","budget":1},"constructor":{"name":"C","emoji":"x","budget":1},"prototype":{"name":"Q","emoji":"x","budget":1},"x\\" onmouseover=\\"alert(1)":{"name":"K","emoji":"x","budget":1},"aman":{"name":"Aman","emoji":"🍜","budget":1}}') }); return Object.keys(r.data.budget.categories).join() === "aman" && r.meta.categoriesSkipped === 4; })());
+  ok("6h. prototype tidak tercemar oleh hasil validasi", (() => { const r = badBudget({ monthly: 1, categories: JSON.parse('{"__proto__":{"polluted":true,"name":"P","emoji":"x","budget":1}}') }); return w.Object.prototype.polluted === undefined && ({}).polluted === undefined && r.data.budget.categories.polluted === undefined; })());
+  ok("6i. settings hilang/rusak -> default {Rizqi,false,true} + warning; tidak crash", [undefined, null, [], "x", { name: "   ", hideBalanceOnOpen: "ya" }].every(sv => { const r = V(backup({ transactions: [tx()], budget: BUDGET_OK, settings: sv })); return r.ok && r.data.settings.name === "Rizqi" && typeof r.data.settings.hideBalanceOnOpen === "boolean" && typeof r.data.settings.showCheckin === "boolean"; }));
+  ok("6j. settings string boolean dinormalisasi & properti asing dibuang", (() => { const r = V(backup({ transactions: [tx()], settings: { name: "Sari", hideBalanceOnOpen: "true", showCheckin: "false", extra: 1 } })); return r.data.settings.hideBalanceOnOpen === true && r.data.settings.showCheckin === false && Object.keys(r.data.settings).sort().join() === "hideBalanceOnOpen,name,showCheckin"; })());
+  ok("6k. meta menandai budget/settings ditemukan atau fallback", (() => { const a = V(backup({ transactions: [], budget: BUDGET_OK, settings: SETTINGS_OK })); const b = V(backup({ transactions: [] })); return a.meta.budgetFound && a.meta.settingsFound && !a.meta.budgetFallback && !a.meta.settingsFallback && !b.meta.budgetFound && b.meta.budgetFallback && b.meta.settingsFallback; })());
+
+  // ================= 7. kemurnian validator =================
+  ok("7a. validateBackup tidak menulis/membaca localStorage & tidak menyentuh DOM (source check)", !/localStorage|sessionStorage|document\.|getElementById|innerHTML/.test(String(w.validateBackup) + String(w.normalizeBudgetData) + String(w.normalizeCategoryKey)));
+  ok("7b. menjalankan validator berkali-kali tidak mengubah localStorage", (() => { [1, 2, 3].forEach(() => V(backup({ transactions: [tx()], budget: BUDGET_OK, settings: SETTINGS_OK }))); return snapshotLS(w) === before; })());
+  ok("7c. validator tidak mengubah data aplikasi aktif (financeData)", w.getCategory("makanan").budget === 800000 && w.getUserName() === "Rizqi Aktif");
+  ok("7d. hasil validasi = objek baru (tidak berbagi referensi dengan input parse)", (() => { const r = V(backup({ transactions: [tx()], budget: BUDGET_OK })); r.data.transactions[0].title = "diubah"; return V(backup({ transactions: [tx()], budget: BUDGET_OK })).data.transactions[0].title === "Makan"; })());
+
+  // ================= 8. alur file picker =================
+  const good = backup({ transactions: [tx(), tx({ title: "Gaji", type: "income", amount: 5000000 }), tx({ amount: 0 })], budget: BUDGET_OK, settings: SETTINGS_OK });
+  await pickFile(d, w, "personal-finance-backup-2026-09-14.json", good);
+  const fb = () => d.getElementById("settings-data-status"), sum = () => d.getElementById("import-summary");
+  ok("8a. file valid: status sukses, menyebut jumlah transaksi & bahwa data BELUM diganti", !fb().hidden && fb().dataset.type === "success" && /2 transaksi siap dipulihkan/.test(txt(fb())) && /BELUM diganti/.test(txt(fb())));
+  // Lanjutan 1b: jaminan "file diperiksa dulu, data BELUM diganti" tidak boleh
+  // hilang dari produk. Sejak copy statis dipendekkan, wording aktualnya ada di
+  // status ini — jadi di sinilah jaminan itu dipatok, kata per kata.
+  ok("1b2. jaminan 'diperiksa dulu, data belum diganti' tetap sampai ke pengguna dengan wording aktual", /File backup valid/.test(txt(fb())) && /Data kamu BELUM diganti/.test(txt(fb())) && /periksa ringkasannya/.test(txt(fb())) && /Timpa Data/.test(txt(fb())), txt(fb()));
+  ok("1b2b. jaminan itu benar: pada titik ini belum ada satu pun data yang ditulis", snapshotLS(w) === before && w.getPendingImport() !== null);
+  const summaryMap = () => Object.fromEntries([...sum().querySelectorAll(".settings-meta-row")].map(row => [row.querySelector("dt").textContent, row.querySelector("dd").textContent]));
+  ok("8b. ringkasan tampil: valid 2 dari 3, dilewati 1, kategori, budget bulanan, pengaturan", !sum().hidden && (() => { const m = summaryMap(); return m["Transaksi valid"] === "2 dari 3" && m["Baris dilewati"] === "1" && m["Budget bulanan"] === "Rp2.000.000" && m["Pengaturan"] === "dari file" && m["Kategori"] === "1"; })(), JSON.stringify(summaryMap()));
+  ok("8c. ringkasan dibuat dengan textContent (tidak ada elemen dari isi file)", sum().querySelectorAll("img, script, b").length === 0);
+  ok("8d. pendingImport tersimpan HANYA di memori (tidak ada key baru di localStorage)", w.getPendingImport() && w.getPendingImport().ok && w.getPendingImport().counts.validRows === 2 && Object.keys(w.localStorage).filter(k => k.startsWith("financeData.")).sort().join() === "financeData.budget,financeData.settings,financeData.transactions");
+  ok("8e. localStorage TIDAK berubah sama sekali setelah file valid diproses", snapshotLS(w) === before, "byte-per-byte");
+  ok("8f. data aplikasi aktif tidak berubah (nama & budget lama tetap)", w.getUserName() === "Rizqi Aktif" && w.getCategory("makanan").budget === 800000 && d.getElementById("settings-name").value === "Rizqi Aktif");
+
+  await pickFile(d, w, "catatan.txt", good, "text/plain");
+  ok("8g. file non-JSON (ekstensi/type) ditolak, ringkasan & pendingImport dibersihkan", fb().dataset.type === "error" && /file \.json/i.test(txt(fb())) && sum().hidden && w.getPendingImport() === null);
+  await pickFile(d, w, "backup.json", "{rusak");
+  ok("8h. JSON rusak ditolak dengan pesan jelas", fb().dataset.type === "error" && /bukan file backup JSON/.test(txt(fb())) && sum().hidden);
+  await pickFile(d, w, "backup.json", backup({ transactions: [] }, { app: "lain" }));
+  ok("8i. backup aplikasi lain ditolak", fb().dataset.type === "error" && /aplikasi lain/.test(txt(fb())));
+  await pickFile(d, w, "kosong.json", "");
+  ok("8j. file kosong ditolak", fb().dataset.type === "error" && /kosong/i.test(txt(fb())));
+  await pickFile(d, w, "besar.json", "x".repeat(5 * 1024 * 1024 + 10));
+  ok("8k. file > 5 MB ditolak tanpa dibaca", fb().dataset.type === "error" && /5 MB/.test(txt(fb())) && w.getPendingImport() === null);
+  ok("8l. localStorage tetap utuh setelah semua kasus gagal", snapshotLS(w) === before);
+  // Halaman dimuat ulang dulu: file 5 MB di langkah sebelumnya kadang membuat
+  // iframe sibuk sehingga event change berikutnya telat (flaky di headless).
+  ({ d, w } = await load("settings.html"));
+  await pickFile(d, w, "backup.json", backup({ transactions: [], budget: BUDGET_OK, settings: SETTINGS_OK }));
+  ok("8m. backup tanpa transaksi diterima (0 transaksi siap dipulihkan)", fb().dataset.type === "success" && /0 transaksi siap dipulihkan/.test(txt(fb())) && w.getPendingImport() && w.getPendingImport().counts.validRows === 0, `type=${fb().dataset.type} pending=${!!w.getPendingImport()} text=${txt(fb()).slice(0,120)}`);
+  const inputEl = d.getElementById("import-file");
+  ok("8n. input.value dikosongkan setelah dipilih (file sama bisa dipilih ulang)", inputEl.value === "");
+
+  // ================= 9. batasan tahap ini =================
+  const appJs = await fetchAppJs(BASE);
+  ok("9a. penerapan backup ada di jalur terpisah & aman: tanpa localStorage.clear(), reload hanya lewat reloadPage()", !/localStorage\.clear\(\)/.test(appJs.replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, "")) && /function snapshotStorage/.test(appJs) && /function rollbackStorage/.test(appJs) && (appJs.match(/location\.reload\(\)/g) || []).length === 1);
+  ok("9b. modal konfirmasi import tersedia di markup & tidak menulis apa pun sendiri", /id="import-modal-overlay"/.test(await (await fetch(BASE + "settings.html")).text()) && !!d.getElementById("import-modal-overlay") && snapshotLS(w) === before);
+  ok("9c. tidak ada fetch/XHR/eval/new Function di jalur import", !/[^.\w]eval\s*\(|new Function|XMLHttpRequest|WebSocket|\bfetch\s*\(/.test([w.handleImportFile, w.readBackupFile, w.validateBackup, w.setupSettingsImport, w.renderImportSummary].map(String).join("\n")));
+  ok("9d. checkinDismissed tidak disentuh", w.sessionStorage.getItem("checkinDismissed") === null);
+  ok("9e. export JSON masih menghasilkan format schema 1 yang sama", (() => { const b = w.buildBackup(); return b.app === "personal-finance" && b.schema === 1 && !!b.data.transactions && !!b.data.budget && !!b.data.settings; })());
+  ok("9f. round-trip: hasil export aplikasi sendiri lolos validasi", (() => { const r = V(JSON.stringify(w.buildBackup())); return r.ok && r.counts.validRows === 1 && r.data.transactions[0].title === "Kopi Aktif"; })());
+
+  // ================= 10. responsif =================
+  for (const wd of [320, 375, 430, 768, 1024, 1280]) {
+    const r = await load("settings.html", wd);
+    await pickFile(r.d, r.w, "backup.json", good);
+    const de = r.d.documentElement;
+    const card = r.d.getElementById("btn-import-pick").closest(".settings-card").getBoundingClientRect();
+    const btn = r.d.getElementById("btn-import-pick").getBoundingClientRect();
+    const inside = btn.right <= card.right + 0.5 && btn.left >= card.left - 0.5 && btn.height >= 36;
+    const rowsOk = [...r.d.querySelectorAll("#data .settings-row, #data .settings-meta-row, #data .settings-feedback")].every(el => el.scrollWidth <= el.clientWidth + 1);
+    ok(`10-${wd}. tanpa overflow horizontal; tombol & ringkasan di dalam card`, de.scrollWidth === de.clientWidth && inside && rowsOk, `sw=${de.scrollWidth} cw=${de.clientWidth}`);
+  }
+  ok("11. console 0 error", errors.length === 0, errors.join(" | "));
+  try { w.localStorage.clear(); } catch (e) {}
+  document.getElementById("r").textContent = out.join("\n");
+})().catch(e => { out.push("EXCEPTION " + e.stack); document.getElementById("r").textContent = out.join("\n"); });
+</script>

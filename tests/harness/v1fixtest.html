@@ -1,0 +1,168 @@
+<!doctype html>
+<meta charset="utf-8">
+<pre id="r">running…</pre>
+<script>
+const out = []; const ok = (n, c, x = "") => out.push(`${c ? "PASS" : "FAIL"} ${n}${x ? "  (" + x + ")" : ""}`);
+const wait = (ms) => new Promise(r => setTimeout(r, ms));
+const BASE = new URL("../../frontend/", location.href).href;
+// JS-6: style.css sudah dihapus. Sumber CSS HIDUP untuk pemeriksaan selector = gabungan 7 file split.
+const CSS_SPLIT_FILES = ["base.css", "dashboard.css", "goals.css", "analytics.css", "budget.css", "transactions.css", "settings.css"];
+async function fetchStyleCss(base) { const parts = []; for (const f of CSS_SPLIT_FILES) parts.push(`/* ==== ${f} ==== */\n` + await (await fetch(base + "css/" + f)).text()); return parts.join("\n"); }
+// JS-6: app.js sudah dihapus. Sumber kode HIDUP untuk pemeriksaan regex = gabungan 8 file split (urutan muat).
+const APP_SPLIT_FILES = ["core.js", "transactions-shared.js", "dashboard.js", "goals.js", "analytics.js", "budget.js", "transactions.js", "settings.js"];
+async function fetchAppJs(base) { const parts = []; for (const f of APP_SPLIT_FILES) parts.push(`/* ==== ${f} ==== */\n` + await (await fetch(base + "js/" + f)).text()); return parts.join("\n"); }
+
+let frame = null;
+async function load(page, width = 390) {
+  if (frame) frame.remove();
+  frame = document.createElement("iframe"); frame.width = width; frame.height = 1500; frame.src = BASE + page;
+  document.body.appendChild(frame);
+  await new Promise(r => frame.onload = r); await wait(320);
+  const d = frame.contentDocument, w = frame.contentWindow;
+  const cc = d.getElementById("checkin-close"); if (cc) { cc.click(); await wait(240); }
+  return { d, w };
+}
+const txt = (el) => (el ? el.textContent.replace(/\s+/g, " ").trim() : "");
+const num = (s) => Number(String(s).replace(/\D/g, ""));
+const typeInto = (el, v) => { el.value = v; el.dispatchEvent(new Event("input", { bubbles: true })); };
+const SEED_TITLES = ["Makan Siang", "Bensin Motor", "Gaji Bulanan"];
+const SEED_AMOUNTS = ["4.945.000", "5.000.000", "55.000", "25.000", "30.000"];
+
+(async () => {
+  // ============ 1. localStorage kosong -> Rp0 ============
+  let { d, w } = await load("index.html");
+  try { w.localStorage.clear(); } catch (e) {}
+  ({ d, w } = await load("index.html"));
+  if (!w.eval("isBalanceVisible")) d.getElementById("btn-toggle-balance").click();
+  await wait(80);
+  ok("1. localStorage kosong -> saldo/pemasukan/pengeluaran Rp0", txt(d.getElementById("balance-value")) === "Rp0" && txt(d.getElementById("income-value")) === "Rp0" && txt(d.getElementById("expense-value")) === "Rp0", `${txt(d.getElementById("balance-value"))} / ${txt(d.getElementById("income-value"))} / ${txt(d.getElementById("expense-value"))}`);
+  ok("1b. in-memory seed array kosong", w.eval("financeData.transactions.length") === 0 && w.eval("nextTransactionId") === 1);
+  ok("1c. dashboard menampilkan empty state, bukan angka contoh", /Belum ada transaksi/.test(txt(d.getElementById("transaction-list"))) && d.getElementById("btn-see-all-transactions").hidden);
+  ok("1d. empty state mengarahkan ke tombol 'Tambah Transaksi', bukan tombol + yang sudah dihapus", /Tap "Tambah Transaksi" untuk mencatat yang pertama/.test(txt(d.getElementById("transaction-list"))) && !/tombol \+/.test(txt(d.getElementById("transaction-list"))) && !!d.querySelector('[data-action="add-transaction"]'), txt(d.getElementById("transaction-list")));
+
+  // ============ 2. tidak ada transaksi contoh di halaman mana pun ============
+  const pagesSeedCheck = [];
+  for (const page of ["index.html", "transactions.html", "analytics.html", "budget.html"]) {
+    const r = await load(page);
+    // Seluruh halaman dipindai, TERMASUK panel notifikasi: teks notifikasi
+    // contoh kini netral, jadi tidak boleh ada nama transaksi contoh di mana pun.
+    const body = txt(r.d.body);
+    for (const title of SEED_TITLES) if (body.includes(title)) pagesSeedCheck.push(`${page}: "${title}"`);
+    for (const amt of SEED_AMOUNTS) if (body.includes("Rp" + amt)) pagesSeedCheck.push(`${page}: Rp${amt}`);
+  }
+  ok("2. tidak ada judul/nominal transaksi contoh di 4 halaman", pagesSeedCheck.length === 0, pagesSeedCheck.join(" | "));
+  ({ d, w } = await load("analytics.html"));
+  ok("2b. analytics kosong: total Rp0 + empty state", num(txt(d.querySelector("#analytics-summary .stat--wide .stat-value"))) === 0 && /Belum ada pengeluaran pada \w+ \d{4}/.test(txt(d.querySelector("#time-chart .chart-note"))));
+  ({ d, w } = await load("budget.html"));
+  ok("2c. budget kosong: terpakai Rp0, budget default utuh", num(txt(d.querySelector("#budget-card .budget-used"))) === 0 && /Rp2\.400\.000/.test(txt(d.getElementById("budget-card"))) && d.querySelectorAll("#category-list .category-card").length === 5);
+  ok("2d. mock notifikasi & goal tetap ada (berlabel contoh), tidak ikut hitungan uang", w.eval("financeData.notifications.length") === 3 && w.eval("typeof financeData.goal.name") === "string");
+  ({ d, w } = await load("index.html"));
+  d.getElementById("btn-notification").click(); await wait(260);
+  const notifText = txt(d.getElementById("notification-list"));
+  ok("2e. notifikasi contoh netral: tidak menyebut nama transaksi/nominal/persentase seolah data user", /Contoh transaksi berhasil dicatat/.test(notifText) && !/Gaji Bulanan|Dana Darurat|100%|62%|Rp/.test(notifText), notifText.slice(0, 150));
+  ok("2f. penanda 'Contoh notifikasi' tetap ada di bawah daftar", /Contoh notifikasi — belum terhubung ke data kamu/.test(notifText));
+  ok("2g. notifikasi tidak memengaruhi saldo (tetap Rp0)", (() => { if (!w.eval("isBalanceVisible")) d.getElementById("btn-toggle-balance").click(); return txt(d.getElementById("balance-value")) === "Rp0"; })());
+
+  // ============ 3. transaksi pertama user tidak membawa seed ============
+  ({ d, w } = await load("index.html"));
+  d.querySelector('[data-action="add-transaction"]').click(); await wait(260);
+  d.getElementById("field-title").value = "Transaksi Pertama";
+  d.getElementById("field-category").value = "makanan";
+  typeInto(d.getElementById("field-amount"), "10000");
+  d.getElementById("transaction-form").requestSubmit(); await wait(280);
+  const stored = JSON.parse(w.localStorage.getItem("financeData.transactions"));
+  ok("3. simpan pertama -> localStorage berisi 1 transaksi user saja", stored.length === 1 && stored[0].title === "Transaksi Pertama" && stored[0].id === 1, stored.map(t => t.title).join("|"));
+  if (!w.eval("isBalanceVisible")) d.getElementById("btn-toggle-balance").click();
+  await wait(60);
+  ok("3b. saldo = −Rp10.000 (murni data user)", txt(d.getElementById("balance-value")) === "-Rp10.000" || num(txt(d.getElementById("balance-value"))) === 10000, txt(d.getElementById("balance-value")));
+  ({ d, w } = await load("index.html"));
+  ok("3c. setelah reload tetap 1 transaksi, tanpa seed", JSON.parse(w.localStorage.getItem("financeData.transactions")).length === 1 && !SEED_TITLES.some(t => txt(d.getElementById("transaction-list")).includes(t)));
+
+  // ============ 4. CRUD tetap berjalan ============
+  ({ d, w } = await load("transactions.html"));
+  const items = () => [...d.querySelectorAll("#all-transaction-list .transaction-item")];
+  ok("4. transaksi user tampil di Semua Transaksi (tanggal hari ini)", items().length === 1 && /Transaksi Pertama/.test(txt(d.getElementById("all-transaction-list"))));
+  d.querySelector('[data-action="edit"]').click(); await wait(260);
+  typeInto(d.getElementById("field-amount"), "12500");
+  d.getElementById("transaction-form").requestSubmit(); await wait(280);
+  ok("4b. edit tersimpan (Rp12.500), tanpa baris ganda", JSON.parse(w.localStorage.getItem("financeData.transactions")).length === 1 && JSON.parse(w.localStorage.getItem("financeData.transactions"))[0].amount === 12500);
+  // add a second one so we can delete and still observe the list
+  d.querySelector('[data-action="add-transaction"]') && null;
+  d.querySelector('[data-action="delete"]').click(); await wait(260);
+  const cOverlay = d.getElementById("confirm-modal-overlay");
+  ok("4c. hapus transaksi memakai modal custom (bukan window.confirm)", cOverlay && !cOverlay.hidden && /Yakin ingin menghapus "Transaksi Pertama"\?/.test(txt(d.getElementById("confirm-title"))) && /Rp12\.500 · Makanan/.test(txt(d.getElementById("confirm-text"))), txt(d.getElementById("confirm-title")));
+  ok("4d. modal konfirmasi bergaya sama dengan hapus kategori", cOverlay.querySelector(".modal--confirm") && !!d.querySelector("#confirm-delete.btn--danger"));
+  d.querySelector("#confirm-modal-overlay [data-modal-close]").click(); await wait(240);
+  ok("4e. Batal -> transaksi TIDAK terhapus", cOverlay.hidden && JSON.parse(w.localStorage.getItem("financeData.transactions")).length === 1);
+  d.querySelector('[data-action="delete"]').click(); await wait(240);
+  d.getElementById("confirm-delete").click(); await wait(280);
+  ok("4f. Hapus Transaksi -> terhapus dari localStorage + daftar", JSON.parse(w.localStorage.getItem("financeData.transactions")).length === 0 && items().length === 0 && cOverlay.hidden);
+  ({ d, w } = await load("index.html"));
+  if (!w.eval("isBalanceVisible")) d.getElementById("btn-toggle-balance").click();
+  await wait(60);
+  ok("4g. dashboard kembali Rp0 setelah semua transaksi dihapus", txt(d.getElementById("balance-value")) === "Rp0");
+
+  // ============ 5. Escape hanya menutup modal paling atas ============
+  ({ d, w } = await load("budget.html"));
+  d.querySelector('#category-list [data-action="edit-category"]').click(); await wait(250);
+  d.getElementById("btn-delete-category").click(); await wait(250);
+  ok("5. dua modal terbuka (edit kategori + konfirmasi)", !d.getElementById("category-modal-overlay").hidden && !d.getElementById("confirm-modal-overlay").hidden);
+  d.dispatchEvent(new w.KeyboardEvent("keydown", { key: "Escape", bubbles: true })); await wait(300);
+  ok("5b. Escape #1 menutup konfirmasi saja, modal edit tetap terbuka", d.getElementById("confirm-modal-overlay").hidden && !d.getElementById("category-modal-overlay").hidden);
+  d.dispatchEvent(new w.KeyboardEvent("keydown", { key: "Escape", bubbles: true })); await wait(300);
+  ok("5c. Escape #2 menutup modal edit", d.getElementById("category-modal-overlay").hidden);
+  ok("5d. hanya 2 listener keydown di seluruh app (dropdown + tumpukan modal)", (await fetchAppJs(BASE)).split('addEventListener("keydown"').length - 1 === 2);
+  // stack juga bekerja untuk modal transaksi
+  ({ d, w } = await load("transactions.html"));
+  d.querySelector('[data-action="add-transaction"]') || null;
+  ({ d, w } = await load("index.html"));
+  d.querySelector('[data-action="add-transaction"]').click(); await wait(250);
+  d.dispatchEvent(new w.KeyboardEvent("keydown", { key: "Escape", bubbles: true })); await wait(280);
+  ok("5e. Escape menutup modal tambah transaksi", d.getElementById("transaction-modal-overlay").hidden);
+  ({ d, w } = await load("index.html"));
+  // check-in muncul lagi? (sessionStorage sudah di-set oleh load()) -> uji langsung stack kosong
+  ok("5f. Escape tanpa modal terbuka tidak melakukan apa-apa", (() => { d.dispatchEvent(new w.KeyboardEvent("keydown", { key: "Escape", bubbles: true })); return !!d.getElementById("balance-value"); })());
+
+  // ============ 6. tidak ada horizontal overflow ============
+  const overflow = [];
+  for (const page of ["index.html", "transactions.html", "analytics.html", "budget.html"]) {
+    for (const width of [320, 375, 430, 768, 1280]) {
+      const r = await load(page, width);
+      if (r.d.documentElement.scrollWidth > r.d.documentElement.clientWidth) overflow.push(`${page}@${width}`);
+    }
+  }
+  ok("6. tidak ada horizontal overflow (4 halaman × 5 lebar, data kosong)", overflow.length === 0, overflow.join(" "));
+  ({ d, w } = await load("index.html")); // iframe terakhir dari loop sudah dilepas
+
+  // ============ 8. chart tetap kecil & interaktif (dengan data) ============
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const p2 = (n) => String(n).padStart(2, "0");
+  const isoOf = (dt) => `${dt.getFullYear()}-${p2(dt.getMonth() + 1)}-${p2(dt.getDate())}`;
+  w.localStorage.setItem("financeData.transactions", JSON.stringify([
+    { id: 1, title: "Kopi", category: "makanan", type: "expense", amount: 25000, isoDate: isoOf(today), time: "" },
+    { id: 2, title: "Parkir", category: "lainnya", type: "expense", amount: 5000, isoDate: isoOf(new Date(today.getFullYear(), today.getMonth(), 1)), time: "" },
+  ]));
+  ({ d, w } = await load("analytics.html"));
+  const bars = () => [...d.querySelectorAll("#time-chart .bar-col")];
+  const daysInMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
+  ok("8. chart tetap kecil: 1 batang per tanggal, lebar < 14px, tanpa scroll", bars().length === daysInMonth && bars().every(b => b.getBoundingClientRect().width < 14) && d.getElementById("time-chart").scrollWidth <= d.getElementById("time-chart").clientWidth + 1);
+  const chartEl = d.getElementById("bar-chart");
+  const cx = (b) => { const r = b.getBoundingClientRect(); return r.left + r.width / 2; };
+  const my = () => { const r = chartEl.getBoundingClientRect(); return r.top + r.height / 2; };
+  const pev = (type, x) => chartEl.dispatchEvent(new w.PointerEvent(type, { bubbles: true, cancelable: true, pointerId: 5, pointerType: "touch", isPrimary: true, clientX: x, clientY: my(), button: 0 }));
+  pev("pointerdown", cx(bars()[0])); pev("pointerup", cx(bars()[0])); await wait(60);
+  ok("8b. tap batang tgl 1 -> terpilih + detail Rp5.000", d.querySelector(".bar-col.is-selected").dataset.key === isoOf(new Date(today.getFullYear(), today.getMonth(), 1)) && num(txt(d.querySelector("#chart-detail .detail-total"))) === 5000);
+  pev("pointerdown", cx(bars()[0])); pev("pointermove", cx(bars()[today.getDate() - 1])); await wait(60);
+  ok("8c. geser hanya mengubah hover, pilihan & detail tetap di tgl 1", d.querySelector(".bar-col.is-hover").dataset.key === isoOf(today) && d.querySelector(".bar-col.is-selected").dataset.key === isoOf(new Date(today.getFullYear(), today.getMonth(), 1)) && num(txt(d.querySelector("#chart-detail .detail-total"))) === 5000);
+  pev("pointerup", cx(bars()[today.getDate() - 1])); await wait(60);
+  ok("8c2. setelah geseran dilepas, pilihan tetap tgl 1 (tidak pindah ke hari ini)", d.querySelector(".bar-col.is-selected").dataset.key === isoOf(new Date(today.getFullYear(), today.getMonth(), 1)) && !d.querySelector(".bar-col.is-hover"));
+  ok("8d. total chart = total pengeluaran (Rp30.000)", num(txt(d.querySelector("#analytics-summary .stat--wide .stat-value"))) === 30000 && /Rp30\.000/.test(txt(d.querySelector("#time-chart .chart-note"))));
+  // kontras
+  const css = await fetchStyleCss(BASE);
+  ok("8e. kontras batang nonaktif dinaikkan (alpha 0.66) & muted didarkkan (#656F69)", /rgba\(20, 83, 45, 0\.66\)/.test(css) && /--color-text-muted: #656F69/.test(css));
+  ok("8f. getMonthExpense() sudah tidak ada di app.js", !(await fetchAppJs(BASE)).includes("getMonthExpense"));
+
+  try { w.localStorage.clear(); } catch (e) {}
+  document.getElementById("r").textContent = out.join("\n");
+})().catch(e => { out.push("EXCEPTION " + e.stack); document.getElementById("r").textContent = out.join("\n"); });
+</script>

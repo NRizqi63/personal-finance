@@ -1,0 +1,180 @@
+<!doctype html>
+<meta charset="utf-8">
+<pre id="r">running…</pre>
+<!-- DOM modal mini untuk menguji tumpukan modal, focus trap, Escape, scroll lock, restore focus -->
+<button id="trigger-a" type="button">buka A</button>
+<button id="outside" type="button">di luar</button>
+<div class="modal-overlay" id="ov-a" hidden><div class="modal" role="dialog" aria-modal="true">
+  <button type="button" class="modal-close" data-modal-close>x</button>
+  <input id="in-a" type="text"><button type="button" id="open-b">buka B</button><button type="button" id="last-a">akhir A</button>
+</div></div>
+<div class="modal-overlay" id="ov-b" hidden><div class="modal" role="dialog" aria-modal="true">
+  <button type="button" class="modal-close" data-modal-close>x</button>
+  <button type="button" id="last-b">akhir B</button>
+</div></div>
+<style>.modal-overlay[hidden]{display:none}</style>
+<script>
+const out = []; const ok = (n, c, x = "") => out.push(`${c ? "PASS" : "FAIL"} ${n}${x ? "  (" + x + ")" : ""}`);
+const wait = (ms) => new Promise(r => setTimeout(r, ms));
+const FRONT = new URL("../../frontend/", location.href).href;
+const HERE = location.href.replace(/[^/]*$/, "");
+const G = (v) => { try { return new Function("return " + v)(); } catch (e) { return "__ERR__:" + e.message; } }; // baca binding global (const/let juga)
+const pad = (n) => String(n).padStart(2, "0");
+const iso = (dt) => `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`;
+const today = new Date(); const T = iso(today);
+const SEED_TX = JSON.stringify([{ id: 4, title: "Gaji", category: "lainnya", type: "income", amount: 5000000, isoDate: T, time: "" }, { id: 9, title: "Makan", category: "makanan", type: "expense", amount: 25000, isoDate: T, time: "" }]);
+const SEED_GOALS = JSON.stringify([{ id: 2, name: "Dana Darurat", target: 10000000, saved: 3200000, deadline: "", createdAt: "2026-01-15" }]);
+const KEYS = ["financeData.transactions", "financeData.budget", "financeData.settings", "financeData.goals"];
+const snap = () => { const o = {}; for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); o[k] = localStorage.getItem(k); } return JSON.stringify(o); };
+
+(async () => {
+  const errors = []; window.addEventListener("error", e => errors.push(e.message));
+  // ---- seed & stub penghitung storage (dipasang SEBELUM core.js dimuat) ----
+  localStorage.clear(); sessionStorage.clear();
+  localStorage.setItem("financeData.transactions", SEED_TX);
+  localStorage.setItem("financeData.goals", SEED_GOALS);
+  sessionStorage.setItem("checkinDismissed", "true");
+  const before = snap(); // diambil SEBELUM stub supaya pembacaan snapshot tidak ikut terhitung
+  const calls = { getItem: {}, setItem: {}, removeItem: {}, clear: 0 };
+  const P = Storage.prototype; const orig = { getItem: P.getItem, setItem: P.setItem, removeItem: P.removeItem, clear: P.clear };
+  P.getItem = function (k) { if (this === localStorage) calls.getItem[k] = (calls.getItem[k] || 0) + 1; return orig.getItem.call(this, k); };
+  P.setItem = function (k, v) { if (this === localStorage) calls.setItem[k] = (calls.setItem[k] || 0) + 1; return orig.setItem.call(this, k, v); };
+  P.removeItem = function (k) { if (this === localStorage) calls.removeItem[k] = (calls.removeItem[k] || 0) + 1; return orig.removeItem.call(this, k); };
+  P.clear = function () { calls.clear++; return orig.clear.call(this); };
+
+  // ---- 1. parse & muat ----
+  const load = (src) => new Promise((res, rej) => { const s = document.createElement("script"); s.src = src; s.onload = () => res(true); s.onerror = () => rej(new Error("gagal muat " + src)); document.body.appendChild(s); });
+  let parseErr = null;
+  try { await load(FRONT + "js/core.js"); } catch (e) { parseErr = e.message; }
+  ok("1a. core.js termuat & dieksekusi tanpa error", !parseErr && errors.length === 0, parseErr || errors.join(" | "));
+  try { await load(FRONT + "js/transactions-shared.js"); } catch (e) { parseErr = e.message; }
+  ok("1b. transactions-shared.js termuat & dieksekusi tanpa error (tanpa deklarasi ganda)", !parseErr && errors.length === 0, parseErr || errors.join(" | "));
+  Object.assign(P, orig); // lepas stub
+
+  // ---- 2. tidak ada deklarasi ganda (statis) ----
+  const coreSrc = await (await fetch(FRONT + "js/core.js")).text();
+  const sharedSrc = await (await fetch(FRONT + "js/transactions-shared.js")).text();
+  const appSrc = await (await fetch(new URL("../fixtures/legacy/app.js", location.href).href)).text() /* referensi legacy beku (app.js dihapus pada JS-6) */;
+  const names = (s) => s.split("\n").map(l => (l.match(/^(?:function|const|let)\s+([A-Za-z_$][\w$]*)/) || [])[1]).filter(Boolean);
+  const nc = names(coreSrc), ns = names(sharedSrc), na = names(appSrc);
+  ok("2a. tidak ada nama ganda di dalam core.js", new Set(nc).size === nc.length);
+  ok("2b. tidak ada nama ganda di dalam transactions-shared.js", new Set(ns).size === ns.length);
+  ok("2c. core.js dan shared tidak berbagi nama", nc.every(n => !ns.includes(n)));
+  ok("2d. semua nama di file baru berasal dari app.js", [...nc, ...ns].every(n => na.includes(n)), [...nc, ...ns].filter(n => !na.includes(n)).join(","));
+  ok(`2e. jumlah deklarasi: core ${nc.length} + shared ${ns.length} = ${nc.length + ns.length} dari ${na.length} di app.js`, nc.length + ns.length > 100 && nc.length + ns.length < na.length);
+  const expectedShared = ["refreshDashboard", "transactionsPage", "openTransactionModal", "confirmDeleteTransaction", "handleTransactionListClick", "setupTransactionModal"];
+  ok("2f. shared berisi persis 6 deklarasi yang diminta", ns.length === 6 && expectedShared.every(n => ns.includes(n)), ns.join(","));
+  const mustCore = ["isValidIsoDate", "addDays", "getMonthRange", "getExpensesInRange", "countUndatedExpenses", "sumAmount", "startOfWeek", "sumExpense", "getWeeklyComparison", "renderBudgetSummary", "renderGreeting", "renderTransactionListItems", "renderTransactionItem", "showTransactionFeedback", "financeData", "loadGoals", "createModalController", "trapTabInModal", "escapeHtml", "formatRupiah"];
+  ok("2g. helper lintas halaman yang diminta ada di core.js", mustCore.every(n => nc.includes(n)), mustCore.filter(n => !nc.includes(n)).join(","));
+  const notCore = ["renderSummary", "setBalanceVisible", "isBalanceVisible", "MASKED_VALUE", "renderGoalCard", "renderAnalytics", "setupBudgetEditor", "validateBackup", "initDashboard", "initGoalsPage"];
+  ok("2h. fungsi halaman TIDAK ikut ke core/shared", notCore.every(n => !nc.includes(n) && !ns.includes(n)));
+
+  // ---- 3. load* tepat satu kali ----
+  ok("3a. loadTransactions/loadBudget/loadSettings/loadGoals masing-masing membaca key-nya tepat 1x", KEYS.every(k => calls.getItem[k] === 1), JSON.stringify(calls.getItem));
+  ok("3b. tidak ada key lain yang dibaca saat memuat", Object.keys(calls.getItem).every(k => KEYS.includes(k)), Object.keys(calls.getItem).join(","));
+  ok("3c. urutan statement parse-time: load* setelah semua const yang dipakainya, sebelum nextTransactionId", (() => { const i = coreSrc.indexOf("\nloadTransactions();"); return i > coreSrc.indexOf("const GOAL_NAME_MAX") && i > coreSrc.indexOf("const financeData") && i < coreSrc.indexOf("let nextTransactionId") && coreSrc.indexOf("\nloadGoals();") < coreSrc.indexOf("let nextTransactionId"); })());
+  ok("3d. nextTransactionId = max(id)+1 dari transaksi tersimpan (10)", G("nextTransactionId") === 10, String(G("nextTransactionId")));
+  ok("3e. financeData terisi dari storage (2 transaksi, 1 target)", G("financeData.transactions.length") === 2 && G("financeData.goals.length") === 1 && G("financeData.goals[0].name") === "Dana Darurat");
+
+  // ---- 4. storage tidak berubah karena memuat foundation ----
+  ok("4a. tidak ada setItem/removeItem/clear saat memuat", Object.keys(calls.setItem).length === 0 && Object.keys(calls.removeItem).length === 0 && calls.clear === 0, JSON.stringify(calls.setItem));
+  ok("4b. isi localStorage identik sebelum/sesudah", snap() === before);
+  ok("4c. checkinDismissed tidak disentuh", sessionStorage.getItem("checkinDismissed") === "true");
+  ok("4d. tidak ada localStorage.clear() di kode core/shared", !/^\s*localStorage\.clear\(\)/m.test(coreSrc + sharedSrc));
+
+  // ---- 5. modal stack, focus trap, Escape, Tab, scroll lock, restore focus ----
+  const ovA = document.getElementById("ov-a"), ovB = document.getElementById("ov-b");
+  const modalA = createModalController(ovA), modalB = createModalController(ovB);
+  const trig = document.getElementById("trigger-a"); trig.focus(); modalA.open(); await wait(30);
+  ok("5a. open(): overlay tampil, body terkunci, fokus ke tombol tutup", !ovA.hidden && document.body.classList.contains("is-modal-open") && document.activeElement === ovA.querySelector(".modal-close"));
+  document.getElementById("last-a").focus();
+  let ev = new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true }); document.dispatchEvent(ev);
+  ok("5b. Tab dari elemen terakhir berputar ke pertama", ev.defaultPrevented && document.activeElement === ovA.querySelector(".modal-close"));
+  ev = new KeyboardEvent("keydown", { key: "Tab", shiftKey: true, bubbles: true, cancelable: true }); document.dispatchEvent(ev);
+  ok("5c. Shift+Tab dari pertama berputar ke terakhir", ev.defaultPrevented && document.activeElement === document.getElementById("last-a"));
+  document.getElementById("outside").focus(); ev = new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true }); document.dispatchEvent(ev);
+  ok("5d. fokus di luar modal ditarik kembali ke dalam", ev.defaultPrevented && ovA.contains(document.activeElement));
+  document.getElementById("open-b").focus(); modalB.open(); await wait(30);
+  ok("5e. modal B di atas A: fokus ke tutup B, body tetap terkunci", !ovB.hidden && !ovA.hidden && document.activeElement === ovB.querySelector(".modal-close") && document.body.classList.contains("is-modal-open"));
+  document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); await wait(250);
+  ok("5f. Escape menutup HANYA modal teratas (B); A tetap terbuka; fokus kembali ke pemicu B", ovB.hidden && !ovA.hidden && document.activeElement === document.getElementById("open-b"));
+  ok("5g. body masih terkunci selama A masih terbuka", document.body.classList.contains("is-modal-open"));
+  document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); await wait(250);
+  ok("5h. Escape kedua menutup A; body dilepas; fokus kembali ke pemicu A", ovA.hidden && !document.body.classList.contains("is-modal-open") && document.activeElement === trig);
+  ok("5i. Escape tanpa modal tidak error", (() => { document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); return errors.length === 0; })());
+  trig.focus(); modalA.open(); await wait(20); ovA.dispatchEvent(new MouseEvent("click", { bubbles: true })); await wait(250);
+  ok("5j. klik overlay menutup & restore focus", ovA.hidden && document.activeElement === trig);
+  trig.focus(); modalA.open(); await wait(20); ovA.querySelector("[data-modal-close]").click(); await wait(250);
+  ok("5k. tombol data-modal-close menutup & restore focus", ovA.hidden && document.activeElement === trig);
+  ok("5l. tepat 1 listener keydown global di core.js (modal) + 0 di shared; dropdown (ke-2) tinggal di dashboard", coreSrc.split('addEventListener("keydown"').length - 1 === 1 && sharedSrc.split('addEventListener("keydown"').length - 1 === 0 && appSrc.split('addEventListener("keydown"').length - 1 === 2);
+  ok("5m. tepat 1 listener DOMContentLoaded (di core.js), 0 di shared", coreSrc.split('"DOMContentLoaded"').length - 1 === 1 && !sharedSrc.includes("DOMContentLoaded"));
+  ok("5n. press feedback & touchstart hanya di core.js", coreSrc.includes("setupPressFeedback") && coreSrc.includes('"touchstart"') && !sharedSrc.includes("setupPressFeedback"));
+
+  // ---- 6. refreshDashboard tanpa fungsi halaman lain ----
+  ok("6a. fungsi halaman memang tidak ada di lingkungan ini", ["renderSummary", "renderCategoryList", "renderRecentTransactions", "renderAllTransactionsList"].every(n => G("typeof " + n) === "undefined"));
+  const b6 = snap(); let thrown = null;
+  try { refreshDashboard(); } catch (e) { thrown = e.message; }
+  ok("6b. refreshDashboard() tidak melempar", thrown === null, thrown || "");
+  ok("6c. hanya menulis ulang transaksi dengan isi yang sama (storage identik)", snap() === b6);
+  ok("6d. summary dihitung ulang (balance 4.975.000)", G("financeData.summary.balance") === 4975000);
+  ok("6e. renderBudgetSummary() dari core no-op tanpa #budget-card", (() => { try { renderBudgetSummary(); renderGreeting(); showTransactionFeedback("x"); renderTransactionListItems; return true; } catch (e) { return false; } })());
+  // isi refreshDashboard: hanya guard, tidak ada panggilan yang hilang
+  const rd = /function refreshDashboard\(\)[\s\S]*?\n\}/.exec(sharedSrc)[0];
+  ok("6f. refreshDashboard tetap memanggil 7 langkah yang sama (2 tanpa guard, 4 dengan guard, renderBudgetSummary langsung)", ["saveTransactions();", "recalcFromTransactions();", 'typeof renderSummary === "function"', "renderBudgetSummary();", 'typeof renderCategoryList === "function"', 'typeof renderRecentTransactions === "function"', 'typeof renderAllTransactionsList === "function"'].every(s => rd.includes(s)));
+  ok("6g. guard typeof tidak dipakai di tempat lain (hanya refreshDashboard & dispatcher)", (coreSrc.match(/typeof \w+ === "function"/g) || []).length === 6 && (sharedSrc.match(/typeof \w+ === "function"/g) || []).length === 4 + 1 /* +1: options.onClose di createModalController? tidak — itu di core */ - 1);
+
+  // ---- 7. typeof fungsi shared/core ----
+  const T7 = { openTransactionModal: "function", handleTransactionListClick: "function", setupTransactionModal: "function", refreshDashboard: "function", transactionsPage: "object", confirmDeleteTransaction: "object" /* null */, financeData: "object", loadGoals: "function", saveGoals: "function", normalizeGoal: "function", getGoalStatus: "function", sortGoals: "function", formatRupiah: "function", toIsoDate: "function", isValidIsoDate: "function", getMonthRange: "function", getWeeklyComparison: "function", renderBudgetSummary: "function", renderGreeting: "function", renderTransactionItem: "function", renderTransactionListItems: "function", showTransactionFeedback: "function", createModalController: "function", trapTabInModal: "function", escapeHtml: "function", nextTransactionId: "number", nextGoalId: "function" };
+  const bad7 = Object.entries(T7).filter(([n, t]) => G("typeof " + n) !== t).map(([n, t]) => `${n}:${G("typeof " + n)}≠${t}`);
+  ok("7a. typeof semua fungsi/state shared & core sesuai", bad7.length === 0, bad7.join(","));
+  ok("7b. confirmDeleteTransaction === null sebelum setupTransactionModal", G("confirmDeleteTransaction") === null);
+  ok("7c. transactionsPage berisi state kalender+filter bulan ini", G("transactionsPage.month") === today.getMonth() && G("transactionsPage.year") === today.getFullYear() && G("transactionsPage.selected") === T);
+  ok("7d. helper G-1 memberi hasil sama seperti sebelumnya (32%, done/active)", G("getGoalProgress({target:10000000,saved:3200000})") === 32 && G('getGoalStatus({target:1,saved:1,deadline:""}).key') === "done");
+
+  // ---- 8. app.js tidak berubah & fungsi verbatim (toString identik dengan app.js) ----
+  const frame = document.createElement("iframe"); frame.src = new URL("../fixtures/pages/app_ref.html", location.href).href; /* referensi: halaman fixture yang memuat app.js apa adanya — tidak bergantung pada tahap migrasi halaman */ frame.width = 390; frame.height = 800; document.body.appendChild(frame);
+  await new Promise(r => frame.onload = r); await wait(300);
+  const W = frame.contentWindow;
+  const fnNames = [...nc, ...ns].filter(n => typeof window[n] === "function");
+  const diffs = fnNames.filter(n => typeof W[n] !== "function" || W[n].toString() !== window[n].toString());
+  // --- Perbandingan fungsi yang SENGAJA diubah (Modal Stabilization) ---
+  // Fence tetap ketat: selain tiga fungsi di bawah semuanya wajib identik
+  // byte-per-byte dengan app.js lama, dan ketiganya wajib berbeda PERSIS
+  // sebanyak baris perbaikan race (pembatalan timer hide & frame .is-open).
+  const MODAL_FIX_DELTA = {"createModalController": {"added": ["cancelAnimationFrame(openFrame);", "cancelPending();", "cancelPending();", "clearTimeout(hideTimer);", "function cancelPending() {", "hideTimer = null;", "hideTimer = null;", "hideTimer = setTimeout(() => {", "if (!showing) lastTrigger = document.activeElement;", "if (!showing) return; // termasuk saat close() dipanggil dua kali", "if (hideTimer !== null) {", "if (openFrame !== null) {", "let hideTimer = null;", "let openFrame = null;", "let showing = false;", "openFrame = null;", "openFrame = null;", "openFrame = requestAnimationFrame(() => {", "openFrame = requestAnimationFrame(() => {", "overlay.classList.add(\"is-open\");", "showing = false;", "showing = true;", "}", "}", "}", "});"], "removed": ["if (overlay.hidden) lastTrigger = document.activeElement;", "if (overlay.hidden) return;", "requestAnimationFrame(() => overlay.classList.add(\"is-open\"));", "requestAnimationFrame(() => {", "setTimeout(() => {"]}, "setupTransactionModal": {"added": ["cancelAnimationFrame(modalOpenFrame);", "cancelModalPending();", "cancelModalPending();", "clearTimeout(modalHideTimer);", "function cancelModalPending() {", "if (!modalShowing) modalTrigger = document.activeElement;", "if (!modalShowing) return; // close ganda: jangan jadwalkan timer kedua", "if (modalHideTimer !== null) {", "if (modalOpenFrame !== null) {", "let modalHideTimer = null;", "let modalOpenFrame = null;", "let modalShowing = false;", "modalHideTimer = null;", "modalHideTimer = null;", "modalHideTimer = setTimeout(() => {", "modalOpenFrame = null;", "modalOpenFrame = null;", "modalOpenFrame = requestAnimationFrame(() => {", "modalOpenFrame = requestAnimationFrame(() => {", "modalShowing = false;", "modalShowing = true;", "}", "}", "}"], "removed": ["if (overlay.hidden) modalTrigger = document.activeElement;", "requestAnimationFrame(() => {", "requestAnimationFrame(() => {", "setTimeout(() => {"]}, "setupCheckin": {"added": ["cancelAnimationFrame(checkinOpenFrame);", "cancelCheckinPending();", "cancelCheckinPending();", "checkinHideTimer = null;", "checkinHideTimer = null;", "checkinHideTimer = setTimeout(() => {", "checkinOpenFrame = null;", "checkinOpenFrame = null;", "checkinOpenFrame = requestAnimationFrame(() => {", "checkinOpenFrame = requestAnimationFrame(() => {", "checkinShowing = false;", "checkinShowing = true;", "clearTimeout(checkinHideTimer);", "function cancelCheckinPending() {", "if (!checkinShowing) checkinTrigger = document.activeElement;", "if (!checkinShowing) return; // close ganda: jangan jadwalkan timer kedua", "if (checkinHideTimer !== null) {", "if (checkinOpenFrame !== null) {", "let checkinHideTimer = null;", "let checkinOpenFrame = null;", "let checkinShowing = false;", "overlay.classList.add(\"is-open\");", "}", "}", "}", "});"], "removed": ["if (overlay.hidden) checkinTrigger = document.activeElement;", "requestAnimationFrame(() => overlay.classList.add(\"is-open\"));", "requestAnimationFrame(() => {", "setTimeout(() => {"]}};
+  const fixLines = (s) => s.replace(/\/\*[\s\S]*?\*\//g, "").split("\n").map(l => l.trim()).filter(l => l && !l.startsWith("//"));
+  const fixDelta = (oldS, newS) => {
+    const count = (arr) => arr.reduce((m, l) => (m[l] = (m[l] || 0) + 1, m), {});
+    const a = count(fixLines(oldS)), b = count(fixLines(newS));
+    const added = [], removed = [];
+    Object.keys(b).forEach(l => { for (let i = 0; i < b[l] - (a[l] || 0); i++) added.push(l); });
+    Object.keys(a).forEach(l => { for (let i = 0; i < a[l] - (b[l] || 0); i++) removed.push(l); });
+    return { added: added.sort(), removed: removed.sort() };
+  };
+  const fixMatches = (name, oldS, newS) => {
+    const exp = MODAL_FIX_DELTA[name], got = fixDelta(oldS, newS);
+    return JSON.stringify(got.added) === JSON.stringify(exp.added) && JSON.stringify(got.removed) === JSON.stringify(exp.removed);
+  };
+  const EXPECTED_DIFF = ["createModalController", "refreshDashboard", "setupTransactionModal"];
+  ok(`8a. ${fnNames.length - 3} fungsi identik byte-per-byte dengan versi app.js (toString); yang berbeda TEPAT 3: refreshDashboard (guard JS-1) + createModalController & setupTransactionModal (perbaikan race timer modal)`, JSON.stringify(diffs.slice().sort()) === JSON.stringify(EXPECTED_DIFF), diffs.join(","));
+  ok("8a2. createModalController berbeda PERSIS sebatas perbaikan race (timer hide & frame is-open dibatalkan), tidak ada perubahan lain", fixMatches("createModalController", W.createModalController.toString(), window.createModalController.toString()));
+  ok("8a3. setupTransactionModal berbeda PERSIS sebatas perbaikan race yang sama", fixMatches("setupTransactionModal", W.setupTransactionModal.toString(), window.setupTransactionModal.toString()));
+  ok("8b. app.js tidak menyertakan guard baru (belum diubah)", !appSrc.includes('typeof renderSummary === "function"') && !appSrc.includes('typeof initGoalsPage === "function"'));
+
+  // ---- dispatcher lewat halaman kecil ----
+  const disp = async (q) => { const f = document.createElement("iframe"); f.src = new URL("../fixtures/pages/jsf_page.html", location.href).href + q; document.body.appendChild(f); await new Promise(r => f.onload = r); await wait(150); const r = { init: f.contentWindow.__init, errors: f.contentWindow.__errors }; f.remove(); return r; };
+  let r = await disp("?page=goals&def=initGoalsPage,initDashboard");
+  ok("D1. data-page=goals -> initGoalsPage (bukan initDashboard)", r.init === "initGoalsPage" && r.errors.length === 0, JSON.stringify(r));
+  r = await disp("?def=initDashboard,initGoalsPage");
+  ok("D2. tanpa data-page -> initDashboard", r.init === "initDashboard" && r.errors.length === 0);
+  r = await disp("?page=settings&def=initDashboard");
+  ok("D3. data-page=settings tanpa initSettingsPage -> no-op tanpa ReferenceError", r.init === null && r.errors.length === 0, JSON.stringify(r));
+  r = await disp("?page=analytics&def=initAnalyticsPage");
+  ok("D4. data-page=analytics -> initAnalyticsPage", r.init === "initAnalyticsPage" && r.errors.length === 0);
+  ok("D5. dispatcher berurutan sama: transactions, analytics, budget, goals, settings, else dashboard", (() => { const d = /addEventListener\("DOMContentLoaded"[\s\S]*?\n\}\);/.exec(coreSrc)[0]; const order = ["initTransactionsPage", "initAnalyticsPage", "initBudgetPage", "initGoalsPage", "initSettingsPage", "initDashboard"].map(n => d.indexOf(n)); return order.every((v, i) => v > 0 && (i === 0 || v > order[i - 1])); })());
+
+  localStorage.clear(); sessionStorage.clear();
+  const pass = out.filter(l => l.startsWith("PASS")).length, fail = out.filter(l => l.startsWith("FAIL")).length;
+  document.getElementById("r").textContent = out.join("\n") + `\n\n== ${pass} PASS / ${fail} FAIL ==`;
+})().catch(e => { document.getElementById("r").textContent = out.join("\n") + "\nEXCEPTION " + e.message + "\n" + e.stack; });
+</script>

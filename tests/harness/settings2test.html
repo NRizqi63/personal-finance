@@ -1,0 +1,154 @@
+<!doctype html>
+<meta charset="utf-8">
+<pre id="r">running…</pre>
+<script>
+const out = []; const ok = (n, c, x = "") => out.push(`${c ? "PASS" : "FAIL"} ${n}${x ? "  (" + x + ")" : ""}`);
+const wait = (ms) => new Promise(r => setTimeout(r, ms));
+const BASE = new URL("../../frontend/", location.href).href;
+// JS-6: style.css sudah dihapus. Sumber CSS HIDUP untuk pemeriksaan selector = gabungan 7 file split.
+const CSS_SPLIT_FILES = ["base.css", "dashboard.css", "goals.css", "analytics.css", "budget.css", "transactions.css", "settings.css"];
+async function fetchStyleCss(base) { const parts = []; for (const f of CSS_SPLIT_FILES) parts.push(`/* ==== ${f} ==== */\n` + await (await fetch(base + "css/" + f)).text()); return parts.join("\n"); }
+const pad = (n) => String(n).padStart(2, "0");
+const today = new Date(); const iso = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`;
+const SEED_TX = [
+  { id: 1, title: "Gaji", category: "lainnya", type: "income", amount: 5000000, isoDate: iso, time: "" },
+  { id: 2, title: "Kopi", category: "makanan", type: "expense", amount: 18000, isoDate: iso, time: "" },
+];
+const SEED_BUDGET = { monthly: 2000000, categories: { makanan: { name: "Makanan", emoji: "🍜", budget: 800000 } } };
+let frame = null;
+async function load(page, width = 390, opts = {}) {
+  if (frame) frame.remove();
+  frame = document.createElement("iframe"); frame.width = width; frame.height = opts.height || 1400; frame.src = BASE + page;
+  document.body.appendChild(frame);
+  await new Promise(r => frame.onload = r); await wait(350);
+  const d = frame.contentDocument, w = frame.contentWindow;
+  if (!opts.keepCheckin) { const cc = d.getElementById("checkin-close"); if (cc && !d.getElementById("checkin-overlay").hidden) { cc.click(); await wait(300); } }
+  return { d, w };
+}
+const txt = (el) => (el ? el.textContent.replace(/\s+/g, " ").trim() : "");
+const typeInto = (el, v) => { el.value = v; el.dispatchEvent(new Event("input", { bubbles: true })); };
+const GREET = /^(Selamat pagi|Selamat siang|Selamat sore|Selamat malam), (.+)$/;
+const settingsLS = (w) => JSON.parse(w.localStorage.getItem("financeData.settings"));
+
+(async () => {
+  let { d, w } = await load("settings.html");
+  try { w.localStorage.clear(); w.localStorage.setItem("financeData.transactions", JSON.stringify(SEED_TX)); w.localStorage.setItem("financeData.budget", JSON.stringify(SEED_BUDGET)); } catch (e) {}
+  ({ d, w } = await load("settings.html"));
+  const errors = []; w.addEventListener("error", e => errors.push(e.message));
+
+  // ---------- 1. Settings: struktur ----------
+  ok("1a. section urut: Profil Akun, Preferensi Aplikasi, Pengaturan Keuangan, Data & Backup, Keamanan, Tentang Aplikasi", [...d.querySelectorAll(".settings-section")].map(s => s.id).join(",") === "profil,preferensi,keuangan,data,keamanan,tentang" && txt(d.getElementById("settings-keuangan-title")) === "Pengaturan Keuangan");
+  ok("1b. Data & Backup: export JSON/CSV + import + tiga reset parsial (tanpa reset seluruh data)", (() => { const s = d.getElementById("data"); return !!s && [...s.querySelectorAll("button")].map(b => b.id || b.dataset.resetTarget).join() === "btn-export-json,btn-export-csv,btn-import-pick,transactions,budget,settings" && !s.querySelector("a") && s.querySelector("input").type === "file" && !s.querySelector('[data-reset-target="all"]'); })());
+  ok("1c. Keamanan tetap informasional, tanpa login/password/PIN", !d.getElementById("keamanan").querySelector("button, input, a") && !/PIN/i.test(txt(d.getElementById("keamanan"))));
+  ok("1d. Pengaturan Keuangan & Tentang tetap: 2 link budget.html, versi V2.2, repo", d.querySelectorAll('#keuangan a[href="budget.html"]').length === 2 && txt(d.getElementById("settings-app-version")) === "V2.2" && !!d.querySelector("#tentang a.settings-inline-link"));
+
+  // ---------- 2. Profil: default & preview ----------
+  const nameIn = () => d.getElementById("settings-name"), preview = () => d.getElementById("settings-name-preview"), fb = () => d.getElementById("settings-name-feedback");
+  const submit = async () => { d.getElementById("settings-profile-form").requestSubmit(); await wait(120); };
+  ok("2a. default tanpa financeData.settings: input 'Rizqi', preview '<sapaan>, Rizqi', key settings TIDAK dibuat saat load (transaksi & budget utuh)", nameIn().value === "Rizqi" && GREET.test(txt(preview())) && txt(preview()).endsWith(", Rizqi") && w.localStorage.getItem("financeData.settings") === null && JSON.parse(w.localStorage.getItem("financeData.transactions")).length === 2 && JSON.parse(w.localStorage.getItem("financeData.budget")).monthly === 2000000);
+  ok("2b. label 'Nama Pengguna' terhubung ke input; maxlength 40; tombol 'Simpan Perubahan' .btn--primary", txt(d.querySelector('label[for="settings-name"]')) === "Nama Pengguna" && nameIn().maxLength === 40 && txt(d.getElementById("settings-name-save")) === "Simpan Perubahan" && d.getElementById("settings-name-save").classList.contains("btn--primary"));
+  typeInto(nameIn(), "Dina");
+  ok("2c. preview berubah saat mengetik ('…, Dina'), localStorage belum ditulis", txt(preview()).endsWith(", Dina") && w.localStorage.getItem("financeData.settings") === null);
+  typeInto(nameIn(), "  Dina Ayu  ");
+  ok("2d. preview memakai nama yang dipangkas ('…, Dina Ayu')", txt(preview()).endsWith(", Dina Ayu") && !/Dina Ayu  /.test(txt(preview())));
+
+  // ---------- 3. Profil: validasi ----------
+  typeInto(nameIn(), ""); await submit();
+  ok("3a. nama kosong ditolak: feedback error 'Nama tidak boleh kosong', aria-invalid, tidak tersimpan", !fb().hidden && fb().dataset.type === "error" && /tidak boleh kosong/.test(txt(fb())) && nameIn().getAttribute("aria-invalid") === "true" && w.localStorage.getItem("financeData.settings") === null);
+  typeInto(nameIn(), "     "); await submit();
+  ok("3b. nama hanya spasi ditolak, preview fallback 'Rizqi'", fb().dataset.type === "error" && txt(preview()).endsWith(", Rizqi") && w.localStorage.getItem("financeData.settings") === null);
+  nameIn().value = "A".repeat(45); nameIn().dispatchEvent(new Event("input", { bubbles: true })); await submit();
+  ok("3c. nama > 40 karakter ditolak (maxlength membatasi ketikan; nilai paksa 45 -> pesan 'maksimal 40')", w.localStorage.getItem("financeData.settings") === null && (nameIn().value.length <= 40 || /maksimal 40/.test(txt(fb()))));
+  typeInto(nameIn(), "A".repeat(40)); await submit();
+  ok("3d. tepat 40 karakter diterima", fb().dataset.type === "success" && settingsLS(w).name === "A".repeat(40));
+  typeInto(nameIn(), "  Dina Ayu  "); await submit();
+  ok("3e. nama valid tersimpan (dipangkas): feedback sukses, input jadi 'Dina Ayu', localStorage financeData.settings lengkap", fb().dataset.type === "success" && !fb().hidden && nameIn().value === "Dina Ayu" && JSON.stringify(settingsLS(w)) === JSON.stringify({ name: "Dina Ayu", hideBalanceOnOpen: false, showCheckin: true }));
+  ok("3f. transaksi & budget tidak berubah setelah simpan settings", JSON.parse(w.localStorage.getItem("financeData.transactions")).length === 2 && JSON.parse(w.localStorage.getItem("financeData.budget")).categories.makanan.budget === 800000);
+  ok("3g. tidak ada alert/prompt/confirm di alur profil & preferensi", !/[^.\w](alert|prompt|confirm)\(/.test(String(w.setupSettingsProfile) + String(w.setupSettingsPreferences)));
+  ({ d, w } = await load("settings.html"));
+  ok("3h. reload: nama tetap 'Dina Ayu' di input & preview", d.getElementById("settings-name").value === "Dina Ayu" && txt(d.getElementById("settings-name-preview")).endsWith(", Dina Ayu"));
+
+  // ---------- 4. Preferensi: switch ----------
+  const hb = () => d.getElementById("pref-hide-balance"), sc = () => d.getElementById("pref-show-checkin"), pfb = () => d.getElementById("settings-pref-feedback");
+  ok("4a. switch default: hide balance OFF, show check-in ON; role=switch; seluruh baris = <label for>", !hb().checked && sc().checked && hb().getAttribute("role") === "switch" && hb().closest("label").getAttribute("for") === "pref-hide-balance" && sc().closest("label").getAttribute("for") === "pref-show-checkin");
+  hb().click(); await wait(80);
+  ok("4b. toggle hide balance -> tersimpan true, feedback tampil", hb().checked && settingsLS(w).hideBalanceOnOpen === true && !pfb().hidden && /disembunyikan/.test(txt(pfb())));
+  sc().click(); await wait(80);
+  ok("4c. toggle show check-in -> tersimpan false", !sc().checked && settingsLS(w).showCheckin === false && settingsLS(w).name === "Dina Ayu");
+  ({ d, w } = await load("settings.html"));
+  ok("4d. reload: switch mengikuti nilai tersimpan (ON / OFF)", d.getElementById("pref-hide-balance").checked && !d.getElementById("pref-show-checkin").checked);
+  ok("4e. area tap baris switch >= 52px, switch 46x26, fokus keyboard bisa (checkbox asli tidak display:none)", [...d.querySelectorAll(".settings-row-switch")].every(r => r.getBoundingClientRect().height >= 52) && d.querySelector(".switch").getBoundingClientRect().width === 46 && w.getComputedStyle(d.getElementById("pref-hide-balance")).display !== "none");
+
+  // ---------- 5. Dashboard: greeting, saldo, check-in ----------
+  ({ d, w } = await load("index.html", 390, { keepCheckin: true }));
+  ok("5a. greeting mengikuti nama baru: '<sapaan>, Dina Ayu' (bukan Rizqi/undefined/null)", GREET.test(txt(d.getElementById("greeting-text"))) && txt(d.getElementById("greeting-text")).endsWith(", Dina Ayu") && !/undefined|null/.test(txt(d.getElementById("greeting-text"))));
+  ok("5b. hideBalanceOnOpen=true -> saldo/pemasukan/pengeluaran ter-masking saat dibuka", d.getElementById("balance-value").textContent === "••••••••" && d.getElementById("income-value").textContent === "••••••••" && d.getElementById("btn-toggle-balance").getAttribute("aria-pressed") === "false");
+  ok("5c. showCheckin=false -> check-in TIDAK muncul otomatis (sessionStorage belum di-set)", d.getElementById("checkin-overlay").hidden && w.sessionStorage.getItem("checkinDismissed") !== "true");
+  d.getElementById("btn-toggle-balance").click(); await wait(60);
+  ok("5d. tombol mata tetap berfungsi: saldo tampil Rp4.982.000 (nilai tidak berubah), pemasukan Rp5.000.000", d.getElementById("balance-value").textContent === "Rp4.982.000" && d.getElementById("income-value").textContent === "Rp5.000.000" && d.getElementById("btn-toggle-balance").getAttribute("aria-pressed") === "true");
+  d.getElementById("btn-toggle-balance").click(); await wait(60);
+  ok("5e. tombol mata bisa menyembunyikan lagi (preferensi tidak mengunci tombol)", d.getElementById("balance-value").textContent === "••••••••");
+  // balik preferensi: hide OFF, checkin ON
+  try { w.localStorage.setItem("financeData.settings", JSON.stringify({ name: "Dina Ayu", hideBalanceOnOpen: false, showCheckin: true })); w.sessionStorage.removeItem("checkinDismissed"); } catch (e) {}
+  ({ d, w } = await load("index.html", 390, { keepCheckin: true }));
+  ok("5f. hideBalanceOnOpen=false -> saldo langsung tampil saat dibuka (Rp4.982.000), tombol mata aria-pressed=true", d.getElementById("balance-value").textContent === "Rp4.982.000" && d.getElementById("btn-toggle-balance").getAttribute("aria-pressed") === "true");
+  ok("5g. showCheckin=true -> check-in muncul (sekali per sesi), sapaannya memakai nama baru", !d.getElementById("checkin-overlay").hidden && /Dina Ayu/.test(txt(d.getElementById("checkin-body"))));
+  d.getElementById("checkin-close").click(); await wait(300);
+  d.getElementById("btn-toggle-balance").click(); await wait(60);
+  ok("5h. tombol mata menyembunyikan saldo walau preferensi 'tampil'", d.getElementById("balance-value").textContent === "••••••••");
+  // sessionStorage dihormati: reload di sesi yang sama -> tidak muncul lagi
+  w.location.reload(); await new Promise(r => frame.onload = r); await wait(400); d = frame.contentDocument; w = frame.contentWindow;
+  ok("5i. reload di sesi sama: check-in tidak muncul lagi (checkinDismissed dihormati) walau showCheckin=true", d.getElementById("checkin-overlay").hidden && w.sessionStorage.getItem("checkinDismissed") === "true");
+
+  // ---------- 6. Kompatibilitas data lama ----------
+  const scenario = async (raw, label, expect) => {
+    try { if (raw === null) w.localStorage.removeItem("financeData.settings"); else w.localStorage.setItem("financeData.settings", raw); } catch (e) {}
+    ({ d, w } = await load("settings.html"));
+    const s = { name: d.getElementById("settings-name").value, hide: d.getElementById("pref-hide-balance").checked, show: d.getElementById("pref-show-checkin").checked };
+    ok(label, expect(s, w), JSON.stringify(s));
+  };
+  await scenario(null, "6a. skenario 1: tanpa key settings -> default Rizqi/false/true; transaksi & budget utuh; key tidak dibuat", (s, w) => s.name === "Rizqi" && !s.hide && s.show && w.localStorage.getItem("financeData.settings") === null && JSON.parse(w.localStorage.getItem("financeData.transactions")).length === 2);
+  await scenario('{"name":"Budi"}', "6b. skenario 2: hanya {name} -> hideBalanceOnOpen=false & showCheckin=true dilengkapi", (s) => s.name === "Budi" && !s.hide && s.show);
+  await scenario('{"name":"   ","hideBalanceOnOpen":true,"showCheckin":false}', "6c. skenario 3: nama hanya spasi -> fallback Rizqi, boolean lain tetap dibaca", (s) => s.name === "Rizqi" && s.hide && !s.show);
+  await scenario('{"name":"Sari","hideBalanceOnOpen":"true","showCheckin":"false"}', "6d. skenario 4: boolean sebagai string 'true'/'false' dinormalisasi", (s) => s.name === "Sari" && s.hide && !s.show);
+  await scenario('{"name":42,"hideBalanceOnOpen":"ya","showCheckin":null,"extra":1}', "6e. nilai rusak (angka, 'ya', null) -> default; properti asing dibuang saat simpan", (s) => s.name === "Rizqi" && !s.hide && s.show);
+  d.getElementById("pref-hide-balance").click(); await wait(60);
+  ok("6f. simpan setelah data rusak -> localStorage bersih: {name:'Rizqi',hideBalanceOnOpen:true,showCheckin:true}", JSON.stringify(settingsLS(w)) === JSON.stringify({ name: "Rizqi", hideBalanceOnOpen: true, showCheckin: true }));
+  await scenario('not json{', "6g. JSON korup -> default tanpa error", (s) => s.name === "Rizqi" && !s.hide && s.show);
+  await scenario('[1,2,3]', "6h. array (bukan objek) -> default", (s) => s.name === "Rizqi" && !s.hide && s.show);
+  try { w.localStorage.setItem("financeData.settings", JSON.stringify({ name: "<b>Eko</b>", hideBalanceOnOpen: false, showCheckin: true })); w.sessionStorage.removeItem("checkinDismissed"); } catch (e) {}
+  ({ d, w } = await load("index.html", 390, { keepCheckin: true }));
+  ok("6i. nama berisi HTML tidak dieksekusi: greeting (textContent) & check-in (escape) menampilkan teks apa adanya", txt(d.getElementById("greeting-text")).endsWith(", <b>Eko</b>") && !d.querySelector("#checkin-body b") && /<b>Eko<\/b>/.test(txt(d.getElementById("checkin-body"))));
+
+  // ---------- 7. halaman lain: fungsi settings tidak error ----------
+  for (const p of ["index.html", "transactions.html", "analytics.html", "budget.html"]) {
+    const r = await load(p);
+    // Refactor JS: halaman yang sudah memuat core.js tidak memuat kode settings sama sekali (bukan lagi no-op, tapi absen).
+    const migrated = [...r.d.querySelectorAll("script[src]")].some((s) => /js\/core\.js/.test(s.getAttribute("src")));
+    let okCall = true; try { if (migrated) { okCall = typeof r.w.initSettingsPage === "undefined" && typeof r.w.setupSettingsProfile === "undefined"; r.w.renderGreeting(); } else { r.w.initSettingsPage(); r.w.setupSettingsProfile(); r.w.setupSettingsPreferences(); r.w.renderGreeting(); } } catch (e) { okCall = false; }
+    ok(`7. ${p}: ${migrated ? "kode settings tidak dimuat (absen), renderGreeting no-op" : "initSettingsPage/setupSettingsProfile/setupSettingsPreferences/renderGreeting = no-op tanpa error"}; getUserName() string valid`, okCall && typeof r.w.getUserName() === "string" && r.w.getUserName().length > 0);
+  }
+
+  // ---------- 8. responsif ----------
+  try { w.localStorage.setItem("financeData.settings", JSON.stringify({ name: "Dina Ayu", hideBalanceOnOpen: false, showCheckin: true })); } catch (e) {}
+  for (const wd of [320, 375, 430, 768, 1024, 1280]) {
+    const r = await load("settings.html", wd);
+    const de = r.d.documentElement;
+    const inp = r.d.getElementById("settings-name"), btn = r.d.getElementById("settings-name-save");
+    const card = inp.closest(".settings-card").getBoundingClientRect();
+    const inside = (el) => { const b = el.getBoundingClientRect(); return b.left >= card.left - 0.5 && b.right <= card.right + 0.5 && b.width > 0; };
+    const rowsOk = [...r.d.querySelectorAll(".settings-row, .section-title, .settings-form")].every(el => el.scrollWidth <= el.clientWidth + 1);
+    const lbl = r.d.querySelector('label[for="settings-name"]').getBoundingClientRect();
+    const labelOk = lbl.bottom <= inp.getBoundingClientRect().top + 0.5;
+    const tapOk = inp.getBoundingClientRect().height >= 44 && btn.getBoundingClientRect().height >= 44 && [...r.d.querySelectorAll(".switch")].every(s => s.getBoundingClientRect().height >= 26 && s.closest(".settings-row").getBoundingClientRect().height >= 52);
+    const sections = [...r.d.querySelectorAll(".settings-section")].map(s => s.getBoundingClientRect());
+    const noOverlap = sections.every((b, i) => i === 0 || b.top >= sections[i - 1].bottom - 0.5);
+    ok(`8-${wd}. tanpa overflow, input & tombol di dalam card, label di atas input, tap >= 44px, section tidak bertabrakan`, de.scrollWidth === de.clientWidth && inside(inp) && inside(btn) && rowsOk && labelOk && tapOk && noOverlap, `sw=${de.scrollWidth} cw=${de.clientWidth}`);
+  }
+  const cssText = await fetchStyleCss(BASE);
+  ok("8g. CSS: tombol simpan (.btn--primary) punya hover/active/focus-visible; switch punya focus-visible & checked", /\.btn--primary:hover/.test(cssText) && /:is\(:active, \.is-pressed\)\s*\{[^}]*scale\(0\.97\)/.test(cssText) && /button:focus-visible/.test(cssText) && /\.switch-input:focus-visible \+ \.switch-track/.test(cssText) && /\.switch-input:checked \+ \.switch-track/.test(cssText));
+  ok("9. console 0 error di settings.html", errors.length === 0, errors.join(" | "));
+  try { w.localStorage.clear(); } catch (e) {}
+  document.getElementById("r").textContent = out.join("\n");
+})().catch(e => { out.push("EXCEPTION " + e.stack); document.getElementById("r").textContent = out.join("\n"); });
+</script>

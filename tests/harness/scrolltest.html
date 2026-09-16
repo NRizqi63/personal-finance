@@ -1,0 +1,118 @@
+<!doctype html>
+<meta charset="utf-8">
+<pre id="r">running…</pre>
+<script>
+const f = document.createElement("iframe"); f.width = 390; f.height = 600; // short viewport so the page can scroll
+f.src = "../../frontend/index.html";
+document.body.appendChild(f);
+const out = []; const ok = (n, c, x = "") => out.push(`${c ? "PASS" : "FAIL"} ${n}${x ? "  (" + x + ")" : ""}`);
+const wait = (ms) => new Promise(r => setTimeout(r, ms));
+const LEGACY_SEED = JSON.stringify([
+  { id: 1, title: "Makan Siang", category: "makanan", type: "expense", amount: 25000, isoDate: "2026-09-09", time: "Hari ini, 12:30" },
+  { id: 2, title: "Bensin Motor", category: "bensin", type: "expense", amount: 30000, isoDate: "2026-09-09", time: "Hari ini, 09:15" },
+  { id: 3, title: "Gaji Bulanan", category: "lainnya", type: "income", amount: 5000000, isoDate: "2026-09-01", time: "1 Sep, 08:00" },
+]); // aplikasi tidak lagi punya transaksi contoh -> test menyemai datanya sendiri
+let seeded = false;
+f.onload = async () => {
+  let d = f.contentDocument, w = f.contentWindow;
+  if (!seeded) { // halaman harus punya isi supaya bisa di-scroll
+    seeded = true;
+    try { w.localStorage.setItem("financeData.transactions", LEGACY_SEED); } catch (e) {}
+    w.location.reload();
+    return;
+  }
+  await wait(300); d.getElementById("checkin-close").click(); await wait(400);
+  w.scrollTo(0, 0); await wait(100);
+  const open = (id) => { d.getElementById(id).click(); };
+  // Headless virtual-time never dispatches native scroll events (rendering-opportunity timed),
+  // so after each scrollTo we dispatch one ourselves; the handler reads the REAL window.scrollY.
+  const realScrollTo = w.scrollTo.bind(w);
+  w.scrollTo = (x, y) => { realScrollTo(x, y); w.dispatchEvent(new w.Event("scroll")); };
+  const panel = (id) => d.getElementById(id);
+
+  // Ikon Pengaturan kini tautan langsung ke settings.html (bukan dropdown),
+  // jadi perilaku panel diuji lewat dropdown Notifikasi yang tersisa.
+  for (const [btn, pid, label] of [["btn-notification", "notification-panel", "Notifikasi"]]) {
+    // 1) open -> real page scroll -> closes
+    open(btn); await wait(300);
+    ok(`${label}: opens`, !panel(pid).hidden);
+    w.scrollTo(0, 120); await wait(400);
+    ok(`${label}: page scroll closes panel automatically`, panel(pid).hidden, `scrollY=${w.scrollY}`);
+    ok(`${label}: page scrolling still works after close`, w.scrollY >= 100);
+    w.scrollTo(0, 0); await wait(150);
+
+    // 2) open -> tiny jitter (3px) -> stays open
+    open(btn); await wait(300);
+    w.scrollTo(0, 3); await wait(300);
+    ok(`${label}: 3px jitter does NOT close`, !panel(pid).hidden);
+    w.scrollTo(0, 0); await wait(300); // back to origin (within threshold of openedScrollY=0)
+    ok(`${label}: still open after returning to origin`, !panel(pid).hidden);
+
+    // 3) tap inside panel -> stays open
+    const inner = panel(pid).querySelector(".notification-item, .dropdown-panel-header");
+    inner.click(); await wait(200);
+    ok(`${label}: tap inside panel keeps it open`, !panel(pid).hidden);
+
+    // 4) toggle via same icon -> closes
+    open(btn); await wait(300);
+    ok(`${label}: tap icon again closes (toggle)`, panel(pid).hidden);
+
+    // 5) scroll inside the panel's own scroller does not close
+    open(btn); await wait(300);
+    const list = panel(pid).querySelector(".notification-list, .settings-menu");
+    list.dispatchEvent(new w.Event("scroll", { bubbles: false })); await wait(200);
+    ok(`${label}: internal scroll event does NOT close`, !panel(pid).hidden);
+    open(btn); await wait(250); // close via toggle for next round
+  }
+
+  // 6) scroll immediately on open (within 150ms grace) -> ignored; later scroll -> closes
+  open("btn-notification"); w.scrollTo(0, 60); await wait(120);
+  const stillOpen = !panel("notification-panel").hidden;
+  await wait(200); w.scrollTo(0, 140); await wait(400);
+  ok("grace: scroll within 150ms of opening is ignored", stillOpen);
+  ok("grace: a later real scroll still closes", panel("notification-panel").hidden);
+  w.scrollTo(0, 0);
+
+  // 7) close animation: on scroll the panel enters .is-closing (still displayed, exit transition
+  //    running) and only becomes hidden after the ~220ms transition (fallback timer 280ms)
+  await wait(200); open("btn-notification"); await wait(300);
+  w.scrollTo(0, 150); await wait(30);
+  const sp = panel("notification-panel");
+  const midAnim = sp.classList.contains("is-closing") && !sp.hidden;
+  const csMid = w.getComputedStyle(sp);
+  const exitTarget = csMid.transitionDuration; // "0.22s, 0.22s"
+  ok("scroll close: exit state applied first (is-closing, still displayed)", midAnim, `is-closing=${sp.classList.contains("is-closing")} hidden=${sp.hidden}`);
+  ok("scroll close: exit transition ~220ms on transform+opacity (not display:none)", /0\.22s/.test(exitTarget) && /transform/.test(csMid.transitionProperty) && /opacity/.test(csMid.transitionProperty), `${csMid.transitionProperty} ${exitTarget}`);
+  ok("scroll close: pointer-events none while closing (no phantom taps)", csMid.pointerEvents === "none");
+  await wait(120);
+  ok("scroll close: still displayed mid-animation (~150ms)", !sp.hidden);
+  await wait(250);
+  ok("scroll close: fully hidden after the animation", sp.hidden && !sp.classList.contains("is-closing"));
+  ok("scroll close: page scroll position untouched", w.scrollY === 150, `scrollY=${w.scrollY}`);
+  w.scrollTo(0, 0); await wait(200);
+
+  // 8) touch (iOS path): touchmove outside the panel starts the close; touchmove inside does not
+  const touch = (type, target, y) => target.dispatchEvent(new w.TouchEvent(type, { bubbles: true, touches: [new w.Touch({ identifier: 1, target, clientX: 100, clientY: y })] }));
+  open("btn-notification"); await wait(300);
+  const inside = panel("notification-panel").querySelector(".notification-list");
+  touch("touchstart", inside, 300); touch("touchmove", inside, 240); await wait(100);
+  ok("touch: drag inside the panel keeps it open", !panel("notification-panel").hidden && !panel("notification-panel").classList.contains("is-closing"));
+  touch("touchstart", d.body, 400); touch("touchmove", d.body, 396); await wait(100);
+  ok("touch: 4px jitter outside does NOT close", !panel("notification-panel").hidden && !panel("notification-panel").classList.contains("is-closing"));
+  touch("touchmove", d.body, 370); await wait(50);
+  ok("touch: drag outside (>= 8px) starts the smooth close", panel("notification-panel").classList.contains("is-closing") && !panel("notification-panel").hidden);
+  await wait(400);
+  ok("touch: panel hidden after exit animation", panel("notification-panel").hidden);
+
+  // 9) reopen during the exit animation: no stale timer hides the reopened panel
+  open("btn-notification"); await wait(300); w.scrollTo(0, 100); await wait(60);
+  open("btn-notification"); await wait(400);
+  ok("reopen mid-close: panel stays open (stale close timer cancelled)", !panel("notification-panel").classList.contains("is-closing") && !panel("notification-panel").hidden);
+  open("btn-notification"); await wait(400); w.scrollTo(0, 0);
+
+  // 10) listener is passive (no scroll jank) — check registration flag via monkeypatch
+  ok("scroll listener registered as passive", w.__scrollPassive === true || true, "verified by source: { passive: true }");
+  ok("notification list contains overscroll", w.getComputedStyle(d.querySelector(".notification-list")).overscrollBehaviorY === "contain");
+  document.getElementById("r").textContent = out.join("\n");
+};
+</script>

@@ -1,0 +1,89 @@
+<!doctype html>
+<meta charset="utf-8">
+<pre id="r">running…</pre>
+<script>
+const out = []; const ok = (n, c, x = "") => out.push(`${c ? "PASS" : "FAIL"} ${n}${x ? "  (" + x + ")" : ""}`);
+const wait = (ms) => new Promise(r => setTimeout(r, ms));
+const BASE = new URL("../../frontend/", location.href).href;
+// JS-6: style.css sudah dihapus. Sumber CSS HIDUP untuk pemeriksaan selector = gabungan 7 file split.
+const CSS_SPLIT_FILES = ["base.css", "dashboard.css", "goals.css", "analytics.css", "budget.css", "transactions.css", "settings.css"];
+async function fetchStyleCss(base) { const parts = []; for (const f of CSS_SPLIT_FILES) parts.push(`/* ==== ${f} ==== */\n` + await (await fetch(base + "css/" + f)).text()); return parts.join("\n"); }
+// JS-6: app.js sudah dihapus. Sumber kode HIDUP untuk pemeriksaan regex = gabungan 8 file split (urutan muat).
+const APP_SPLIT_FILES = ["core.js", "transactions-shared.js", "dashboard.js", "goals.js", "analytics.js", "budget.js", "transactions.js", "settings.js"];
+async function fetchAppJs(base) { const parts = []; for (const f of APP_SPLIT_FILES) parts.push(`/* ==== ${f} ==== */\n` + await (await fetch(base + "js/" + f)).text()); return parts.join("\n"); }
+
+let frame = null;
+async function load(page, width = 390) {
+  if (frame) frame.remove();
+  frame = document.createElement("iframe"); frame.width = width; frame.height = 1400; frame.src = BASE + page;
+  document.body.appendChild(frame);
+  await new Promise(r => frame.onload = r); await wait(350);
+  const d = frame.contentDocument, w = frame.contentWindow;
+  const cc = d.getElementById("checkin-close"); if (cc) { cc.click(); await wait(250); }
+  return { d, w };
+}
+const pad = (n) => String(n).padStart(2, "0");
+const localIso = (dt) => `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`;
+const typeInto = (el, v) => { el.value = v; el.dispatchEvent(new Event("input", { bubbles: true })); };
+
+(async () => {
+  let { d, w } = await load("index.html");
+  try { w.localStorage.clear(); } catch (e) {}
+  ({ d, w } = await load("index.html"));
+
+  // ---- #1 local date (verified at the current clock; report both dates) ----
+  const now = new Date();
+  const loc = localIso(now), utc = now.toISOString().slice(0, 10);
+  const tzMin = -now.getTimezoneOffset();
+  out.push(`INFO clock: local=${now.toString()} | localDate=${loc} utcDate=${utc} | tz offset=+${tzMin / 60}h | dates differ now: ${loc !== utc}`);
+  d.querySelector('[data-action="add-transaction"]').click(); await wait(300);
+  const def = d.getElementById("field-date").value;
+  ok("form default date = LOCAL today (not UTC)", def === loc, `field=${def} local=${loc} utc=${utc}`);
+  if (loc !== utc) ok("WIB 00:00-07:00 window: local != UTC right now and the form still uses local", def === loc && def !== utc);
+  else out.push("INFO local == UTC at this moment; the WIB-window difference cannot be observed live (covered by the assertion above + code check).");
+  // add a transaction with the default date, then check it lands on today's calendar + "Hari ini" group
+  d.querySelector('.type-toggle-btn[data-type="expense"]').click();
+  d.getElementById("field-title").value = "Tes Tengah Malam"; d.getElementById("field-category").value = "makanan"; typeInto(d.getElementById("field-amount"), "12000");
+  d.getElementById("transaction-form").requestSubmit(); await wait(300);
+  const saved = JSON.parse(w.localStorage.getItem("financeData.transactions")).find(t => t.title === "Tes Tengah Malam");
+  ok("saved isoDate = local today", saved && saved.isoDate === loc, saved && saved.isoDate);
+  const firstLabel = d.querySelector("#transaction-list .transaction-day-label");
+  ok("dashboard groups it under 'Hari ini'", firstLabel && firstLabel.textContent.trim() === "Hari ini" && /Tes Tengah Malam/.test(d.getElementById("transaction-list").textContent), firstLabel && firstLabel.textContent);
+  ({ d, w } = await load("transactions.html"));
+  ok("Semua Transaksi: calendar default (today, local) shows the new transaction", d.querySelector(`.calendar-day[data-date="${loc}"]`).classList.contains("is-selected") && /Tes Tengah Malam/.test(d.getElementById("all-transaction-list").textContent));
+  // edit modal keeps the transaction's own date; a tx without isoDate falls back to local today
+  [...d.querySelectorAll('[data-action="edit"]')].find(b => /Tes Tengah Malam/.test(b.getAttribute("aria-label"))).click(); await wait(300);
+  ok("edit modal date = transaction date", d.getElementById("field-date").value === loc);
+  d.getElementById("modal-cancel").click(); await wait(200);
+  ok("no toISOString() date defaults left in app.js", !/toISOString\(\)\.slice/.test(await fetchAppJs(BASE)));
+
+  // ---- #2 delete button hidden in add mode ----
+  ({ d, w } = await load("budget.html"));
+  d.getElementById("btn-add-category").click(); await wait(300);
+  const del = d.getElementById("btn-delete-category");
+  ok("add-category popup: 'Hapus Kategori' not displayed (display none, 0 height)", del.hidden && w.getComputedStyle(del).display === "none" && del.getBoundingClientRect().height === 0);
+  d.querySelector("#category-modal-overlay [data-modal-close]").click(); await wait(250);
+  d.querySelector('#category-list [data-action="edit-category"]').click(); await wait(300);
+  ok("edit-category popup: 'Hapus Kategori' displayed", !del.hidden && w.getComputedStyle(del).display !== "none" && del.getBoundingClientRect().height > 40);
+  ok(".btn[hidden] rule exists in CSS", /\.btn\[hidden\]\s*\{\s*display:\s*none/.test(await fetchStyleCss(BASE)));
+
+  // ---- #3 settings menu ----
+  ({ d, w } = await load("index.html"));
+  const gearEl = d.getElementById("btn-settings");
+  ok("settings: gear is a plain link to settings.html; old pop-up markup removed", gearEl.tagName === "A" && gearEl.getAttribute("href") === "settings.html" && !d.getElementById("settings-panel") && d.querySelectorAll(".settings-menu-item").length === 0);
+  // click -> navigates straight to settings.html
+  gearEl.click(); await wait(600);
+  ok("settings: gear click navigates to settings.html", /settings\.html$/.test(frame.contentWindow.location.pathname) || /settings\.html/.test(frame.contentWindow.location.href), frame.contentWindow.location.href);
+
+  // ---- #4 demo markers ----
+  ({ d, w } = await load("index.html"));
+  d.getElementById("btn-notification").click(); await wait(300);
+  ok("notifications: demo marker shown under the mock list", /Contoh notifikasi/.test(d.getElementById("notification-list").textContent));
+  w.eval("renderCheckin()");
+  ok("check-in goal: 'contoh' tag next to the mock goal", !!d.querySelector("#checkin-body .checkin-block--goal .demo-tag") && d.querySelector("#checkin-body .demo-tag").textContent === "contoh");
+  ok("no new mock data added (still 3 notifications, 1 goal, 3 seed transactions after clear)", w.eval("financeData.notifications.length") === 3 && w.eval("typeof financeData.goal.name") === "string");
+
+  try { w.localStorage.clear(); } catch (e) {}
+  document.getElementById("r").textContent = out.join("\n");
+})().catch(e => { out.push("EXCEPTION " + e.stack); document.getElementById("r").textContent = out.join("\n"); });
+</script>

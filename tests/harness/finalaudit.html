@@ -1,0 +1,285 @@
+<!doctype html>
+<meta charset="utf-8">
+<pre id="r">running…</pre>
+<script>
+const out = []; const ok = (n, c, x = "") => out.push(`${c ? "PASS" : "FAIL"} ${n}${x ? "  (" + x + ")" : ""}`);
+const info = (m) => out.push("INFO " + m);
+const wait = (ms) => new Promise(r => setTimeout(r, ms));
+const confirmDelete = async (d, w) => { const btn = d.getElementById("confirm-delete"); if (btn && !d.getElementById("confirm-modal-overlay").hidden) { btn.click(); await new Promise(r => setTimeout(r, 260)); } };
+
+const BASE = new URL("../../frontend/", location.href).href;
+// JS-6: style.css sudah dihapus. Sumber CSS HIDUP untuk pemeriksaan selector = gabungan 7 file split.
+const CSS_SPLIT_FILES = ["base.css", "dashboard.css", "goals.css", "analytics.css", "budget.css", "transactions.css", "settings.css"];
+async function fetchStyleCss(base) { const parts = []; for (const f of CSS_SPLIT_FILES) parts.push(`/* ==== ${f} ==== */\n` + await (await fetch(base + "css/" + f)).text()); return parts.join("\n"); }
+// JS-6: app.js sudah dihapus. Sumber kode HIDUP untuk pemeriksaan regex = gabungan 8 file split (urutan muat).
+const APP_SPLIT_FILES = ["core.js", "transactions-shared.js", "dashboard.js", "goals.js", "analytics.js", "budget.js", "transactions.js", "settings.js"];
+async function fetchAppJs(base) { const parts = []; for (const f of APP_SPLIT_FILES) parts.push(`/* ==== ${f} ==== */\n` + await (await fetch(base + "js/" + f)).text()); return parts.join("\n"); }
+
+let frame = null;
+async function load(page, width = 390) {
+  if (frame) frame.remove();
+  frame = document.createElement("iframe"); frame.width = width; frame.height = 1600; frame.src = BASE + page;
+  document.body.appendChild(frame);
+  await new Promise(r => frame.onload = r); await wait(320);
+  const d = frame.contentDocument, w = frame.contentWindow;
+  const cc = d.getElementById("checkin-close"); if (cc) { cc.click(); await wait(240); }
+  return { d, w };
+}
+const pad = (n) => String(n).padStart(2, "0");
+const iso = (dt) => `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`;
+const addD = (dt, n) => new Date(dt.getFullYear(), dt.getMonth(), dt.getDate() + n);
+const txt = (el) => (el ? el.textContent.replace(/\s+/g, " ").trim() : "");
+const num = (s) => Number(String(s).replace(/\D/g, ""));
+const typeInto = (el, v) => { el.value = v; el.dispatchEvent(new Event("input", { bubbles: true })); };
+const MONTHS = ["Januari","Februari","Maret","April","Mei","Juni","Juli","Agustus","September","Oktober","November","Desember"];
+
+(async () => {
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+  const daysInMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
+  info(`clock local=${new Date().toString()} localDate=${iso(today)} utcDate=${new Date().toISOString().slice(0,10)} differ=${iso(today) !== new Date().toISOString().slice(0,10)}`);
+
+  // =============== 1. DASHBOARD (seeded data, empty storage) ===============
+  let { d, w } = await load("index.html");
+  try { w.localStorage.clear(); } catch (e) {}
+  ({ d, w } = await load("index.html"));
+  const reveal = () => { if (!w.eval("isBalanceVisible")) d.getElementById("btn-toggle-balance").click(); };
+  reveal(); await wait(80);
+  const seedTx = JSON.parse(JSON.stringify(w.eval("financeData.transactions")));
+  const sIn = seedTx.filter(t => t.type === "income").reduce((a, t) => a + t.amount, 0);
+  const sOut = seedTx.filter(t => t.type === "expense").reduce((a, t) => a + t.amount, 0);
+  ok("dashboard: saldo = pemasukan − pengeluaran (from actual transactions)", num(txt(d.getElementById("balance-value"))) === sIn - sOut && num(txt(d.getElementById("income-value"))) === sIn && num(txt(d.getElementById("expense-value"))) === sOut, `${txt(d.getElementById("balance-value"))} / ${txt(d.getElementById("income-value"))} / ${txt(d.getElementById("expense-value"))}`);
+  ok("dashboard: summary is recomputed, not read from mock summary object", (() => { w.eval("financeData.summary.balance = 123; recalcFromTransactions();"); return w.eval("financeData.summary.balance") === sIn - sOut; })());
+  ok("dashboard: goal/notification mock not part of balance math", !w.eval("String(recalcFromTransactions)").includes("goal") && !w.eval("String(recalcFromTransactions)").includes("notification"));
+  ok("dashboard: greeting rendered", /^(Selamat|Halo)/.test(txt(d.getElementById("greeting-text"))), txt(d.getElementById("greeting-text")));
+  // overlap check on main sections
+  const rects = [...d.querySelectorAll(".app > section, .app > header")].map(el => ({ n: el.className.split(" ")[0], r: el.getBoundingClientRect() })).filter(x => x.r.height > 0);
+  let overlap = "";
+  for (let i = 1; i < rects.length; i++) if (rects[i].r.top < rects[i - 1].r.bottom - 0.5) overlap = `${rects[i - 1].n}/${rects[i].n}`;
+  ok("dashboard: no overlapping sections", !overlap, overlap);
+  ok("dashboard: preview only (no edit/delete in Transaksi Terbaru)", d.querySelectorAll("#transaction-list [data-action]").length === 0);
+
+  // =============== 2. CRUD ===============
+  const add = async (type, title, cat, amount, date) => {
+    d.querySelector('[data-action="add-transaction"]').click(); await wait(260);
+    d.querySelector(`.type-toggle-btn[data-type="${type}"]`).click();
+    d.getElementById("field-title").value = title;
+    d.getElementById("field-category").value = cat;
+    typeInto(d.getElementById("field-amount"), String(amount));
+    if (date) d.getElementById("field-date").value = date;
+    d.getElementById("transaction-form").requestSubmit(); await wait(260);
+  };
+  const store = () => JSON.parse(w.localStorage.getItem("financeData.transactions") || "[]");
+  const n0 = w.eval("financeData.transactions.length"); // seed ikut dipersist saat simpan pertama
+  await add("income", "Audit Income", "lainnya", 1000000);
+  await add("expense", "Audit Expense", "makanan", 15000);
+  ok("CRUD: add income + expense saved to localStorage with correct types/amounts", store().length === n0 + 2 && store().some(t => t.title === "Audit Income" && t.type === "income" && t.amount === 1000000) && store().some(t => t.title === "Audit Expense" && t.type === "expense" && t.amount === 15000));
+  reveal(); await wait(60);
+  ok("CRUD: summary updates immediately after add", num(txt(d.getElementById("income-value"))) === sIn + 1000000 && num(txt(d.getElementById("expense-value"))) === sOut + 15000 && num(txt(d.getElementById("balance-value"))) === sIn + 1000000 - (sOut + 15000));
+  ok("CRUD: income not counted as expense and vice versa", num(txt(d.getElementById("expense-value"))) !== sOut + 1000000 && num(txt(d.getElementById("income-value"))) !== sIn + 15000);
+  // validation
+  d.querySelector('[data-action="add-transaction"]').click(); await wait(220);
+  d.getElementById("transaction-form").requestSubmit(); await wait(150);
+  ok("CRUD validation: empty form rejected (modal stays open, nothing saved)", !d.getElementById("transaction-modal-overlay").hidden && store().length === n0 + 2);
+  d.getElementById("field-title").value = "Tanpa Kategori"; typeInto(d.getElementById("field-amount"), "5000");
+  d.getElementById("transaction-form").requestSubmit(); await wait(150);
+  ok("CRUD validation: category required", !d.getElementById("transaction-modal-overlay").hidden && !store().some(t => t.title === "Tanpa Kategori"));
+  d.getElementById("field-category").value = "makanan"; typeInto(d.getElementById("field-amount"), "0");
+  d.getElementById("transaction-form").requestSubmit(); await wait(150);
+  ok("CRUD validation: amount 0 rejected", !d.getElementById("transaction-modal-overlay").hidden && !store().some(t => t.amount === 0));
+  typeInto(d.getElementById("field-amount"), "abc");
+  ok("CRUD validation: non-numeric amount stripped by input mask", d.getElementById("field-amount").value === "");
+  typeInto(d.getElementById("field-amount"), "5000"); d.getElementById("field-date").value = "";
+  d.getElementById("transaction-form").requestSubmit(); await wait(150);
+  ok("CRUD validation: empty date rejected", !d.getElementById("transaction-modal-overlay").hidden && store().length === n0 + 2);
+  d.getElementById("modal-cancel").click(); await wait(200);
+  // reload persistence
+  ({ d, w } = await load("index.html"));
+  reveal(); await wait(60);
+  ok("CRUD: data persists after reload, no duplication", store().length === n0 + 2 && num(txt(d.getElementById("income-value"))) === sIn + 1000000 && new Set(store().map(t => t.id)).size === store().length);
+  // edit + delete on transactions page
+  ({ d, w } = await load("transactions.html"));
+  w.confirm = () => true;
+  const expand = async () => { const b = d.getElementById("btn-toggle-all"); if (b && !d.getElementById("transaction-list-more").hidden) { b.click(); await wait(80); } };
+  await expand();
+  const editBtn = [...d.querySelectorAll('[data-action="edit"]')].find(b => /Audit Expense/.test(b.getAttribute("aria-label")));
+  editBtn.click(); await wait(260);
+  ok("CRUD: edit modal prefilled (title, category, amount, date)", d.getElementById("field-title").value === "Audit Expense" && d.getElementById("field-category").value === "makanan" && d.getElementById("field-amount").value === "15.000" && d.getElementById("field-date").value === iso(today));
+  d.getElementById("field-title").value = "Audit Expense Edited"; typeInto(d.getElementById("field-amount"), "20000");
+  d.getElementById("transaction-form").requestSubmit(); await wait(260);
+  const edited = store().filter(t => /Audit Expense/.test(t.title));
+  ok("CRUD: edit updates in place (no duplicate row, amount changed)", edited.length === 1 && edited[0].title === "Audit Expense Edited" && edited[0].amount === 20000 && store().length === n0 + 2);
+  await expand();
+  [...d.querySelectorAll('[data-action="delete"]')].find(b => /Audit Expense Edited/.test(b.getAttribute("aria-label"))).click(); await wait(260); await confirmDelete(d, w);
+  ok("CRUD: delete removes exactly one transaction", store().length === n0 + 1 && !store().some(t => /Audit Expense/.test(t.title)));
+  ({ d, w } = await load("index.html"));
+  reveal(); await wait(60);
+  ok("CRUD: dashboard reflects delete after reload", num(txt(d.getElementById("expense-value"))) === sOut);
+
+  // =============== 3. DATE / TIMEZONE ===============
+  d.querySelector('[data-action="add-transaction"]').click(); await wait(240);
+  ok("DATE: add form defaults to LOCAL today", d.getElementById("field-date").value === iso(today), `${d.getElementById("field-date").value} vs local ${iso(today)} / utc ${new Date().toISOString().slice(0,10)}`);
+  d.getElementById("modal-cancel").click(); await wait(180);
+  const src = await fetchAppJs(BASE);
+  ok("DATE: no toISOString() used to derive a date value (only in comments)", !/toISOString\(\)\s*\.\s*slice/.test(src) && !/=\s*new Date\(\)\.toISOString/.test(src));
+  ok("DATE: grouping uses local toIsoDate (today's tx grouped as 'Hari ini')", (() => { const l = d.querySelector("#transaction-list .transaction-day-label"); return l && txt(l) === "Hari ini"; })());
+  // helper correctness across DST-free local tz
+  ok("DATE: toIsoDate() matches local components for edge times", w.eval(`(() => { const d1 = new Date(2026, 0, 1, 0, 30); const d2 = new Date(2026, 11, 31, 23, 30); return toIsoDate(d1) === "2026-01-01" && toIsoDate(d2) === "2026-12-31"; })()`));
+  ok("DATE: month range built from local components (1st .. last day)", w.eval(`(() => { const r = getMonthRange(new Date(2028, 1, 15)); return toIsoDate(r.from) === "2028-02-01" && toIsoDate(r.to) === "2028-03-01"; })()`));
+
+  // =============== 4-5. ANALYTICS + CHART ===============
+  const seed = [
+    { id: 901, title: "Makan Siang", category: "makanan", type: "expense", amount: 25000, isoDate: iso(today), time: "" },
+    { id: 902, title: "Bensin Motor", category: "bensin", type: "expense", amount: 30000, isoDate: iso(today), time: "" },
+    { id: 903, title: "Gaji", category: "lainnya", type: "income", amount: 5000000, isoDate: iso(today), time: "" },
+    { id: 904, title: "Tagihan", category: "tagihan", type: "expense", amount: 200000, isoDate: iso(today.getDate() > 1 ? monthStart : addD(monthStart, 1)), time: "" },
+    { id: 905, title: "Bulan Lalu", category: "belanja", type: "expense", amount: 100000, isoDate: iso(new Date(today.getFullYear(), today.getMonth() - 1, 15)), time: "" },
+    { id: 906, title: "Tanpa Tanggal", category: "makanan", type: "expense", amount: 7000, isoDate: "", time: "" },
+    { id: 907, title: "Tanggal Rusak", category: "makanan", type: "expense", amount: 8000, isoDate: "2026-02-30", time: "" },
+  ];
+  const expMonth = 255000;
+  w.localStorage.setItem("financeData.transactions", JSON.stringify(seed));
+  ({ d, w } = await load("analytics.html"));
+  const bars = () => [...d.querySelectorAll("#time-chart .bar-col")];
+  const sumBars = () => bars().reduce((s, b) => s + num(b.getAttribute("aria-label").split(",").pop()), 0);
+  ok("ANALYTICS: total = actual expenses this month (income & last month excluded)", num(txt(d.querySelector("#analytics-summary .stat--wide .stat-value"))) === expMonth, txt(d.querySelector("#analytics-summary .stat--wide .stat-value")));
+  ok("ANALYTICS: largest category correct (Tagihan Rp200.000)", /Tagihan/.test(txt(d.querySelector("#analytics-summary .stat:nth-child(2)"))) && num(txt(d.querySelector("#analytics-summary .stat:nth-child(2) .stat-sub"))) === 200000);
+  ok("ANALYTICS: Σ bars = Σ categories = tile total", sumBars() === expMonth && [...d.querySelectorAll("#category-chart .cat-row-amount")].reduce((s, e) => s + num(txt(e)), 0) === expMonth, `bars=${sumBars()}`);
+  ok("ANALYTICS: invalid/missing dates skipped safely with a note", /2 pengeluaran tanpa tanggal valid/.test(txt(d.querySelector("#time-chart .chart-note"))));
+  ok("ANALYTICS: no period tabs / custom date inputs remain", !d.querySelector("#period-filter, .seg, .seg-btn, #custom-range, #custom-from, #custom-to, #period-label"));
+  ok("ANALYTICS: one small bar per day of month", bars().length === daysInMonth && bars().every(b => b.getBoundingClientRect().width < 14));
+  const chartEl = d.getElementById("bar-chart");
+  ok("CHART: body has no horizontal overflow; chart card does not scroll", d.documentElement.scrollWidth === d.documentElement.clientWidth && d.getElementById("time-chart").scrollWidth <= d.getElementById("time-chart").clientWidth + 1);
+  ok("CHART: touch-action pan-y (vertical page scroll preserved)", w.getComputedStyle(chartEl).touchAction === "pan-y");
+  // interaction
+  const cx = (b) => { const r = b.getBoundingClientRect(); return r.left + r.width / 2; };
+  const my = () => { const r = chartEl.getBoundingClientRect(); return r.top + r.height / 2; };
+  const pev = (type, x, ptype = "touch", id = 7) => chartEl.dispatchEvent(new w.PointerEvent(type, { bubbles: true, cancelable: true, pointerId: id, pointerType: ptype, isPrimary: true, clientX: x, clientY: my(), button: 0 }));
+  const selKey = () => { const b = d.querySelector("#time-chart .bar-col.is-selected"); return b && b.dataset.key; };
+  const barPos = () => bars().map(b => Math.round(b.getBoundingClientRect().left)).join(",");
+  const posBefore = barPos();
+  const hovKey = () => { const b = d.querySelector("#time-chart .bar-col.is-hover"); return b && b.dataset.key; };
+  const monthLabel = `${MONTHS[today.getMonth()]} ${today.getFullYear()}`;
+  ok("CHART: default has no selection; detail shows the whole active period", !selKey() && txt(d.getElementById("chart-detail-title")) === monthLabel && num(txt(d.querySelector("#chart-detail .detail-total"))) === expMonth);
+  pev("pointerdown", cx(bars()[4])); await wait(40);
+  ok("CHART: scrubbing gives hover preview only (no selection, detail untouched)", hovKey() === iso(addD(monthStart, 4)) && !selKey() && txt(d.getElementById("chart-detail-title")) === monthLabel);
+  pev("pointermove", cx(bars()[today.getDate() - 1])); await wait(40);
+  ok("CHART: hover follows the finger, detail still the whole period", hovKey() === iso(today) && !selKey() && num(txt(d.querySelector("#chart-detail .detail-total"))) === expMonth);
+  pev("pointerup", cx(bars()[today.getDate() - 1])); await wait(40);
+  ok("CHART: after a drag, nothing is locked as selected", !selKey() && !hovKey() && num(txt(d.querySelector("#chart-detail .detail-total"))) === expMonth);
+  pev("pointerdown", cx(bars()[today.getDate() - 1])); pev("pointerup", cx(bars()[today.getDate() - 1])); await wait(40);
+  ok("CHART: tap (no movement) selects the bar + aria-pressed", selKey() === iso(today) && d.querySelector(".bar-col.is-selected").getAttribute("aria-pressed") === "true");
+  ok("CHART: detail follows the tapped bar (today, Rp55.000, 2 items)", txt(d.getElementById("chart-detail-title")) === `${today.getDate()} ${MONTHS[today.getMonth()]} ${today.getFullYear()}` && num(txt(d.querySelector("#chart-detail .detail-total"))) === 55000 && d.querySelectorAll("#chart-detail .transaction-item").length === 2);
+  ok("CHART: bars do not move during interaction", barPos() === posBefore);
+  ok("CHART: no horizontal scrollbar after interaction", d.documentElement.scrollWidth === d.documentElement.clientWidth && chartEl.scrollWidth - chartEl.clientWidth <= 12);
+  const mouseBar = bars()[2];
+  pev("pointerdown", cx(mouseBar), "mouse", 1); pev("pointerup", cx(mouseBar), "mouse", 1); await wait(40);
+  ok("CHART: mouse click selects a bar", selKey() === iso(addD(monthStart, 2)));
+  const before = JSON.stringify(store());
+  ok("CHART: interaction does not modify stored transactions", JSON.stringify(store()) === before && store().length === seed.length);
+  const emptyBar = bars().find(b => /Rp0$/.test(b.getAttribute("aria-label")));
+  pev("pointerdown", cx(emptyBar)); pev("pointerup", cx(emptyBar)); await wait(40);
+  ok("CHART: empty day shows empty state, total Rp0", /📭/.test(txt(d.getElementById("chart-detail"))) && num(txt(d.querySelector("#chart-detail .detail-total"))) === 0);
+  ok("CHART: no Edit/Delete on analytics", !d.querySelector("#chart-detail [data-action]"));
+  d.getElementById("btn-reset-selection").click(); await wait(60);
+  ok("CHART: reset returns to whole month", !d.querySelector(".bar-col.is-selected") && num(txt(d.querySelector("#chart-detail .detail-total"))) === expMonth);
+  // empty data
+  w.localStorage.setItem("financeData.transactions", JSON.stringify([]));
+  ({ d, w } = await load("analytics.html"));
+  ok("CHART: empty dataset renders without error (bars flat, empty copy)", bars().length === daysInMonth && /Belum ada pengeluaran pada \w+ \d{4}/.test(txt(d.querySelector("#time-chart .chart-note"))) && /Belum ada pengeluaran/.test(txt(d.getElementById("category-chart"))));
+  const chartEl2 = d.getElementById("bar-chart");
+  chartEl2.dispatchEvent(new w.PointerEvent("pointerdown", { bubbles: true, pointerId: 3, pointerType: "touch", isPrimary: true, clientX: chartEl2.getBoundingClientRect().left + 10, clientY: chartEl2.getBoundingClientRect().top + 10, button: 0 })); await wait(60);
+  ok("CHART: interacting with an all-zero chart does not throw", !!d.getElementById("chart-detail"));
+  // corrupt storage
+  w.localStorage.setItem("financeData.transactions", "{not json");
+  ({ d, w } = await load("analytics.html"));
+  ok("DATA: corrupt localStorage falls back to seed data without crashing", bars().length === daysInMonth && !!d.getElementById("analytics-summary"));
+  w.localStorage.setItem("financeData.transactions", JSON.stringify([{ id: 1, title: "Rusak", type: "expense" }]));
+  ({ d, w } = await load("index.html"));
+  ok("DATA: transaction missing amount/date/category does not break dashboard", !!d.getElementById("balance-value") && !!d.getElementById("transaction-list"));
+  ({ d, w } = await load("transactions.html"));
+  ok("DATA: incomplete transaction does not break Semua Transaksi/calendar", d.querySelectorAll(".calendar-day").length === 42);
+
+  // =============== 6. BUDGET ===============
+  w.localStorage.setItem("financeData.transactions", JSON.stringify(seed));
+  try { w.localStorage.removeItem("financeData.budget"); } catch (e) {}
+  ({ d, w } = await load("budget.html"));
+  ok("BUDGET: monthly card uses expenses only (Rp255.000 / default Rp2.400.000)", num(txt(d.querySelector("#budget-card .budget-used"))) === expMonth && /Rp2\.400\.000/.test(txt(d.getElementById("budget-card"))));
+  ok("BUDGET: category cards render with per-category expense", d.querySelectorAll("#category-list .category-card").length >= 5 && /Terpakai: Rp25\.000/.test(txt(d.querySelector('.category-card[data-category="makanan"]'))));
+  ok("BUDGET: income never counted in 'terpakai'", !/Rp5\.000\.000/.test(txt(d.getElementById("budget-card"))));
+  d.getElementById("btn-edit-budget").click(); await wait(240);
+  typeInto(d.getElementById("field-budget-monthly"), "1800000");
+  d.getElementById("budget-form").requestSubmit(); await wait(240);
+  ok("BUDGET: edit monthly budget applies and persists", /Rp1\.800\.000/.test(txt(d.getElementById("budget-card"))) && JSON.parse(w.localStorage.getItem("financeData.budget")).monthly === 1800000);
+  ({ d, w } = await load("budget.html"));
+  ok("BUDGET: value survives reload", /Rp1\.800\.000/.test(txt(d.getElementById("budget-card"))));
+  d.getElementById("btn-add-category").click(); await wait(240);
+  ok("BUDGET: delete button hidden in add mode (hidden not overridden)", d.getElementById("btn-delete-category").hidden && w.getComputedStyle(d.getElementById("btn-delete-category")).display === "none");
+  d.querySelector("#category-modal-overlay [data-modal-close]").click(); await wait(200);
+  // Escape behaviour with nested modals
+  d.querySelector('#category-list [data-action="edit-category"]').click(); await wait(220);
+  d.getElementById("btn-delete-category").click(); await wait(220);
+  d.dispatchEvent(new w.KeyboardEvent("keydown", { key: "Escape", bubbles: true })); await wait(300);
+  ok("BUDGET: Escape closes only the topmost modal (confirm closed, edit modal stays open)", d.getElementById("confirm-modal-overlay").hidden && !d.getElementById("category-modal-overlay").hidden, `confirm hidden=${d.getElementById("confirm-modal-overlay").hidden} edit hidden=${d.getElementById("category-modal-overlay").hidden}`);
+  d.dispatchEvent(new w.KeyboardEvent("keydown", { key: "Escape", bubbles: true })); await wait(300);
+  ok("BUDGET: second Escape closes the edit modal", d.getElementById("category-modal-overlay").hidden);
+
+  // =============== 7. NAV + SETTINGS ===============
+  ({ d, w } = await load("index.html"));
+  const gearLink = d.getElementById("btn-settings");
+  ok("NAV: gear icon is a direct link to settings.html (no settings pop-up left)", gearLink.tagName === "A" && gearLink.getAttribute("href") === "settings.html" && !d.getElementById("settings-panel") && d.querySelectorAll(".settings-menu-item").length === 0);
+  gearLink.click(); await wait(500);
+  ok("NAV: clicking the gear navigates to settings.html", /settings\.html/.test(frame.contentWindow.location.href), frame.contentWindow.location.href);
+  ({ d, w } = await load("index.html"));
+  ok("NAV: dashboard links -> analytics.html, budget.html, transactions.html", d.querySelector('a[href="analytics.html"]') && d.querySelector('a[href="budget.html"]') && d.querySelector('a[href="transactions.html"]'));
+  // dead controls: every button has an id / data-attr / type=submit / known handler
+  const deadBtns = [];
+  for (const page of ["index.html", "transactions.html", "analytics.html", "budget.html"]) {
+    const r = await load(page);
+    for (const b of r.d.querySelectorAll("button")) {
+      const wired = b.id || b.dataset.action || b.dataset.modalClose !== undefined || b.dataset.setting || b.dataset.type || b.dataset.key || b.dataset.date !== undefined || b.dataset.calNav !== undefined || b.dataset.emoji || b.dataset.amount || b.type === "submit" || b.closest("#emoji-picker, #budget-quick-amounts, .calendar, #bar-chart");
+      if (!wired && b.getBoundingClientRect().height > 0) deadBtns.push(`${page}: ${b.className} "${txt(b).slice(0, 24)}"`);
+    }
+  }
+  ok("NAV: no visible button without a handler/target", deadBtns.length === 0, deadBtns.join(" | "));
+
+  // =============== 9. RESPONSIVE + A11Y ===============
+  const widths = [320, 375, 430, 768, 1280];
+  const pagesList = ["index.html", "transactions.html", "analytics.html", "budget.html"];
+  let overflowIssues = [];
+  let tapIssues = [];
+  for (const page of pagesList) {
+    for (const width of widths) {
+      const r = await load(page, width);
+      const dd = r.d, ww = r.w;
+      if (dd.documentElement.scrollWidth > dd.documentElement.clientWidth) overflowIssues.push(`${page}@${width} html sw=${dd.documentElement.scrollWidth} cw=${dd.documentElement.clientWidth}`);
+      for (const el of dd.querySelectorAll("body *")) {
+        const rr = el.getBoundingClientRect();
+        if (rr.width && (rr.right > dd.documentElement.clientWidth + 0.5 || rr.left < -0.5) && ww.getComputedStyle(el).position !== "fixed" && !el.closest("[hidden]")) overflowIssues.push(`${page}@${width} ${el.tagName.toLowerCase()}.${(el.className || "").toString().split(" ")[0]}`);
+      }
+      for (const b of dd.querySelectorAll("button, a, input, select")) {
+        const rr = b.getBoundingClientRect();
+        if (!rr.width || b.closest("[hidden]")) continue;
+        const isBar = b.classList.contains("bar-col");
+        const minW = isBar ? 5 : 36, minH = isBar ? 100 : 35;
+        if (rr.height < minH || rr.width < minW) tapIssues.push(`${page}@${width} ${b.tagName.toLowerCase()}#${b.id || ""}.${(b.className || "").toString().split(" ")[0]} ${rr.width.toFixed(0)}x${rr.height.toFixed(0)}`);
+      }
+    }
+  }
+  ok("RESPONSIVE: no horizontal overflow on body at 320/375/430/768/1280 across 4 pages", overflowIssues.length === 0, [...new Set(overflowIssues)].slice(0, 6).join(" | "));
+  ok("RESPONSIVE: interactive controls keep usable tap size", tapIssues.length === 0, [...new Set(tapIssues)].slice(0, 6).join(" | "));
+  // focus states
+  ({ d, w } = await load("analytics.html", 390));
+  const css = await fetchStyleCss(BASE);
+  ok("A11Y: global :focus-visible outline defined for buttons and links", /button:focus-visible/.test(css) && /a:focus-visible/.test(css));
+  ok("A11Y: chart bars have their own focus-visible style", /\.bar-col:focus-visible/.test(css));
+  ok("A11Y: active bar conveyed via aria-pressed + class (not colour only)", bars()[0].hasAttribute("aria-pressed"));
+  ok("A11Y: each bar has an accessible label with date and amount", bars().every(b => /\d{4}, Rp/.test(b.getAttribute("aria-label"))));
+  info(`contrast tokens: text=${w.getComputedStyle(d.documentElement).getPropertyValue("--color-text").trim()} muted=${w.getComputedStyle(d.documentElement).getPropertyValue("--color-text-muted").trim()} primary=${w.getComputedStyle(d.documentElement).getPropertyValue("--color-primary").trim()} on bg=${w.getComputedStyle(d.documentElement).getPropertyValue("--color-bg").trim()}`);
+  const barLabelColor = w.getComputedStyle(bars()[0].querySelector(".bar-label")).color;
+  info(`bar label colour ${barLabelColor}; selected bar fill ${w.getComputedStyle(d.documentElement).getPropertyValue("--color-primary-dark").trim()}`);
+
+  try { w.localStorage.clear(); } catch (e) {}
+  document.getElementById("r").textContent = out.join("\n");
+})().catch(e => { out.push("EXCEPTION " + e.stack); document.getElementById("r").textContent = out.join("\n"); });
+</script>

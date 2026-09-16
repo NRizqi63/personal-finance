@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Semua Transaksi</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="../legacy/style.css" />
+</head>
+<!-- data-page memberi tahu js/app.js untuk menjalankan initTransactionsPage()
+     alih-alih initDashboard(). Satu app.js dipakai kedua halaman; data
+     transaksi dibagi lewat localStorage (lihat loadTransactions()). -->
+<body data-page="transactions">
+  <div class="app app--page">
+
+    <!-- HEADER: tombol kembali + judul halaman -->
+    <header class="app-header page-header">
+      <a class="icon-btn" href="index.html" aria-label="Kembali ke dashboard">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M19 12H5" />
+          <path d="m12 19-7-7 7-7" />
+        </svg>
+      </a>
+      <h1 class="greeting-text">Semua Transaksi</h1>
+    </header>
+
+    <!-- CARI & FILTER (V2.1) — murni lapisan tampilan: tidak mengubah data
+         transaksi maupun localStorage. Saat salah satu filter aktif, kalender
+         disembunyikan dan daftar menampilkan hasil dari SELURUH transaksi;
+         "Hapus Filter" mengembalikan tampilan kalender seperti V1. -->
+    <section class="tx-filters" aria-label="Cari dan filter transaksi">
+      <div class="search-field">
+        <svg class="search-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="11" cy="11" r="7" />
+          <path d="m20 20-3.5-3.5" />
+        </svg>
+        <input type="search" id="tx-search" placeholder="Cari nama transaksi..." autocomplete="off" aria-label="Cari nama transaksi" />
+        <button type="button" class="search-clear" id="tx-search-clear" hidden aria-label="Hapus pencarian">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M18 6 6 18" />
+            <path d="m6 6 12 12" />
+          </svg>
+        </button>
+      </div>
+
+      <div class="filter-bar">
+        <button type="button" class="btn btn--ghost btn--xs" id="btn-filter-toggle" aria-expanded="false" aria-controls="filter-panel">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M3 5h18" />
+            <path d="M7 12h10" />
+            <path d="M10 19h4" />
+          </svg>
+          Filter &amp; Urutkan
+        </button>
+        <!-- Grup kanan: label urutan (hanya saat urutan bukan default) + Hapus
+             Filter. Jumlah hasil tidak ditaruh di sini — cukup sekali di
+             samping judul "Hasil Filter" (#selected-date-hint). -->
+        <div class="filter-bar-actions">
+          <span class="filter-sort-label" id="filter-sort-label" hidden></span>
+          <button type="button" class="btn btn--ghost btn--xs btn-clear-filter" id="btn-clear-filter" hidden>Hapus Filter</button>
+        </div>
+      </div>
+
+      <div class="filter-panel" id="filter-panel" hidden>
+        <div class="form-field">
+          <span class="form-field-label" id="filter-type-label">Jenis transaksi</span>
+          <div class="filter-group" role="group" aria-labelledby="filter-type-label">
+            <button type="button" class="filter-chip is-active" data-filter-type="all" aria-pressed="true">Semua</button>
+            <button type="button" class="filter-chip" data-filter-type="income" aria-pressed="false">Pemasukan</button>
+            <button type="button" class="filter-chip" data-filter-type="expense" aria-pressed="false">Pengeluaran</button>
+          </div>
+        </div>
+
+        <div class="form-field">
+          <label for="filter-category">Kategori</label>
+          <select id="filter-category">
+            <!-- Opsi diisi js/app.js dari financeData.categories -->
+            <option value="all">Semua kategori</option>
+          </select>
+        </div>
+
+        <div class="form-field">
+          <span class="form-field-label" id="filter-range-label">Rentang tanggal</span>
+          <div class="filter-dates" role="group" aria-labelledby="filter-range-label">
+            <label class="filter-date">
+              <span>Dari</span>
+              <input type="date" id="filter-from" />
+            </label>
+            <label class="filter-date">
+              <span>Sampai</span>
+              <input type="date" id="filter-to" />
+            </label>
+          </div>
+        </div>
+
+        <div class="form-field filter-field--last">
+          <label for="filter-sort">Urutkan</label>
+          <select id="filter-sort">
+            <option value="newest">Terbaru</option>
+            <option value="oldest">Terlama</option>
+            <option value="highest">Nominal terbesar</option>
+            <option value="lowest">Nominal terkecil</option>
+          </select>
+        </div>
+      </div>
+    </section>
+
+    <!-- KALENDER (custom, bukan kalender bawaan browser) — pilih tanggal
+         untuk memfilter daftar di bawahnya. Default: hari ini.
+         Dirender oleh renderCalendar() di app.js. -->
+    <section class="calendar-section" aria-label="Kalender transaksi">
+      <div class="calendar" id="calendar">
+        <!-- Diisi otomatis oleh js/app.js -->
+      </div>
+    </section>
+
+    <!-- TRANSAKSI PADA TANGGAL TERPILIH
+         Maks. 3 card; kalau lebih, muncul "Lihat semua transaksi" (tetap
+         hanya tanggal itu). Edit/hapus lewat handler yang sama dengan
+         sebelumnya (handleTransactionListClick di app.js). -->
+    <section class="transactions" aria-label="Transaksi pada tanggal terpilih">
+      <div class="section-header-row">
+        <h2 class="section-title" id="selected-date-title">Hari ini</h2>
+        <span class="section-hint" id="selected-date-hint" aria-live="polite" hidden></span>
+      </div>
+      <!-- Status hasil CRUD transaksi (diisi showTransactionFeedback()). -->
+      <p class="settings-feedback transaction-feedback" id="transaction-feedback" role="status" aria-live="polite" hidden></p>
+      <ul class="transaction-list" id="all-transaction-list">
+        <!-- Diisi otomatis oleh js/app.js melalui renderAllTransactionsList() -->
+      </ul>
+      <div class="list-more" id="transaction-list-more" hidden>
+        <p class="list-more-note" id="transaction-list-more-note"></p>
+        <button type="button" class="btn btn--ghost btn--block" id="btn-toggle-all" aria-expanded="false">Lihat semua transaksi</button>
+      </div>
+    </section>
+
+  </div>
+
+  <!-- MODAL: TAMBAH / EDIT TRANSAKSI
+       Markup identik dengan yang ada di index.html — dibutuhkan di sini juga
+       supaya tombol +/edit di halaman ini bisa membuka form yang sama tanpa
+       harus kembali ke dashboard. Kalau form ini diubah, ubah di kedua file. -->
+  <div class="modal-overlay" id="transaction-modal-overlay" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+      <div class="modal-header">
+        <h2 id="modal-title">Tambah Transaksi</h2>
+        <button type="button" class="modal-close" id="modal-close" aria-label="Tutup">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M18 6 6 18" />
+            <path d="m6 6 12 12" />
+          </svg>
+        </button>
+      </div>
+
+      <form class="transaction-form" id="transaction-form" novalidate>
+        <input type="hidden" id="field-id" name="id" value="" />
+
+        <div class="type-toggle" id="type-toggle" role="group" aria-label="Jenis transaksi">
+          <div class="type-toggle-indicator" id="type-toggle-indicator" aria-hidden="true"></div>
+          <button type="button" class="type-toggle-btn" data-type="income">Pemasukan</button>
+          <button type="button" class="type-toggle-btn is-active" data-type="expense">Pengeluaran</button>
+        </div>
+
+        <div class="form-field">
+          <label for="field-title">Nama Transaksi</label>
+          <input type="text" id="field-title" name="title" placeholder="Contoh: Makan siang" required />
+        </div>
+
+        <div class="form-field">
+          <label for="field-category">Kategori</label>
+          <select id="field-category" name="category" required>
+            <option value="" disabled selected>Pilih kategori</option>
+            <option value="makanan">Makanan</option>
+            <option value="bensin">Bensin</option>
+            <option value="belanja">Belanja</option>
+            <option value="tagihan">Tagihan</option>
+            <option value="hiburan">Hiburan</option>
+            <option value="lainnya">Lainnya</option>
+          </select>
+        </div>
+
+        <div class="form-field">
+          <label for="field-amount">Nominal</label>
+          <div class="input-prefix">
+            <span class="input-prefix-label">Rp</span>
+            <input type="text" inputmode="numeric" id="field-amount" name="amount" placeholder="0" required />
+          </div>
+        </div>
+
+        <div class="form-field">
+          <label for="field-date">Tanggal</label>
+          <input type="date" id="field-date" name="date" required />
+        </div>
+
+        <div class="modal-actions">
+          <button type="button" class="btn btn--ghost" id="modal-cancel">Batal</button>
+          <button type="submit" class="btn btn--primary" id="modal-submit">Simpan Transaksi</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: KONFIRMASI HAPUS TRANSAKSI
+       Markup & gaya sama dengan konfirmasi hapus kategori di budget.html —
+       isinya diisi oleh setupTransactionModal() di app.js. -->
+  <div class="modal-overlay" id="confirm-modal-overlay" hidden>
+    <div class="modal modal--form modal--confirm" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
+      <div class="modal-header">
+        <h2 id="confirm-title">Yakin ingin menghapus transaksi ini?</h2>
+        <button type="button" class="modal-close" data-modal-close aria-label="Tutup">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M18 6 6 18" />
+            <path d="m6 6 12 12" />
+          </svg>
+        </button>
+      </div>
+      <p class="modal-sub" id="confirm-text">Transaksi yang dihapus tidak bisa dikembalikan.</p>
+      <div class="modal-actions">
+        <button type="button" class="btn btn--ghost" data-modal-close>Batal</button>
+        <button type="button" class="btn btn--danger" id="confirm-delete">Hapus Transaksi</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="../legacy/app.js"></script>
+</body>
+</html>

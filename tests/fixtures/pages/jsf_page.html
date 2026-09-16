@@ -1,0 +1,20 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>jsf dispatcher</title>
+<body>
+<button id="t">t</button>
+<script>
+  // data-page diambil dari query supaya satu file bisa menguji semua cabang dispatcher.
+  const __p = new URLSearchParams(location.search).get("page");
+  if (__p) document.body.dataset.page = __p;
+  window.__init = null; window.__errors = [];
+  window.addEventListener("error", (e) => window.__errors.push(e.message));
+</script>
+<script src="../../../frontend/js/core.js"></script>
+<script>
+  // Init halaman didefinisikan SETELAH core.js (seperti file halaman nanti). Hanya
+  // sebagian yang didefinisikan supaya cabang tanpa init bisa diuji (harus no-op).
+  const __def = (new URLSearchParams(location.search).get("def") || "").split(",").filter(Boolean);
+  for (const n of __def) window[n] = function () { window.__init = n; };
+</script>
+</body>

@@ -1,0 +1,189 @@
+<!doctype html>
+<meta charset="utf-8">
+<pre id="r">running…</pre>
+<script>
+const f = document.createElement("iframe"); f.width = 390; f.height = 900;
+f.src = "../../frontend/index.html";
+document.body.appendChild(f);
+const out = []; const ok = (name, cond, extra="") => out.push(`${cond ? "PASS" : "FAIL"} ${name}${extra ? "  (" + extra + ")" : ""}`);
+const wait = (ms) => new Promise(r => setTimeout(r, ms));
+const LEGACY_SEED = JSON.stringify([
+  { id: 1, title: "Makan Siang", category: "makanan", type: "expense", amount: 25000, isoDate: "2026-09-09", time: "Hari ini, 12:30" },
+  { id: 2, title: "Bensin Motor", category: "bensin", type: "expense", amount: 30000, isoDate: "2026-09-09", time: "Hari ini, 09:15" },
+  { id: 3, title: "Gaji Bulanan", category: "lainnya", type: "income", amount: 5000000, isoDate: "2026-09-01", time: "1 Sep, 08:00" },
+]); // aplikasi tidak lagi punya transaksi contoh -> test menyemai datanya sendiri
+const confirmDelete = async (d, w) => { const btn = d.getElementById("confirm-delete"); if (btn && !d.getElementById("confirm-modal-overlay").hidden) { btn.click(); await new Promise(r => setTimeout(r, 260)); } };
+
+window.addEventListener("unhandledrejection", (e) => { out.push("EXCEPTION " + (e.reason && e.reason.stack)); document.getElementById("r").textContent = out.join("|"); });
+f.onload = async () => {
+  let d = f.contentDocument, w = f.contentWindow;
+  try { w.localStorage.clear(); w.localStorage.setItem("financeData.transactions", LEGACY_SEED); } catch (e) {}
+  w.confirm = () => true;
+  // muat ulang supaya seed test terbaca loadTransactions()
+  f.contentWindow.location.reload();
+  await new Promise(r => { f.onload = r; });
+  d = f.contentDocument; w = f.contentWindow; w.confirm = () => true;
+  await wait(400);
+  // notice modal
+  const notice = d.getElementById("checkin-overlay");
+  ok("check-in shown on load", !notice.hidden);
+  ok("check-in: body scroll locked while open", d.body.classList.contains("is-modal-open"));
+  const cb = d.getElementById("checkin-body").textContent;
+  ok("check-in: greeting + saldo + pemasukan + pengeluaran from data", /Rizqi/.test(cb) && /Rp4\.945\.000/.test(cb) && /Rp5\.000\.000/.test(cb) && /Rp55\.000/.test(cb), cb.replace(/\s+/g," ").slice(0,90));
+  ok("check-in: budget from actual expenses", /Rp55\.000/.test(cb) && /Rp2\.400\.000/.test(cb));
+  ok("check-in: goal Dana Darurat 62% + sisa", /Dana Darurat/.test(cb) && /62% tercapai/.test(cb) && /Rp6\.200\.000/.test(cb) && /Rp10\.000\.000/.test(cb) && /Rp3\.800\.000/.test(cb));
+  ok("check-in: insight uses fallback when no 2-week data", /Belum cukup data/.test(cb));
+  const st = d.querySelector(".checkin-status"); ok("check-in: rule-based status = safe (2,3% of budget)", st && st.dataset.status === "safe" && /masih aman/.test(st.textContent), st && st.textContent.slice(0,60));
+  d.getElementById("checkin-cta").click(); await wait(300);
+  ok("check-in: CTA closes with transition + unlocks scroll", notice.hidden && !d.body.classList.contains("is-modal-open"));
+  ok("check-in: not shown again in this session", (() => { try { return w.sessionStorage.getItem("checkinDismissed") === "true"; } catch (e) { return false; } })());
+  // balance toggle
+  const bal = d.getElementById("balance-value"), inc = d.getElementById("income-value"), exp = d.getElementById("expense-value");
+  // Settings V1 Tahap 2: default hideBalanceOnOpen=false -> saldo TAMPIL saat dibuka
+  // (V1 lama: tersembunyi). Preferensi "sembunyikan saat dibuka" diuji di settings2test.
+  ok("balance visible by default (settings.hideBalanceOnOpen=false)", /^Rp/.test(bal.textContent) && /^Rp/.test(inc.textContent) && /^Rp/.test(exp.textContent), `${bal.textContent} / ${inc.textContent} / ${exp.textContent}`);
+  ok("only eye icon visible", !d.getElementById("icon-eye").classList.contains("is-hidden") && d.getElementById("icon-eye-off").classList.contains("is-hidden"));
+  d.getElementById("btn-toggle-balance").click(); await wait(50);
+  ok("toggle masks all 3 amounts", bal.textContent === "••••••••" && inc.textContent === "••••••••" && exp.textContent === "••••••••");
+  ok("only eye-off icon visible", d.getElementById("icon-eye").classList.contains("is-hidden") && !d.getElementById("icon-eye-off").classList.contains("is-hidden"));
+  d.getElementById("btn-toggle-balance").click(); await wait(50);
+  ok("toggle reveals all 3 amounts again", /^Rp/.test(bal.textContent) && /^Rp/.test(inc.textContent) && /^Rp/.test(exp.textContent));
+  const before = d.querySelectorAll("#transaction-list .transaction-item").length;
+  // add
+  d.querySelector('[data-action="add-transaction"]').click(); await wait(400);
+  const overlay = d.getElementById("transaction-modal-overlay");
+  ok("add modal opens", !overlay.hidden && overlay.classList.contains("is-open"));
+  ok("type toggle has exactly 2 options", d.querySelectorAll(".type-toggle-btn").length === 2);
+  d.getElementById("field-title").value = "Tes Polish";
+  d.getElementById("field-category").value = "belanja";
+  const amt = d.getElementById("field-amount"); amt.value = "1250000"; amt.dispatchEvent(new w.Event("input"));
+  ok("amount live-formats with thousands sep", amt.value === "1.250.000", amt.value);
+  d.getElementById("transaction-form").dispatchEvent(new w.Event("submit", { cancelable: true })); await wait(300);
+  ok("add modal closes after submit", overlay.hidden);
+  const after = d.querySelectorAll("#transaction-list .transaction-item").length;
+  ok("list re-rendered (limit 3 respected)", after === Math.min(before + 1, 3), `${before} -> ${after}`);
+  const saved = JSON.parse(w.localStorage.getItem("financeData.transactions") || "[]");
+  ok("saved to localStorage as number 1250000", saved.some(t => t.title === "Tes Polish" && t.amount === 1250000 && t.type === "expense"));
+  ok("expense amount updated in summary", exp.textContent === "Rp1.305.000", exp.textContent);
+  // see-all link visible now (4 > 3)
+  ok("'Lihat semua' link visible", !d.getElementById("btn-see-all-transactions").hidden);
+  // dashboard = preview only: cards with icons, no edit/delete, no time on mobile
+  ok("dashboard: no edit/delete buttons in Transaksi Terbaru", d.querySelectorAll('#transaction-list [data-action]').length === 0);
+  {
+    const items = [...d.querySelectorAll("#transaction-list .transaction-item")];
+    ok("dashboard: each transaction is a card with an icon", items.length > 0 && items.every(li => li.querySelector(".transaction-icon").textContent.trim().length > 0), `items=${items.length}`);
+    const cs = w.getComputedStyle(items[0]);
+    ok("dashboard: card style (white bg + radius)", cs.backgroundColor === "rgb(255, 255, 255)" && parseFloat(cs.borderTopLeftRadius) >= 10, `${cs.backgroundColor} r=${cs.borderTopLeftRadius}`);
+    const times = [...d.querySelectorAll("#transaction-list .transaction-time")];
+    ok("dashboard mobile: time hidden next to category", times.length > 0 && times.every(el => w.getComputedStyle(el).display === "none"), `time nodes=${times.length}`);
+    const metaTexts = [...d.querySelectorAll("#transaction-list .transaction-meta")].map(el => el.textContent.trim());
+    ok("dashboard: meta markup keeps a single data source (no duplicate rows)", d.querySelectorAll("#transaction-list .transaction-item").length === d.querySelectorAll("#transaction-list .transaction-meta").length);
+    const iconOf = (li) => li.querySelector(".transaction-icon").innerHTML;
+    const byCat = {}; items.forEach(li => { const id = +li.dataset.id; const tx = JSON.parse(w.localStorage.getItem("financeData.transactions")).find(x => x.id === id); byCat[tx.type === "income" ? "income" : tx.category] = iconOf(li); });
+    const keys = Object.keys(byCat);
+    ok("dashboard: icon differs per category/type", keys.length >= 2 && new Set(Object.values(byCat)).size === keys.length, keys.join(","));
+    const amounts = items.map(li => li.querySelector(".transaction-amount").getBoundingClientRect());
+    ok("dashboard: amounts stay inside their cards", items.every((li, i) => amounts[i].right <= li.getBoundingClientRect().right - 8));
+  }
+  // ---- transactions.html: edit/delete still work there (same localStorage) ----
+  const f4 = document.createElement("iframe"); f4.width = 390; f4.height = 900; f4.src = "../../frontend/transactions.html"; document.body.appendChild(f4);
+  await new Promise(r => f4.onload = r); await wait(400);
+  const d4 = f4.contentDocument, w4 = f4.contentWindow; w4.confirm = () => true;
+  const overlay4 = d4.getElementById("transaction-modal-overlay");
+  ok("transactions.html: edit/delete buttons present on every card", d4.querySelectorAll('#all-transaction-list .transaction-item').length > 0 && [...d4.querySelectorAll('#all-transaction-list .transaction-item')].every(li => li.querySelector('[data-action="edit"]') && li.querySelector('[data-action="delete"]')));
+  ok("transactions.html: default = today's transactions only (Tes Polish visible, 1 Sep Gaji not)", /Tes Polish/.test(d4.getElementById("all-transaction-list").textContent) && !/Gaji Bulanan/.test(d4.getElementById("all-transaction-list").textContent));
+  ok("transactions.html: expense cards use category emoji (not 💰)", d4.querySelector("#all-transaction-list .transaction-icon--expense").textContent.trim() !== "💰");
+  ok("transactions.html: cards with icons too", [...d4.querySelectorAll('#all-transaction-list .transaction-item')].every(li => li.querySelector(".transaction-icon").textContent.trim()));
+  const editBtn = [...d4.querySelectorAll('#all-transaction-list [data-action="edit"]')].find(b => b.getAttribute("aria-label").includes("Tes Polish")); editBtn.click(); await wait(400);
+  ok("transactions.html: edit modal opens with 'Edit Transaksi'", !overlay4.hidden && d4.getElementById("modal-title").textContent === "Edit Transaksi");
+  ok("transactions.html: edit populates formatted amount", d4.getElementById("field-amount").value === "1.250.000", d4.getElementById("field-amount").value);
+  d4.getElementById("modal-cancel").click(); await wait(300);
+  ok("transactions.html: cancel closes edit modal", overlay4.hidden);
+  const n0 = JSON.parse(w.localStorage.getItem("financeData.transactions")).length;
+  [...d4.querySelectorAll('#all-transaction-list [data-action="delete"]')].find(b => /Tes Polish/.test(b.getAttribute("aria-label"))).click(); await wait(260); await confirmDelete(d4, w);
+  const n1 = JSON.parse(w.localStorage.getItem("financeData.transactions")).length;
+  ok("transactions.html: delete removes 1 transaction (shared localStorage)", n1 === n0 - 1, `${n0} -> ${n1}`);
+  const todayIso = (() => { const x = new Date(); return `${x.getFullYear()}-${String(x.getMonth()+1).padStart(2,"0")}-${String(x.getDate()).padStart(2,"0")}`; })();
+  const todayCount = JSON.parse(w.localStorage.getItem("financeData.transactions")).filter(t => t.isoDate === todayIso).length;
+  ok("transactions.html: list re-rendered after delete (today's transactions, max 3)", d4.querySelectorAll('#all-transaction-list .transaction-item').length === Math.min(3, todayCount), `today=${todayCount}`);
+  // dashboard re-reads the same storage (as it would on next load)
+  w.eval("financeData.transactions = JSON.parse(localStorage.getItem('financeData.transactions')); recalcFromTransactions(); refreshDashboard();"); await wait(200);
+  ok("dashboard: reflects deletion from transactions.html", d.querySelectorAll("#transaction-list .transaction-item").length === Math.min(3, n1) && !/Tes Polish/.test(d.getElementById("transaction-list").textContent));
+  // escape closes add modal
+  d.querySelector('[data-action="add-transaction"]').click(); await wait(300);
+  d.dispatchEvent(new w.KeyboardEvent("keydown", { key: "Escape" })); await wait(300);
+  ok("Escape closes add modal", overlay.hidden);
+  // dropdown
+  d.getElementById("btn-notification").click(); await wait(250);
+  ok("notification dropdown opens", !d.getElementById("notification-panel").hidden);
+  d.body.click(); await wait(400);
+  ok("click outside closes dropdown", d.getElementById("notification-panel").hidden);
+  // dashboard: no Analisis Kategori section; Budget is followed directly by Transaksi Terbaru
+  ok("no category section on dashboard", !d.querySelector(".category-analysis, .category-carousel, .category-dots, #category-analysis-card"));
+  {
+    const vis = [...d.querySelectorAll(".app > *")].filter(el => !el.hidden).map(el => el.className.split(" ")[0]);
+    // G-4 menyisipkan section Target Keuangan (goals-dashboard) di antara Budget dan Transaksi.
+    ok("section order header,summary,quick-actions,budget,goals-dashboard,transactions", vis.join(",") === "app-header,summary,quick-actions,budget,goals-dashboard,transactions", vis.join(","));
+    const b = d.querySelector(".budget").getBoundingClientRect(), g = d.querySelector(".goals-dashboard").getBoundingClientRect(), t = d.querySelector(".transactions").getBoundingClientRect();
+    const appGap = parseFloat(w.getComputedStyle(d.querySelector(".app")).rowGap), q = d.querySelector(".quick-actions").getBoundingClientRect();
+    ok("gaps quick->budget->goals->transactions all equal the normal section gap (no leftover space)", Math.abs((g.top - b.bottom) - appGap) < 0.5 && Math.abs((t.top - g.bottom) - appGap) < 0.5 && Math.abs((b.top - q.bottom) - appGap) < 0.5, `budget->goals=${(g.top - b.bottom).toFixed(1)} goals->tx=${(t.top - g.bottom).toFixed(1)} appGap=${appGap}`);
+  }
+  // --- new UI wiring ---
+  // after the add(1.250.000 belanja) + delete(one expense) above, remaining expenses drive "terpakai"
+  const bc = d.getElementById("budget-card").textContent.replace(/\s+/g," ").trim();
+  const usedNow = JSON.parse(w.localStorage.getItem("financeData.transactions")).filter(t=>t.type==="expense").reduce((a,t)=>a+t.amount,0);
+  ok("budget card 'terpakai' = sum of actual expenses", bc.includes(usedNow.toLocaleString("id-ID")) && bc.includes("Rp2.400.000"), bc.slice(0,70) + " | expected used " + usedNow);
+  ok("no category cards on dashboard (moved to analytics.html)", d.querySelectorAll(".category-card").length === 0);
+  d.querySelector('[data-action="add-transaction"]').click(); await wait(300);
+  ok("quick action opens add modal", !overlay.hidden); d.getElementById("modal-cancel").click(); await wait(300);
+
+  ok("dashboard has no Insight/Goals sections", !d.querySelector(".insight-section") && !d.querySelector("section.insight"));
+  ok("no FAB, no bottom nav", !d.querySelector(".fab") && !d.querySelector(".bottom-nav"));
+  ok("nav: Lihat Analisis -> analytics.html, Lihat Detail (budget) -> budget.html", d.querySelectorAll('a[href="analytics.html"]').length === 1 && d.querySelectorAll('a[href="budget.html"]').length === 1);
+  ok("nav: Lihat semua transaksi -> transactions.html", d.getElementById("btn-see-all-transactions").getAttribute("href") === "transactions.html");
+  // ---- status rules: seed storage so expenses exceed budget, reload dashboard in a new frame ----
+  w.sessionStorage.removeItem("checkinDismissed");
+  const seeded = JSON.parse(w.localStorage.getItem("financeData.transactions"));
+  const iso = (dd) => { const t = new Date(); t.setDate(t.getDate() - dd); return t.getFullYear() + "-" + String(t.getMonth()+1).padStart(2,"0") + "-" + String(t.getDate()).padStart(2,"0"); };
+  seeded.push({ id: 900, title: "Belanja besar", category: "belanja", type: "expense", amount: 2500000, isoDate: iso(0), time: "hari ini" });
+  seeded.push({ id: 901, title: "Makan minggu lalu", category: "makanan", type: "expense", amount: 100000, isoDate: iso(8), time: "minggu lalu" });
+  seeded.push({ id: 902, title: "Makan minggu ini", category: "makanan", type: "expense", amount: 118000, isoDate: iso(1), time: "minggu ini" });
+  w.localStorage.setItem("financeData.transactions", JSON.stringify(seeded));
+  const f3 = document.createElement("iframe"); f3.width = 390; f3.height = 900; f3.src = "../../frontend/index.html?seed=1"; document.body.appendChild(f3);
+  await new Promise(r => f3.onload = r); await wait(400);
+  const d3 = f3.contentDocument, cb3 = d3.getElementById("checkin-body").textContent, st3 = d3.querySelector(".checkin-status");
+  ok("status rule: budget exceeded -> danger wording", st3 && st3.dataset.status === "danger" && /terlewati/.test(st3.textContent), st3 && st3.textContent.slice(0,70));
+  // Ekspektasi dihitung independen dari seed dengan aturan minggu Senin-mulai
+  // yang sama dengan aplikasi, supaya test stabil di hari apa pun (termasuk
+  // Senin, saat "kemarin" sudah masuk minggu lalu).
+  {
+    const nowD = new Date(); const t0 = new Date(nowD.getFullYear(), nowD.getMonth(), nowD.getDate());
+    const mon = new Date(t0); mon.setDate(t0.getDate() - ((t0.getDay() + 6) % 7));
+    const lastMon = new Date(mon); lastMon.setDate(mon.getDate() - 7);
+    const tomorrow = new Date(t0); tomorrow.setDate(t0.getDate() + 1);
+    const inRange = (isoS, a, b) => { const dd = new Date(isoS + "T00:00:00"); return dd >= a && dd < b; };
+    const mk = seeded.filter(x => x.type === "expense" && x.category === "makanan");
+    const thisW = mk.filter(x => inRange(x.isoDate, mon, tomorrow)).reduce((s, x) => s + x.amount, 0);
+    const lastW = mk.filter(x => inRange(x.isoDate, lastMon, mon)).reduce((s, x) => s + x.amount, 0);
+    let expectRe;
+    if (thisW > 0 && lastW > 0) { const pct = Math.abs(Math.round((thisW - lastW) / lastW * 100)); expectRe = new RegExp(`Makanan minggu ini ${thisW >= lastW ? "naik" : "turun"} ${pct}%`); }
+    else expectRe = /Belum cukup data/;
+    ok("insight rule: week-over-week Makanan sesuai perhitungan independen (Senin-mulai)", expectRe.test(cb3), `thisW=${thisW} lastW=${lastW} | ${(cb3.match(/Pengeluaran [^.]*\./) || cb3.match(/Belum cukup data[^.]*\./) || [""])[0]}`);
+  }
+  d3.getElementById("checkin-close").click(); await wait(300);
+  ok("check-in: close (X) works", d3.getElementById("checkin-overlay").hidden);
+  // restore storage for the analytics check below
+  w.localStorage.setItem("financeData.transactions", JSON.stringify(seeded.filter(t => t.id < 900)));
+  // ---- budget.html in a second frame, sharing the same localStorage ----
+  const f2 = document.createElement("iframe"); f2.width = 390; f2.height = 900; f2.src = "../../frontend/budget.html"; document.body.appendChild(f2);
+  await new Promise(r => f2.onload = r); await wait(400);
+  const d2 = f2.contentDocument;
+  ok("budget: budget card rendered", /Rp2\.400\.000/.test(d2.getElementById("budget-card").textContent));
+  ok("budget: 5 category cards stacked", d2.querySelectorAll("#category-list .category-card").length === 5);
+  const used2 = JSON.parse(f2.contentWindow.localStorage.getItem("financeData.transactions")).filter(t=>t.type==="expense"&&t.category==="belanja").reduce((a,t)=>a+t.amount,0);
+  ok("budget: reads same localStorage (Belanja terpakai matches)", d2.querySelector('.category-card[data-category="belanja"]').textContent.includes(used2.toLocaleString("id-ID")), "belanja used=" + used2);
+  ok("budget: back link to index.html", d2.querySelector('a.icon-btn[href="index.html"]') !== null);
+  ok("budget: no add modal / no FAB on this page", !d2.getElementById("transaction-modal-overlay") && !d2.querySelector(".fab"));
+  document.getElementById("r").textContent = out.join("\n");
+};
+</script>

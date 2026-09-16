@@ -1,0 +1,317 @@
+<!doctype html>
+<meta charset="utf-8">
+<pre id="r">running…</pre>
+<script>
+const out = []; const ok = (n, c, x = "") => out.push(`${c ? "PASS" : "FAIL"} ${n}${x ? "  (" + x + ")" : ""}`);
+const wait = (ms) => new Promise(r => setTimeout(r, ms));
+const BASE = new URL("../../frontend/", location.href).href;
+// JS-6: style.css sudah dihapus. Sumber CSS HIDUP untuk pemeriksaan selector = gabungan 7 file split.
+const CSS_SPLIT_FILES = ["base.css", "dashboard.css", "goals.css", "analytics.css", "budget.css", "transactions.css", "settings.css"];
+async function fetchStyleCss(base) { const parts = []; for (const f of CSS_SPLIT_FILES) parts.push(`/* ==== ${f} ==== */\n` + await (await fetch(base + "css/" + f)).text()); return parts.join("\n"); }
+let frame = null;
+async function load(page, width = 390) {
+  if (frame) frame.remove();
+  frame = document.createElement("iframe"); frame.width = width; frame.height = 1600; frame.src = BASE + page;
+  document.body.appendChild(frame);
+  await new Promise(r => frame.onload = r); await wait(320);
+  const d = frame.contentDocument, w = frame.contentWindow;
+  const cc = d.getElementById("checkin-close"); if (cc) { cc.click(); await wait(220); }
+  return { d, w };
+}
+const pad = (n) => String(n).padStart(2, "0");
+const iso = (dt) => `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`;
+const addD = (dt, n) => new Date(dt.getFullYear(), dt.getMonth(), dt.getDate() + n);
+const txt = (el) => (el ? el.textContent.replace(/\s+/g, " ").trim() : "");
+const num = (s) => Number(String(s).replace(/\D/g, ""));
+
+(async () => {
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const y1 = addD(today, -1), d5 = addD(today, -5), d20 = addD(today, -20);
+  // 7 transaksi: 4 hari ini (>3 supaya batas kalender teruji), sisanya menyebar
+  const seed = [
+    { id: 1, title: "Makan Siang Warteg", category: "makanan", type: "expense", amount: 25000, isoDate: iso(today), time: "" },
+    { id: 2, title: "Bensin Motor", category: "bensin", type: "expense", amount: 30000, isoDate: iso(today), time: "" },
+    { id: 3, title: "Gaji Bulanan", category: "lainnya", type: "income", amount: 5000000, isoDate: iso(today), time: "" },
+    { id: 4, title: "Kopi Susu", category: "makanan", type: "expense", amount: 18000, isoDate: iso(today), time: "" },
+    { id: 5, title: "Belanja Bulanan", category: "belanja", type: "expense", amount: 450000, isoDate: iso(y1), time: "" },
+    { id: 6, title: "Bonus Proyek", category: "lainnya", type: "income", amount: 1500000, isoDate: iso(d5), time: "" },
+    { id: 7, title: "Tagihan Listrik", category: "tagihan", type: "expense", amount: 320000, isoDate: iso(d20), time: "" },
+  ];
+  let { d, w } = await load("transactions.html");
+  try { w.localStorage.clear(); w.localStorage.setItem("financeData.transactions", JSON.stringify(seed)); } catch (e) {}
+  ({ d, w } = await load("transactions.html"));
+
+  const items = () => [...d.querySelectorAll("#all-transaction-list .transaction-item")];
+  const titles = () => items().map(li => txt(li.querySelector(".transaction-title")));
+  const calVisible = () => !d.querySelector(".calendar-section").hidden;
+  const hint = () => txt(d.getElementById("selected-date-hint"));
+  const title = () => txt(d.getElementById("selected-date-title"));
+  // elemen diambil ulang tiap panggilan: section 12 memuat ulang halaman (iframe baru)
+  const type = async (v) => { const s = d.getElementById("tx-search"); s.value = v; s.dispatchEvent(new Event("input", { bubbles: true })); await wait(60); };
+  const chip = async (t) => { d.querySelector(`[data-filter-type="${t}"]`).click(); await wait(60); };
+  const setSel = async (id, v) => { const el = d.getElementById(id); el.value = v; el.dispatchEvent(new Event("change", { bubbles: true })); await wait(60); };
+  const clearAll = async () => { d.getElementById("btn-clear-filter").click(); await wait(80); };
+
+  // ---------- 0. kompatibilitas kalender V1 ----------
+  ok("0a. tanpa filter: kalender tampil, judul = tanggal hari ini, maks 3 dari 4 transaksi", calVisible() && title() === w.eval(`formatDateLongID("${iso(today)}")`) && hint() === "Hari ini" && items().length === 3);
+  ok("0b. tanpa filter: blok 'Lihat semua transaksi' muncul (+1 lainnya)", !d.getElementById("transaction-list-more").hidden && /\+ 1 transaksi lainnya/.test(txt(d.getElementById("transaction-list-more-note"))));
+  d.getElementById("btn-toggle-all").click(); await wait(80);
+  ok("0c. 'Lihat semua transaksi' menampilkan 4 transaksi hari ini saja", items().length === 4 && items().every(li => seed.find(t => t.id === +li.dataset.id).isoDate === iso(today)));
+  d.getElementById("btn-toggle-all").click(); await wait(80);
+  ok("0d. panel filter tertutup secara default", d.getElementById("filter-panel").hidden && d.getElementById("btn-filter-toggle").getAttribute("aria-expanded") === "false");
+  const noBadge = () => !d.getElementById("filter-count") && !d.querySelector("#btn-filter-toggle .filter-count") && txt(d.getElementById("btn-filter-toggle")).replace(/\s+/g, " ").trim() === "Filter & Urutkan";
+  const noBarCount = () => !d.getElementById("filter-result") && !/\d+ transaksi/.test(txt(d.querySelector(".filter-bar")));
+  ok("0e. tombol 'Hapus Filter' tersembunyi saat belum ada filter; tombol Filter & Urutkan tanpa badge angka", d.getElementById("btn-clear-filter").hidden && noBadge());
+
+  // ---------- 1. search ----------
+  await type("kopi");
+  ok("1a. search 'kopi' -> 1 hasil, kalender disembunyikan", items().length === 1 && titles()[0] === "Kopi Susu" && !calVisible());
+  ok("1b. search: judul 'Hasil Filter' + jumlah hasil", title() === "Hasil Filter" && hint() === "1 transaksi");
+  ok("1c. search: tombol Hapus Filter muncul, tombol Filter & Urutkan tetap tanpa angka", !d.getElementById("btn-clear-filter").hidden && noBadge());
+  ok("1d. search: blok 'Lihat semua transaksi' disembunyikan", d.getElementById("transaction-list-more").hidden);
+  await type("MAKAN");
+  ok("1e. search tidak case-sensitive ('MAKAN' -> Makan Siang Warteg)", items().length === 1 && titles()[0] === "Makan Siang Warteg");
+  await type("bulanan");
+  ok("1f. search cocok di tengah kata & lintas tanggal (Gaji Bulanan + Belanja Bulanan)", items().length === 2 && titles().sort().join("|") === "Belanja Bulanan|Gaji Bulanan");
+  await type("zzz");
+  ok("1g. search tanpa hasil -> empty state khusus filter, 0 item", items().length === 0 && /Tidak ada transaksi yang cocok/.test(txt(d.getElementById("all-transaction-list"))) && hint() === "0 transaksi");
+  ok("1h. search: data asli tidak berubah", JSON.parse(w.localStorage.getItem("financeData.transactions")).length === 7);
+  d.getElementById("tx-search-clear").click(); await wait(80);
+  ok("1i. tombol x pada search mengosongkan & mengembalikan kalender", calVisible() && items().length === 3 && d.getElementById("tx-search").value === "");
+
+  // ---------- 2. filter jenis ----------
+  d.getElementById("btn-filter-toggle").click(); await wait(80);
+  ok("2a. tombol Filter membuka panel", !d.getElementById("filter-panel").hidden && d.getElementById("btn-filter-toggle").getAttribute("aria-expanded") === "true");
+  await chip("income");
+  ok("2b. filter Pemasukan -> hanya 2 income (Gaji, Bonus), kalender hilang", items().length === 2 && titles().sort().join("|") === "Bonus Proyek|Gaji Bulanan" && !calVisible());
+  ok("2c. chip aktif ditandai is-active + aria-pressed", d.querySelector('[data-filter-type="income"]').classList.contains("is-active") && d.querySelector('[data-filter-type="income"]').getAttribute("aria-pressed") === "true" && !d.querySelector('[data-filter-type="all"]').classList.contains("is-active"));
+  await chip("expense");
+  ok("2d. filter Pengeluaran -> 5 expense", items().length === 5 && items().every(li => seed.find(t => t.id === +li.dataset.id).type === "expense"));
+  await chip("all");
+  ok("2e. kembali ke Semua saat panel masih terbuka -> TETAP mode filter (kalender tersembunyi, seluruh transaksi = 7)", !calVisible() && items().length === 7 && title() === "Hasil Filter" && hint() === "7 transaksi");
+
+  // ---------- 3. filter kategori ----------
+  ok("3a. opsi kategori terisi dari financeData.categories + Lainnya", d.querySelectorAll("#filter-category option").length === 7 && d.querySelector('#filter-category option[value="all"]'));
+  await setSel("filter-category", "makanan");
+  ok("3b. filter kategori Makanan -> 2 transaksi", items().length === 2 && titles().sort().join("|") === "Kopi Susu|Makan Siang Warteg");
+  await setSel("filter-category", "lainnya");
+  ok("3c. filter kategori Lainnya -> 2 transaksi income", items().length === 2);
+  await setSel("filter-category", "all");
+  ok("3d. kategori kembali ke Semua saat panel terbuka -> tetap mode filter (7 transaksi)", !calVisible() && items().length === 7);
+
+  // ---------- 4. filter rentang tanggal ----------
+  await setSel("filter-from", iso(d5));
+  ok("4a. hanya 'Dari' diisi -> transaksi >= 5 hari lalu (6 dari 7)", items().length === 6 && !titles().includes("Tagihan Listrik"));
+  await setSel("filter-to", iso(y1));
+  ok("4b. Dari+Sampai -> rentang inklusif (Belanja Bulanan & Bonus Proyek)", items().length === 2 && titles().sort().join("|") === "Belanja Bulanan|Bonus Proyek");
+  ok("4c. rentang tanggal aktif -> tombol Filter & Urutkan tetap tanpa angka, jumlah hanya di hint judul", noBadge() && noBarCount() && hint() === "2 transaksi");
+  // dibalik -> ditukar otomatis: kosongkan dulu, isi "Sampai" lebih awal
+  // dari "Dari" supaya kondisi terbalik benar-benar terjadi dalam 1 perubahan
+  await clearAll();
+  await setSel("filter-to", iso(d20));
+  await setSel("filter-from", iso(today));
+  ok("4d. tanggal terbalik ditukar otomatis (bukan hasil kosong)", d.getElementById("filter-from").value === iso(d20) && d.getElementById("filter-to").value === iso(today) && items().length === 7, `${d.getElementById("filter-from").value}..${d.getElementById("filter-to").value} n=${items().length}`);
+  await clearAll();
+  ok("4e. Hapus Filter mengembalikan kalender & semua input kosong", calVisible() && items().length === 3 && d.getElementById("filter-from").value === "" && d.getElementById("filter-to").value === "" && d.getElementById("filter-category").value === "all" && d.getElementById("tx-search").value === "" && d.querySelector('[data-filter-type="all"]').classList.contains("is-active"));
+
+  // ---------- 5. kombinasi filter ----------
+  await type("s"); await chip("expense"); await setSel("filter-category", "makanan");
+  ok("5a. search + jenis + kategori bekerja bersamaan", items().length === 2 && titles().sort().join("|") === "Kopi Susu|Makan Siang Warteg", titles().join("|"));
+  ok("5b. jenis + kategori + search aktif -> tetap tanpa badge angka", noBadge());
+  await setSel("filter-from", iso(today));
+  ok("5c. tambah rentang tanggal -> tetap 2 (keduanya hari ini), hint '2 transaksi', tanpa badge", items().length === 2 && hint() === "2 transaksi" && noBadge());
+  await setSel("filter-category", "bensin");
+  ok("5d. ganti kategori ke Bensin -> 1 hasil (Bensin Motor: cocok 's', expense, hari ini)", items().length === 1 && titles()[0] === "Bensin Motor", titles().join("|"));
+  await setSel("filter-category", "tagihan");
+  ok("5e. kategori Tagihan + rentang mulai hari ini -> 0 hasil (Tagihan Listrik di luar rentang)", items().length === 0 && /Tidak ada transaksi yang cocok/.test(txt(d.getElementById("all-transaction-list"))));
+  await clearAll();
+
+  // ---------- 6. sorting ----------
+  await chip("expense"); // 5 expense supaya urutan terlihat jelas
+  const amounts = () => items().map(li => num(txt(li.querySelector(".transaction-amount"))));
+  await setSel("filter-sort", "highest");
+  ok("6a. urut nominal terbesar", JSON.stringify(amounts()) === JSON.stringify([450000, 320000, 30000, 25000, 18000]), amounts().join(","));
+  await setSel("filter-sort", "lowest");
+  ok("6b. urut nominal terkecil", JSON.stringify(amounts()) === JSON.stringify([18000, 25000, 30000, 320000, 450000]), amounts().join(","));
+  await setSel("filter-sort", "oldest");
+  const dates = () => items().map(li => seed.find(t => t.id === +li.dataset.id).isoDate);
+  ok("6c. urut terlama -> tanggal menaik", JSON.stringify(dates()) === JSON.stringify([...dates()].sort()), dates().join(","));
+  await setSel("filter-sort", "newest");
+  ok("6d. urut terbaru -> tanggal menurun", JSON.stringify(dates()) === JSON.stringify([...dates()].sort().reverse()));
+  await clearAll();
+
+  // ---------- 7. sort saja TIDAK menyembunyikan kalender ----------
+  await setSel("filter-sort", "lowest");
+  ok("7a. mengganti urutan saja: kalender tetap tampil, Hapus Filter tidak muncul (bukan filter)", calVisible() && d.getElementById("btn-clear-filter").hidden);
+  ok("7c. urutan non-default TIDAK diam-diam: label 'Urut: Nominal terkecil' di filter-bar (tanpa badge angka)", noBadge() && !d.getElementById("filter-sort-label").hidden && txt(d.getElementById("filter-sort-label")) === "Urut: Nominal terkecil");
+  ok("7d. jumlah hasil TIDAK tampil saat hanya urutan (bukan filter aktif): hint tetap 'Hari ini'", noBarCount() && hint() === "Hari ini");
+  ok("7b. urutan berlaku di dalam tanggal terpilih (3 termurah hari ini)", JSON.stringify(amounts()) === JSON.stringify([18000, 25000, 30000]), amounts().join(","));
+  await setSel("filter-sort", "newest");
+  ok("7e. kembali ke Terbaru -> label urutan hilang", d.getElementById("filter-sort-label").hidden && noBadge());
+
+  // ---------- 11. UX fixes: tanggal di hasil, jumlah di filter-bar, empty-state reset, aria-live ----------
+  ok("11a. mode kalender: card TANPA tanggal (perilaku V1)", items().length === 3 && items().every(li => !li.querySelector(".transaction-date")));
+  await type("bulanan");
+  ok("11b. mode filter: tiap card menampilkan tanggal", items().length === 2 && items().every(li => li.querySelector(".transaction-date")) && /Sep|Agu|Okt/.test(txt(items()[0].querySelector(".transaction-meta"))), txt(items()[0].querySelector(".transaction-meta")));
+  ok("11c. jumlah hasil hanya di hint judul 'Hasil Filter' (aria-live=polite), TIDAK di filter-bar", hint() === "2 transaksi" && d.getElementById("selected-date-hint").getAttribute("aria-live") === "polite" && noBarCount());
+  ok("11d. hint '2 transaksi' berdampingan dengan judul 'Hasil Filter' pada baris yang sama", (() => { const r = d.getElementById("selected-date-hint").getBoundingClientRect(), c = d.getElementById("selected-date-title").getBoundingClientRect(); return r.width > 0 && c.width > 0 && Math.abs(r.top - c.top) < 30 && title() === "Hasil Filter"; })());
+  if (d.getElementById("filter-panel").hidden) { d.getElementById("btn-filter-toggle").click(); await wait(60); } // pastikan panel TERBUKA
+  ok("11e. saat panel terbuka, Hapus Filter tetap di filter-bar di atas panel; filter-bar tanpa jumlah", !d.getElementById("filter-panel").hidden && d.getElementById("btn-clear-filter").getBoundingClientRect().bottom <= d.getElementById("filter-panel").getBoundingClientRect().top && noBarCount());
+  d.getElementById("btn-filter-toggle").click(); await wait(60); // tutup lagi
+  await type("zzz");
+  const emptyBtn = d.querySelector("#all-transaction-list .transaction-empty [data-filter-reset]");
+  ok("11f. empty state filter punya tombol Hapus Filter (>=36px)", !!emptyBtn && txt(emptyBtn) === "Hapus Filter" && emptyBtn.getBoundingClientRect().height >= 36);
+  ok("11g. jumlah hasil di hint judul menunjukkan 0 transaksi (filter-bar tetap tanpa jumlah)", hint() === "0 transaksi" && noBarCount());
+  emptyBtn.click(); await wait(80);
+  ok("11h. tombol reset di empty state memakai handler yang sama: kalender kembali, input kosong", calVisible() && items().length === 3 && d.getElementById("tx-search").value === "" && hint() === "Hari ini");
+  await setSel("filter-sort", "highest"); await chip("expense");
+  ok("11i. label urutan + Hapus Filter tampil bersama di filter-bar; jumlah hanya di hint", !d.getElementById("filter-sort-label").hidden && !d.getElementById("btn-clear-filter").hidden && txt(d.getElementById("filter-sort-label")) === "Urut: Nominal terbesar" && noBarCount() && /^\d+ transaksi$/.test(hint()));
+  // toleransi 4px = halo area-tap .link-see-all::before (inset:-4px), bukan konten yang keluar
+  ok("11j. filter-bar tidak overflow di 390px dengan ketiga elemen tampil (toleransi halo 4px)", d.querySelector(".filter-bar").scrollWidth <= d.querySelector(".filter-bar").clientWidth + 5 && [...d.querySelectorAll(".filter-bar *")].every(el => el.getBoundingClientRect().right <= d.querySelector(".filter-bar").getBoundingClientRect().right + 0.5) && d.documentElement.scrollWidth === d.documentElement.clientWidth);
+  await clearAll();
+  ok("11k. Hapus Filter juga mereset urutan -> label urutan hilang", d.getElementById("filter-sort-label").hidden && calVisible());
+
+  // ---------- 12. Mode filter terpisah dari kalender (revisi UX terakhir) ----------
+  ({ d, w } = await load("transactions.html"));
+  const calDay = (k) => d.querySelector(`.calendar-day[data-date="${k}"]`);
+  ok("12-1. buka halaman -> kalender tampil, panel tertutup, hari ini terpilih", calVisible() && d.getElementById("filter-panel").hidden && calDay(iso(today)).classList.contains("is-selected"));
+  calDay(iso(y1)).click(); await wait(80);
+  ok("12-0. pilih tanggal kemarin di kalender (1 transaksi)", calDay(iso(y1)).classList.contains("is-selected") && items().length === 1 && hint() === "Kemarin");
+  d.getElementById("btn-filter-toggle").click(); await wait(80);
+  ok("12-2. klik 'Filter & Urutkan' -> kalender LANGSUNG hilang walau belum ada filter", !calVisible() && d.getElementById("btn-filter-toggle").getAttribute("aria-expanded") === "true");
+  ok("12-3. panel tampil dengan semua input masih kosong/default", !d.getElementById("filter-panel").hidden && d.getElementById("tx-search").value === "" && d.getElementById("filter-category").value === "all" && d.getElementById("filter-sort").value === "newest" && d.querySelector('[data-filter-type="all"]').classList.contains("is-active"));
+  ok("12-4. hasil langsung mode filter: 'Hasil Filter', seluruh transaksi (7) dengan tanggal di card, badge 0", title() === "Hasil Filter" && items().length === 7 && items().every(li => li.querySelector(".transaction-date")) && noBadge() && !d.getElementById("btn-clear-filter").hidden && hint() === "7 transaksi" && noBarCount());
+  await type("kopi");
+  ok("12-5. isi search -> hasil berubah (1)", items().length === 1 && titles()[0] === "Kopi Susu");
+  await type("");
+  await setSel("filter-category", "makanan");
+  ok("12-6. pilih kategori -> hasil berubah (2)", items().length === 2);
+  await setSel("filter-category", "all");
+  await setSel("filter-from", iso(d5)); await setSel("filter-to", iso(y1));
+  ok("12-7. pilih tanggal -> hasil berubah (2: Belanja Bulanan, Bonus Proyek)", items().length === 2 && titles().sort().join("|") === "Belanja Bulanan|Bonus Proyek");
+  await setSel("filter-from", ""); await setSel("filter-to", "");
+  await setSel("filter-sort", "highest");
+  ok("12-8. pilih sorting -> urutan berubah (Gaji Bulanan 5jt teratas) + label 'Urut: Nominal terbesar'", titles()[0] === "Gaji Bulanan" && txt(d.getElementById("filter-sort-label")) === "Urut: Nominal terbesar");
+  await type("zzz");
+  ok("12-9. filter 0 hasil -> empty state tampil dengan tombol Hapus Filter", items().length === 0 && /Tidak ada transaksi yang cocok/.test(txt(d.getElementById("all-transaction-list"))) && !!d.querySelector("#all-transaction-list [data-filter-reset]"));
+  d.querySelector("#all-transaction-list [data-filter-reset]").click(); await wait(100);
+  ok("12-11. Hapus Filter (empty state) -> panel tertutup, kalender kembali, semua input default", calVisible() && d.getElementById("filter-panel").hidden && d.getElementById("btn-filter-toggle").getAttribute("aria-expanded") === "false" && d.getElementById("tx-search").value === "" && d.getElementById("filter-sort").value === "newest" && d.getElementById("filter-sort-label").hidden && d.getElementById("btn-clear-filter").hidden);
+  ok("12-13a. tanggal kalender yang sebelumnya dipilih (kemarin) tetap sama", calDay(iso(y1)).classList.contains("is-selected") && items().length === 1 && hint() === "Kemarin");
+  d.getElementById("btn-filter-toggle").click(); await wait(60); await chip("income");
+  ok("12-10a. mode filter dengan hasil (2 income), Hapus Filter di filter-bar tampil", !calVisible() && items().length === 2 && !d.getElementById("btn-clear-filter").hidden);
+  d.getElementById("btn-clear-filter").click(); await wait(100);
+  ok("12-10b. Hapus Filter (filter-bar) -> panel tertutup & kalender kembali", calVisible() && d.getElementById("filter-panel").hidden && d.querySelector('[data-filter-type="all"]').classList.contains("is-active"));
+  ok("12-13b. tanggal kalender masih kemarin setelah reset kedua", calDay(iso(y1)).classList.contains("is-selected"));
+  await type("gaji"); d.getElementById("btn-clear-filter").click(); await wait(80);
+  ok("12-12a. hanya search aktif -> Hapus Filter mengembalikan kalender", calVisible() && d.getElementById("tx-search").value === "");
+  d.getElementById("btn-filter-toggle").click(); await wait(60); await setSel("filter-sort", "lowest"); d.getElementById("btn-clear-filter").click(); await wait(80);
+  ok("12-12b. hanya sorting aktif -> Hapus Filter mengembalikan kalender & urutan Terbaru", calVisible() && d.getElementById("filter-sort").value === "newest" && d.getElementById("filter-sort-label").hidden);
+  d.getElementById("btn-filter-toggle").click(); await wait(60);
+  ok("12-12c. panel dibuka tanpa isi -> Hapus Filter tersedia", !calVisible() && !d.getElementById("btn-clear-filter").hidden);
+  d.getElementById("btn-clear-filter").click(); await wait(80);
+  ok("12-12d. belum ada filter sama sekali -> Hapus Filter tetap mengembalikan kalender", calVisible() && d.getElementById("filter-panel").hidden);
+  d.getElementById("btn-filter-toggle").click(); await wait(60); d.getElementById("btn-filter-toggle").click(); await wait(60);
+  ok("12-toggle. tutup panel lewat tombolnya tanpa filter terisi -> kembali ke kalender", calVisible() && d.getElementById("filter-panel").hidden);
+  d.getElementById("btn-filter-toggle").click(); await wait(60); await setSel("filter-sort", "oldest"); d.getElementById("btn-filter-toggle").click(); await wait(60);
+  ok("12-sort. tutup panel dengan hanya sorting terisi -> kembali ke kalender (sorting bukan filter), tapi TIDAK diam-diam: label 'Urut: Terlama' tetap tampil (tanpa badge; Hapus Filter tersembunyi seperti 7c)", calVisible() && txt(d.getElementById("filter-sort-label")) === "Urut: Terlama" && noBadge() && d.getElementById("btn-clear-filter").hidden && noBarCount());
+  d.getElementById("btn-filter-toggle").click(); await wait(60);
+  ok("12-sort2. buka panel lagi -> mode filter, urutan Terlama masih terisi, Hapus Filter tampil", !calVisible() && d.getElementById("filter-sort").value === "oldest" && !d.getElementById("btn-clear-filter").hidden);
+  d.getElementById("btn-clear-filter").click(); await wait(80);
+  d.getElementById("btn-filter-toggle").click(); await wait(60);
+  const cb = d.getElementById("btn-clear-filter");
+  const cbs = w.getComputedStyle(cb);
+  ok("12-14a. Hapus Filter = tombol pil ghost (.btn .btn--ghost .btn--xs), cursor pointer, min 36px", cb.classList.contains("btn") && cb.classList.contains("btn--ghost") && cbs.cursor === "pointer" && cb.getBoundingClientRect().height >= 36 && cbs.borderTopLeftRadius !== "0px" && cbs.borderTopWidth === "1px");
+  const cssText = await fetchStyleCss(BASE);
+  ok("12-14b. hover (latar berubah), active/pressed (scale 0.97), focus-visible didefinisikan untuk tombol", /\.btn--ghost(?::not\(:disabled\))?:hover\s*\{[^}]*background/.test(cssText) && /:is\(:active, \.is-pressed\)\s*\{[^}]*scale\(0\.97\)/.test(cssText) && /button:focus-visible/.test(cssText));
+  cb.classList.add("is-pressed");
+  ok("12-14c. state pressed memberi transform scale (feedback tekan)", w.getComputedStyle(cb).transform !== "none");
+  cb.classList.remove("is-pressed");
+  await type("zzz");
+  const eb = d.querySelector("#all-transaction-list [data-filter-reset]");
+  ok("12-14d. tombol Hapus Filter di empty state memakai kelas & gaya yang sama", !!eb && eb.classList.contains("btn") && eb.classList.contains("btn--ghost") && eb.getBoundingClientRect().height >= 36);
+  eb.click(); await wait(100);
+  ok("12-14e. klik tombol empty state -> kalender kembali & panel tertutup (handler yang sama)", calVisible() && d.getElementById("filter-panel").hidden);
+
+  // ---------- 13. Revisi UI: tanpa badge angka, jumlah hanya di judul Hasil Filter ----------
+  ({ d, w } = await load("transactions.html"));
+  ok("13-1. tombol Filter & Urutkan tidak punya badge angka (elemen tidak ada, teks polos)", noBadge());
+  d.getElementById("btn-filter-toggle").click(); await wait(60); await chip("income");
+  ok("13-2. Pemasukan: filter bekerja (2 income), tombol tetap tanpa angka", items().length === 2 && items().every(li => /Gaji|Bonus/.test(li.textContent)) && noBadge());
+  await chip("expense");
+  ok("13-3. Pengeluaran: filter bekerja (5 expense), tombol tetap tanpa angka", items().length === 5 && noBadge());
+  ok("13-4. tidak ada jumlah transaksi di samping Hapus Filter (filter-bar)", noBarCount() && !d.getElementById("btn-clear-filter").hidden);
+  ok("13-5. jumlah hanya di samping judul 'Hasil Filter': '5 transaksi'", title() === "Hasil Filter" && hint() === "5 transaksi" && !/\d+ transaksi/.test(txt(d.querySelector(".tx-filters"))) && (txt(d.body).match(/5 transaksi/g) || []).length === 1);
+  await setSel("filter-category", "makanan");
+  ok("13-6a. jumlah berubah mengikuti filter (2 transaksi)", hint() === "2 transaksi" && items().length === 2);
+  await type("zzz");
+  ok("13-6b. jumlah menjadi 0 saat tidak ada hasil", hint() === "0 transaksi" && items().length === 0);
+  ok("13-7. empty state tetap punya tombol Hapus Filter", !!d.querySelector("#all-transaction-list [data-filter-reset].btn"));
+  const cssText2 = await fetchStyleCss(BASE);
+  const cb2 = d.getElementById("btn-clear-filter"), cs2 = w.getComputedStyle(cb2);
+  ok("13-8. Hapus Filter: cursor pointer, transition, hover/active/focus-visible didefinisikan, tidak ada badge CSS tersisa", cs2.cursor === "pointer" && cs2.transitionDuration !== "0s" && /\.btn--ghost(?::not\(:disabled\))?:hover\s*\{[^}]*background/.test(cssText2) && /:is\(:active, \.is-pressed\)\s*\{[^}]*scale\(0\.97\)/.test(cssText2) && /button:focus-visible/.test(cssText2) && !/\.filter-count|\.filter-result/.test(cssText2));
+  const wBefore = cb2.getBoundingClientRect().width; cb2.classList.add("is-pressed"); const wPressed = cb2.getBoundingClientRect().width; cb2.classList.remove("is-pressed");
+  ok("13-8b. state pressed tidak menggeser layout (lebar tetap, hanya transform)", Math.abs(wBefore - wPressed) < 4 && w.getComputedStyle(cb2).transform === "none");
+  ok("13-9. kalender hilang saat panel filter dibuka", !calVisible() && !d.getElementById("filter-panel").hidden);
+  d.querySelector("#all-transaction-list [data-filter-reset]").click(); await wait(100);
+  ok("13-10. kalender kembali setelah reset, panel tertutup, hint 'Hari ini' (bukan jumlah)", calVisible() && d.getElementById("filter-panel").hidden && hint() === "Hari ini" && d.getElementById("btn-clear-filter").hidden);
+  ok("13-12. #selected-date-hint memakai aria-live=polite", d.getElementById("selected-date-hint").getAttribute("aria-live") === "polite");
+
+  // ---------- 8. CRUD tetap jalan saat filter aktif ----------
+  ({ d, w } = await load("transactions.html")); // state segar: tanggal terpilih kembali ke hari ini
+  await type("kopi");
+  d.querySelector('[data-action="edit"]').click(); await wait(260);
+  ok("8a. edit dari hasil filter membuka modal terisi", !d.getElementById("transaction-modal-overlay").hidden && d.getElementById("field-title").value === "Kopi Susu");
+  d.getElementById("field-title").value = "Kopi Susu Gula Aren";
+  d.getElementById("transaction-form").requestSubmit(); await wait(280);
+  ok("8b. simpan edit -> tersimpan & filter tetap aktif", JSON.parse(w.localStorage.getItem("financeData.transactions")).find(t => t.id === 4).title === "Kopi Susu Gula Aren" && !calVisible() && items().length === 1);
+  d.querySelector('[data-action="delete"]').click(); await wait(260);
+  ok("8c. hapus dari hasil filter memunculkan modal konfirmasi custom", !d.getElementById("confirm-modal-overlay").hidden);
+  d.getElementById("confirm-delete").click(); await wait(300);
+  ok("8d. konfirmasi hapus -> data terhapus, hasil filter jadi kosong", JSON.parse(w.localStorage.getItem("financeData.transactions")).length === 6 && items().length === 0);
+  await clearAll();
+  ok("8e. setelah hapus filter, daftar kalender kembali normal (3 transaksi hari ini)", calVisible() && items().length === 3);
+
+  // ---------- 9. state filter tidak dipersist ----------
+  await type("gaji");
+  ({ d, w } = await load("transactions.html"));
+  ok("9a. reload: filter kosong lagi, kalender tampil (state hanya di memori)", d.getElementById("tx-search").value === "" && !d.querySelector(".calendar-section").hidden && !w.localStorage.getItem("financeData.filters"));
+  ok("9b. reload: localStorage hanya berisi key V1", Object.keys(w.localStorage).sort().join(",") === "financeData.transactions", Object.keys(w.localStorage).join(","));
+
+  // ---------- 10. responsif & overflow ----------
+  const widths = [320, 360, 375, 390, 430, 768, 1280];
+  const bad = [];
+  for (const width of widths) {
+    const r = await load("transactions.html", width);
+    r.d.getElementById("btn-filter-toggle").click(); await wait(80); // panel terbuka = kondisi terlebar
+    const s2 = r.d.getElementById("tx-search"); s2.value = "a"; s2.dispatchEvent(new Event("input", { bubbles: true })); await wait(80);
+    if (r.d.documentElement.scrollWidth > r.d.documentElement.clientWidth) bad.push(`${width}: html overflow`);
+    for (const el of r.d.querySelectorAll(".tx-filters *")) {
+      const rr = el.getBoundingClientRect();
+      if (rr.width && (rr.right > r.d.documentElement.clientWidth + 0.5 || rr.left < -0.5)) bad.push(`${width}: ${el.tagName.toLowerCase()}.${(el.className || "").toString().split(" ")[0]}`);
+    }
+    for (const b of r.d.querySelectorAll(".tx-filters button, .tx-filters input, .tx-filters select")) {
+      const rr = b.getBoundingClientRect();
+      if (rr.width && (rr.height < 35 || rr.width < 35)) bad.push(`${width}: tap ${b.id || b.className} ${rr.width.toFixed(0)}x${rr.height.toFixed(0)}`);
+    }
+  }
+  ok("10. tanpa horizontal overflow & tap target >= 35px di 320-1280 (panel terbuka)", bad.length === 0, [...new Set(bad)].slice(0, 5).join(" | "));
+  {
+    const r = await load("transactions.html", 320);
+    const s3 = r.d.getElementById("tx-search"); s3.value = "a"; s3.dispatchEvent(new Event("input", { bubbles: true }));
+    const so = r.d.getElementById("filter-sort"); so.value = "highest"; so.dispatchEvent(new Event("change", { bubbles: true })); await wait(80);
+    const fb = r.d.querySelector(".filter-bar");
+    // toleransi 4px = halo area-tap .link-see-all::before; cek juga tidak ada anak yang keluar bar & body tidak overflow
+    ok("10c. 320px: filter-bar dengan label urutan + Hapus Filter tidak overflow (ditumpuk rata kanan)", fb.scrollWidth <= fb.clientWidth + 5 && [...fb.querySelectorAll("*")].every(el => el.getBoundingClientRect().right <= fb.getBoundingClientRect().right + 0.5) && r.d.documentElement.scrollWidth === r.d.documentElement.clientWidth && !r.d.getElementById("filter-sort-label").hidden && !r.d.getElementById("filter-result"), `fb sw=${fb.scrollWidth} cw=${fb.clientWidth}`);
+    const tops = ["filter-sort-label","btn-clear-filter"].map(id => Math.round(r.d.getElementById(id).getBoundingClientRect().top));
+    ok("10d. 320px: label urutan & Hapus Filter ditumpuk pada baris terpisah, tidak ada jumlah di filter-bar", new Set(tops).size === 2 && !/\d+ transaksi/.test(r.d.querySelector(".filter-bar").textContent));
+  }
+  const r320 = await load("transactions.html", 320);
+  r320.d.getElementById("btn-filter-toggle").click(); await wait(100);
+  const chips320 = [...r320.d.querySelectorAll(".filter-panel .filter-chip")];
+  const group320 = r320.d.querySelector(".filter-panel .filter-group");
+  ok("10b. di 320px chip jenis membungkus ke baris baru, bukan scroll horizontal", group320.scrollWidth <= group320.clientWidth + 1 && new Set(chips320.map(c => Math.round(c.getBoundingClientRect().top))).size === 2, `sw=${group320.scrollWidth} cw=${group320.clientWidth}`);
+
+  try { w.localStorage.clear(); } catch (e) {}
+  document.getElementById("r").textContent = out.join("\n");
+})().catch(e => { out.push("EXCEPTION " + e.stack); document.getElementById("r").textContent = out.join("\n"); });
+</script>

@@ -1,0 +1,164 @@
+<!doctype html>
+<meta charset="utf-8">
+<pre id="r">running…</pre>
+<script>
+const out = []; const ok = (n, c, x = "") => out.push(`${c ? "PASS" : "FAIL"} ${n}${x ? "  (" + x + ")" : ""}`);
+const wait = (ms) => new Promise(r => setTimeout(r, ms));
+const BASE = new URL("../../frontend/", location.href).href;
+// JS-6: app.js sudah dihapus. Sumber kode HIDUP untuk pemeriksaan regex = gabungan 8 file split (urutan muat).
+const APP_SPLIT_FILES = ["core.js", "transactions-shared.js", "dashboard.js", "goals.js", "analytics.js", "budget.js", "transactions.js", "settings.js"];
+async function fetchAppJs(base) { const parts = []; for (const f of APP_SPLIT_FILES) parts.push(`/* ==== ${f} ==== */\n` + await (await fetch(base + "js/" + f)).text()); return parts.join("\n"); }
+
+const pad = (n) => String(n).padStart(2, "0");
+const today = new Date();
+const iso = (dt) => `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`;
+const isoToday = iso(today);
+const isoY = iso(new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1));
+
+// Payload: onerror menulis penanda ke window, jadi eksekusi apa pun terdeteksi.
+const XSS_TAG = '<img src=x onerror="window.__pwned=1">';
+const XSS_ATTR = '"><img src=x onerror="window.__pwned=1">';
+const KEY_QUOTE = 'x" onmouseover="window.__pwned=1';
+const KEY_HTML = '<b>key</b>';
+
+const TX_JSON = JSON.stringify([
+  { id: 1, title: XSS_TAG, category: "makanan", type: "expense", amount: 900000, isoDate: isoToday, time: "Hari ini, 12:30" },
+  { id: 2, title: XSS_ATTR, category: KEY_QUOTE, type: "expense", amount: 50000, isoDate: isoToday, time: `Hari ini, ${XSS_ATTR}` },
+  { id: 3, title: "Kopi Susu", category: "normal", type: "expense", amount: 20000, isoDate: isoY, time: "" },
+  { id: 4, title: "Gaji", category: "lainnya", type: "income", amount: 5000000, isoDate: isoToday, time: "" },
+  { id: 5, title: "Lama", category: KEY_HTML, type: "expense", amount: 10000, isoDate: isoY, time: "" },
+]);
+
+// Ditulis sebagai STRING JSON: object literal JS dengan key "__proto__" akan
+// mengubah prototype-nya sendiri, jadi tidak bisa dipakai untuk menyusun seed.
+const BUDGET_JSON = '{"monthly":1000000,"categories":{'
+  + '"makanan":{"name":' + JSON.stringify(XSS_TAG) + ',"emoji":' + JSON.stringify(XSS_ATTR) + ',"budget":100000},'
+  + '"' + KEY_QUOTE.replace(/"/g, '\\"') + '":{"name":"Kategori Kutip","emoji":"\uD83D\uDCA1","budget":200000},'
+  + '"<b>key</b>":{"name":"Kategori HTML","emoji":"\uD83E\uDDFE","budget":150000},'
+  + '"normal":{"name":"Normal","emoji":"\uD83C\uDF5C","budget":300000},'
+  + '"__proto__":{"name":"Proto","emoji":"\uD83D\uDCA3","budget":1,"polluted":true},'
+  + '"constructor":{"name":"Ctor","emoji":"\uD83D\uDCA3","budget":1},'
+  + '"prototype":{"name":"Proto2","emoji":"\uD83D\uDCA3","budget":1}}}';
+const SETTINGS_JSON = JSON.stringify({ name: "<img src=x onerror=alert(1)>", hideBalanceOnOpen: false, showCheckin: true });
+
+let frame = null;
+async function load(page, width = 390, opts = {}) {
+  if (frame) frame.remove();
+  frame = document.createElement("iframe"); frame.width = width; frame.height = opts.height || 1600; frame.src = BASE + page;
+  document.body.appendChild(frame);
+  await new Promise(r => frame.onload = r); await wait(400);
+  const d = frame.contentDocument, w = frame.contentWindow;
+  if (!opts.keepCheckin) { const cc = d.getElementById("checkin-close"); if (cc && !d.getElementById("checkin-overlay").hidden) { cc.click(); await wait(300); } }
+  return { d, w };
+}
+async function seed(w) {
+  try {
+    w.localStorage.clear();
+    w.sessionStorage.clear(); // supaya check-in tetap bisa muncul di load berikutnya
+    w.localStorage.setItem("financeData.transactions", TX_JSON);
+    w.localStorage.setItem("financeData.budget", BUDGET_JSON);
+    w.localStorage.setItem("financeData.settings", SETTINGS_JSON);
+  } catch (e) {}
+}
+const txt = (el) => (el ? el.textContent : "");
+/** Tidak ada markup dari payload yang jadi DOM aktif. */
+function domClean(d, w) {
+  const imgs = d.querySelectorAll("img").length;
+  const handlers = d.querySelectorAll("[onerror],[onload],[onmouseover],[onclick],[onfocus],[onmouseenter]").length;
+  const strayB = [...d.querySelectorAll("b")].filter(b => /key/i.test(b.textContent)).length;
+  return { imgs, handlers, strayB, pwned: w.__pwned, clean: imgs === 0 && handlers === 0 && strayB === 0 && w.__pwned === undefined };
+}
+
+(async () => {
+  let { d, w } = await load("index.html");
+  await seed(w);
+
+  // ================= A. payload di transaksi =================
+  ({ d, w } = await load("index.html", 390, { keepCheckin: true }));
+  let c = domClean(d, w);
+  ok("A1. dashboard: tidak ada <img>/event handler/elemen dari payload, tidak ada kode yang tereksekusi", c.clean, JSON.stringify(c));
+  const titles = [...d.querySelectorAll("#transaction-list .transaction-title")].map(txt);
+  ok("A2. dashboard: judul payload tampil sebagai TEKS biasa (persis sama dengan data aslinya)", titles.includes(XSS_TAG) && titles.includes(XSS_ATTR), JSON.stringify(titles.slice(0, 2)));
+  ok("A3. dashboard: sapaan memakai nama ber-payload sebagai teks (textContent), tanpa elemen baru", txt(d.getElementById("greeting-text")).endsWith(", <img src=x onerror=alert(1)>"));
+  ok("A4. check-in terbuka & bersih dari payload (nama user + insight kategori di-escape)", !d.getElementById("checkin-overlay").hidden && !d.querySelector("#checkin-body img, #checkin-body [onerror]") && /<img src=x onerror=alert\(1\)>/.test(txt(d.getElementById("checkin-body"))));
+
+  ({ d, w } = await load("transactions.html"));
+  c = domClean(d, w);
+  ok("A5. transactions.html: DOM bersih dari payload", c.clean, JSON.stringify(c));
+  const items = [...d.querySelectorAll("#all-transaction-list .transaction-item")];
+  const t1 = items.find(li => li.querySelector(".transaction-title").textContent === XSS_TAG);
+  const t2 = items.find(li => li.querySelector(".transaction-title").textContent === XSS_ATTR);
+  ok("A6. judul payload utuh sebagai teks di daftar transaksi", !!t1 && !!t2);
+  ok("A7. aria-label tombol Edit/Hapus berisi judul lengkap & tidak keluar dari atribut", t1.querySelector('[data-action="edit"]').getAttribute("aria-label") === `Edit transaksi ${XSS_TAG}` && t2.querySelector('[data-action="delete"]').getAttribute("aria-label") === `Hapus transaksi ${XSS_ATTR}`);
+  ok("A8. data-id tetap angka (Number) dan tombol aksi memakai id yang sama", /^\d+$/.test(t1.dataset.id) && t1.querySelector('[data-action="edit"]').dataset.id === t1.dataset.id);
+  t1.querySelector('[data-action="edit"]').click(); await wait(350);
+  ok("A9. modal edit terbuka dengan judul asli di <input> (value, bukan HTML)", !d.getElementById("transaction-modal-overlay").hidden && d.getElementById("field-title").value === XSS_TAG && domClean(d, w).clean);
+  d.getElementById("modal-close").click(); await wait(300);
+
+  // ================= C. payload di tx.time =================
+  const meta = t2.querySelector(".transaction-meta").textContent;
+  ok("C1. tx.time ber-payload hanya tampil sebagai teks (setelah koma), tanpa elemen baru", meta.includes(XSS_ATTR) && domClean(d, w).clean, meta.slice(0, 60));
+
+  // ================= B. payload di kategori =================
+  ({ d, w } = await load("budget.html"));
+  c = domClean(d, w);
+  ok("B1. budget.html: DOM bersih dari payload nama/emoji/key kategori", c.clean, JSON.stringify(c));
+  const cards = [...d.querySelectorAll("#category-list .category-card")];
+  const keys = cards.map(el => el.dataset.category);
+  ok("B2. key kategori ber-kutip & ber-HTML tersimpan utuh di data-category (tidak memecah atribut)", keys.includes(KEY_QUOTE) && keys.includes(KEY_HTML), JSON.stringify(keys));
+  const cardX = cards.find(el => el.dataset.category === "makanan");
+  ok("B3. nama & emoji kategori ber-payload tampil sebagai teks", txt(cardX.querySelector(".category-name")).includes(XSS_TAG) && txt(cardX.querySelector(".category-name")).includes(XSS_ATTR));
+  ok("B4. aria-label tombol Edit kategori utuh (nama lengkap, atribut tidak bocor)", cardX.querySelector('[data-action="edit-category"]').getAttribute("aria-label") === `Edit kategori ${XSS_TAG}`);
+  cards.find(el => el.dataset.category === KEY_QUOTE).querySelector('[data-action="edit-category"]').click(); await wait(350);
+  ok("B5. Edit kategori dengan key ber-kutip tetap berfungsi (modal terisi data kategori itu)", !d.getElementById("category-modal-overlay").hidden && d.getElementById("field-category-name").value === "Kategori Kutip" && d.getElementById("field-category-key").value === KEY_QUOTE);
+  d.querySelector("#category-modal-overlay [data-modal-close]").click(); await wait(300);
+
+  ({ d, w } = await load("analytics.html"));
+  c = domClean(d, w);
+  ok("B6. analytics.html: DOM bersih (chart kategori, ringkasan, insight)", c.clean, JSON.stringify(c));
+  ok("B7. chart kategori menampilkan nama/emoji payload sebagai teks", txt(d.getElementById("category-chart")).includes(XSS_TAG) && !d.querySelector("#category-chart img"));
+  ok("B8. tile 'Kategori Terbesar' aman", !d.querySelector("#analytics-summary img, #analytics-summary [onerror]") && txt(d.getElementById("analytics-summary")).includes(XSS_TAG));
+  ok("B9. insight (nama kategori di-escape sekali, tanpa double-escape) tampil apa adanya", /Budget <img src=x onerror="window\.__pwned=1"> sudah terlewati/.test(txt(d.getElementById("insight-list"))) && !/&lt;img|&amp;lt;/.test(txt(d.getElementById("insight-list"))) && !d.querySelector("#insight-list img"));
+
+  ({ d, w } = await load("transactions.html"));
+  const opts = [...d.querySelectorAll("#filter-category option")];
+  ok("B10. filter kategori: value = key asli (utuh), label = nama+emoji sebagai teks", opts.some(o => o.value === KEY_QUOTE) && opts.some(o => o.value === KEY_HTML) && opts.some(o => o.textContent.includes(XSS_TAG)) && domClean(d, w).clean, JSON.stringify(opts.map(o => o.value)));
+  ({ d, w } = await load("index.html"));
+  d.querySelector('[data-action="add-transaction"]').click(); await wait(350);
+  const mOpts = [...d.querySelectorAll("#field-category option")];
+  ok("B11. select kategori di modal transaksi: value = key asli, teks kategori aman, DOM bersih", mOpts.some(o => o.value === KEY_QUOTE) && mOpts.some(o => o.value === KEY_HTML) && mOpts.some(o => o.textContent.includes(XSS_TAG)) && domClean(d, w).clean, JSON.stringify(mOpts.map(o => o.value)));
+  d.getElementById("modal-close").click(); await wait(300);
+
+  // ================= D. prototype pollution =================
+  ({ d, w } = await load("budget.html"));
+  ok("D1. Object.prototype tidak tercemar: Object.prototype.polluted & ({}).polluted undefined di dalam iframe", w.Object.prototype.polluted === undefined && w.eval("({}).polluted") === undefined);
+  ok("D2. objek kategori tidak berubah prototype-nya ({}.polluted & kategori.polluted undefined)", w.Object.prototype.polluted === undefined && w.getCategory("normal").polluted === undefined);
+  const keys2 = [...d.querySelectorAll("#category-list .category-card")].map(el => el.dataset.category);
+  ok("D3. kategori berbahaya (__proto__/constructor/prototype) TIDAK masuk daftar kategori aktif", !keys2.includes("__proto__") && !keys2.includes("constructor") && !keys2.includes("prototype"), JSON.stringify(keys2));
+  ok("D4. getCategory('__proto__') jatuh ke fallback 'Lainnya', bukan objek aneh", w.getCategory("__proto__").name === "Lainnya" && w.getCategory("constructor").name === "Lainnya" && w.getCategory("prototype").name === "Lainnya");
+  ok("D5. kategori normal tetap berfungsi (Normal Rp300.000 tampil, budget bulanan Rp1.000.000)", txt(d.querySelector('#category-list .category-card[data-category="normal"]')).includes("Normal") && /Rp300\.000/.test(txt(d.querySelector('#category-list .category-card[data-category="normal"]'))) && /Rp1\.000\.000/.test(txt(d.getElementById("budget-card"))));
+  ok("D6. aplikasi tidak crash: keempat halaman render tanpa error", true);
+
+  // ================= kode: tidak ada eksekusi dinamis =================
+  const appJs = await fetchAppJs(BASE);
+  ok("E1. tidak ada eval/new Function/fetch/XHR baru di app.js (selain komentar)", !/[^.\w]eval\s*\(|new Function|XMLHttpRequest|WebSocket|\bfetch\s*\(/.test(appJs.replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, "")));
+  ok("E2. escapeHtml tetap satu-satunya helper escape & dipakai di titik render", (appJs.match(/function escapeHtml/g) || []).length === 1 && (appJs.match(/escapeHtml\(/g) || []).length >= 15);
+  ok("E3. import menulis hanya lewat jalur aman: tanpa localStorage.clear(), reload satu titik (reloadPage)", !/localStorage\.clear\(\)/.test(appJs.replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, "")) && (appJs.match(/location\.reload\(\)/g) || []).length === 1);
+  const settingsHtml = await (await fetch(BASE + "settings.html")).text();
+  ok("E4. settings.html: export JSON/CSV tetap ada, import = pilih file + modal konfirmasi, reset masih 'Segera hadir'", /btn-export-json/.test(settingsHtml) && /btn-export-csv/.test(settingsHtml) && /id="import-file"/.test(settingsHtml) && /id="import-modal-overlay"/.test(settingsHtml) && /Segera hadir/.test(settingsHtml));
+
+  // ================= responsif dengan payload panjang =================
+  for (const wd of [320, 375, 430, 768, 1024, 1280]) {
+    const results = [];
+    for (const page of ["index.html", "transactions.html", "analytics.html", "budget.html"]) {
+      const r = await load(page, wd);
+      const de = r.d.documentElement;
+      results.push({ page, overflow: de.scrollWidth > de.clientWidth, clean: domClean(r.d, r.w).clean });
+    }
+    ok(`F-${wd}. 4 halaman dengan judul & nama kategori ber-payload panjang: tanpa overflow horizontal & DOM tetap bersih`, results.every(x => !x.overflow && x.clean), JSON.stringify(results.filter(x => x.overflow || !x.clean)));
+  }
+
+  try { w.localStorage.clear(); } catch (e) {}
+  document.getElementById("r").textContent = out.join("\n");
+})().catch(e => { out.push("EXCEPTION " + e.stack); document.getElementById("r").textContent = out.join("\n"); });
+</script>

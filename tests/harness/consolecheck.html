@@ -1,0 +1,14 @@
+<!doctype html><meta charset="utf-8"><pre id="r"></pre>
+<script>
+const q=new URLSearchParams(location.search), W=+q.get("w")||375, P=q.get("p")||"index.html";
+const out=[]; const f=document.createElement("iframe"); f.width=W; f.height=1200;
+f.src=new URL("../../frontend/", location.href).href+P; document.body.appendChild(f);
+f.onload=async()=>{ const d=f.contentDocument,w=f.contentWindow; const errs=[];
+  w.addEventListener("error",e=>errs.push("error: "+e.message)); w.addEventListener("unhandledrejection",e=>errs.push("rejection: "+e.reason));
+  const oe=w.console.error, ow=w.console.warn; w.console.error=(...a)=>errs.push("console.error: "+a.join(" ")); w.console.warn=(...a)=>errs.push("console.warn: "+a.join(" "));
+  await new Promise(r=>setTimeout(r,300));
+  try { if (P==="transactions.html") { d.getElementById("btn-filter-toggle").click(); await new Promise(r=>setTimeout(r,60)); d.querySelector('[data-filter-type="income"]').click(); const s=d.getElementById("tx-search"); s.value="zzz"; s.dispatchEvent(new Event("input",{bubbles:true})); await new Promise(r=>setTimeout(r,80)); (d.querySelector("#all-transaction-list [data-filter-reset]")||{click(){}}).click(); await new Promise(r=>setTimeout(r,80)); d.getElementById("btn-filter-toggle").click(); await new Promise(r=>setTimeout(r,60)); d.getElementById("btn-clear-filter").click(); } } catch(e){ errs.push("EXC "+e.message); }
+  await new Promise(r=>setTimeout(r,200));
+  document.getElementById("r").textContent=`${P}@${W}: errors=${errs.length}`+(errs.length?"\n"+errs.join("\n"):"");
+};
+</script>

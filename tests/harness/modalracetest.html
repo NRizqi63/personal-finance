@@ -1,0 +1,292 @@
+<!doctype html>
+<meta charset="utf-8">
+<pre id="r">running…</pre>
+<script>
+/* Reproduksi race condition modal (Final Frontend Audit).
+
+   Pola bug: close() menjadwalkan setTimeout(overlay.hidden = true, 180/220ms).
+   Kalau modal dibuka lagi SEBELUM timer itu jalan, timer lama menyembunyikan
+   modal yang BARU. Varian kedua: rAF bersarang milik open() yang memasang
+   .is-open bisa menyala setelah modal ditutup (kelas nyangkut).
+
+   Dua lapis pengujian:
+   A. DETERMINISTIK — setTimeout/requestAnimationFrame di dalam iframe diganti
+      antrean palsu yang bisa di-flush manual, sehingga urutan "timer lama vs
+      buka baru" diuji persis, tanpa bergantung pada waktu nyata.
+      (Perlu karena di headless, rAF iframe praktis tidak pernah dijalankan —
+      artefak lingkungan yang sama yang membuat functest "add modal opens"
+      kadang FAIL; lihat catatan di bawah.)
+   B. WAKTU NYATA — buka -> tutup -> buka ulang < durasi animasi, lalu tunggu
+      lebih lama dari durasi animasi; modal harus tetap tampil, fokus di dalam
+      modal, scroll lock masih terpasang, dan bersih setelah ditutup. */
+const out = []; const ok = (n, c, x = "") => out.push(`${c ? "PASS" : "FAIL"} ${n}${x ? "  (" + x + ")" : ""}`);
+const wait = (ms) => new Promise(r => setTimeout(r, ms));
+const BASE = new URL("../../frontend/", location.href).href;
+const APP_SPLIT_FILES = ["core.js", "transactions-shared.js", "dashboard.js", "goals.js", "analytics.js", "budget.js", "transactions.js", "settings.js"];
+async function fetchAppJs(base) { const parts = []; for (const f of APP_SPLIT_FILES) parts.push(`/* ==== ${f} ==== */\n` + await (await fetch(base + "js/" + f)).text()); return parts.join("\n"); }
+
+const pad = (n) => String(n).padStart(2, "0");
+const iso = (dt) => `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`;
+const T = iso(new Date());
+const TX = [{ id: 2, title: "Gaji", category: "lainnya", type: "income", amount: 5000000, isoDate: T, time: "" }, { id: 1, title: "Makan", category: "makanan", type: "expense", amount: 25000, isoDate: T, time: "" }];
+const GOALS = [{ id: 1, name: "Dana Darurat", target: 10000000, saved: 3200000, deadline: "", createdAt: "2026-01-15" }];
+
+let frame = null;
+async function load(page, { dismissCheckin = true, width = 390 } = {}) {
+  if (!frame) { frame = document.createElement("iframe"); frame.width = width; frame.height = 1800; frame.src = BASE + "index.html"; document.body.appendChild(frame); await new Promise(r => frame.onload = r); }
+  const w0 = frame.contentWindow;
+  try {
+    w0.localStorage.clear(); w0.sessionStorage.clear();
+    w0.localStorage.setItem("financeData.transactions", JSON.stringify(TX));
+    w0.localStorage.setItem("financeData.goals", JSON.stringify(GOALS));
+    if (dismissCheckin) w0.sessionStorage.setItem("checkinDismissed", "true");
+  } catch (e) {}
+  frame.remove(); frame = document.createElement("iframe"); frame.width = width; frame.height = 1800; frame.src = BASE + page;
+  document.body.appendChild(frame);
+  await new Promise(r => frame.onload = r); await wait(400);
+  const r = { d: frame.contentDocument, w: frame.contentWindow, errors: [] };
+  r.w.addEventListener("error", e => r.errors.push(e.message));
+  r.w.console.error = (...a) => r.errors.push("console.error " + a.join(" "));
+  return r;
+}
+const $ = (d, id) => d.getElementById(id);
+const locked = (d) => d.body.classList.contains("is-modal-open");
+const activeId = (d) => { const e = d.activeElement; return e ? (e.id || e.className || e.tagName) : "none"; };
+async function tap(el) { el.focus(); el.click(); await wait(20); }
+
+/* --- antrean palsu untuk setTimeout & requestAnimationFrame di iframe --- */
+function fakeClock(w) {
+  const timers = new Map(); let tid = 1;
+  const frames = new Map(); let fid = 1;
+  const real = { st: w.setTimeout, ct: w.clearTimeout, raf: w.requestAnimationFrame, caf: w.cancelAnimationFrame };
+  w.setTimeout = (fn, ms) => { const id = tid++; timers.set(id, fn); return id; };
+  w.clearTimeout = (id) => { timers.delete(id); };
+  w.requestAnimationFrame = (fn) => { const id = fid++; frames.set(id, fn); return id; };
+  w.cancelAnimationFrame = (id) => { frames.delete(id); };
+  return {
+    pendingTimers: () => timers.size,
+    pendingFrames: () => frames.size,
+    flushTimers() { const fns = [...timers.values()]; timers.clear(); fns.forEach(fn => fn()); },
+    flushFrames(times = 1) { for (let i = 0; i < times; i++) { const fns = [...frames.values()]; frames.clear(); fns.forEach(fn => fn(0)); } },
+    restore() { w.setTimeout = real.st; w.clearTimeout = real.ct; w.requestAnimationFrame = real.raf; w.cancelAnimationFrame = real.caf; }
+  };
+}
+
+/* Skenario waktu nyata, dipakai ulang untuk tiap modal.
+   gap    = jeda antara close dan open ulang (< durasi animasi)
+   settle = jeda sesudahnya (> durasi animasi) supaya timer lama pasti sempat
+            jalan kalau memang tidak dibatalkan. */
+async function raceCase(label, { d, overlay, openFn, closeFn, gap = 60, settle = 420, trigger = null }) {
+  await openFn();
+  ok(`${label} — buka pertama: modal tampil`, !overlay.hidden);
+  await closeFn();
+  ok(`${label} — tepat setelah close, overlay belum hidden (timer animasi menggantung)`, overlay.hidden === false, `hidden=${overlay.hidden}`);
+  await wait(gap);
+  await openFn();
+  ok(`${label} — buka ulang pada gap ${gap}ms: tampil`, !overlay.hidden);
+  await wait(settle);
+  ok(`${label} — TIMER LAMA TIDAK MENUTUP MODAL BARU (masih tampil setelah ${settle}ms)`, overlay.hidden === false, `hidden=${overlay.hidden}`);
+  ok(`${label} — fokus berada di dalam modal`, overlay.contains(d.activeElement), activeId(d));
+  ok(`${label} — scroll lock masih terpasang`, locked(d));
+  await closeFn();
+  await wait(settle);
+  ok(`${label} — tutup normal: hidden kembali true`, overlay.hidden === true);
+  ok(`${label} — kelas .is-open tidak tersisa`, !overlay.classList.contains("is-open"));
+  ok(`${label} — scroll lock dilepas`, !locked(d));
+  if (trigger) ok(`${label} — fokus kembali ke pemicu`, d.activeElement === trigger, activeId(d));
+}
+
+(async () => {
+  const appJs = await fetchAppJs(BASE);
+
+  /* ===== 0. Kode: timer & frame memang dibatalkan ===== */
+  ok("0a. core.js: timer hide disimpan & di-clearTimeout", /hideTimer = setTimeout/.test(appJs) && /clearTimeout\(hideTimer\)/.test(appJs));
+  ok("0b. core.js: rAF pembuka disimpan & di-cancelAnimationFrame", /openFrame = requestAnimationFrame/.test(appJs) && /cancelAnimationFrame\(openFrame\)/.test(appJs));
+  ok("0c. modal transaksi punya pembatalan sendiri", /modalHideTimer = setTimeout/.test(appJs) && /clearTimeout\(modalHideTimer\)/.test(appJs) && /cancelAnimationFrame\(modalOpenFrame\)/.test(appJs));
+  ok("0d. modal check-in punya pembatalan sendiri", /checkinHideTimer = setTimeout/.test(appJs) && /clearTimeout\(checkinHideTimer\)/.test(appJs) && /cancelAnimationFrame\(checkinOpenFrame\)/.test(appJs));
+  ok("0e. tidak ada lagi setTimeout(hidden = true) tanpa penampung timer", !/\n\s*setTimeout\(\(\) => \{\s*\n\s*overlay\.hidden = true;/.test(appJs));
+  ok("0f. durasi animasi tidak diubah (2x 180ms + 1x 220ms)", (appJs.match(/\}, 180\);/g) || []).length === 2 && (appJs.match(/\}, 220\);/g) || []).length === 1);
+  ok("0g. TEPAT 2 listener keydown global (tidak ada listener baru)", appJs.split('addEventListener("keydown"').length - 1 === 2);
+  ok("0h. API publik controller tetap { open, close, isOpen }", /return \{ open, close, isOpen: \(\) => !overlay\.hidden \};/.test(appJs));
+
+  /* ===================================================================
+     A. DETERMINISTIK — antrean timer & frame palsu
+     =================================================================== */
+  let r = await load("goals.html"); let d = r.d; let w = r.w;
+  {
+    const clock = fakeClock(w);
+    // Overlay baru (bukan milik halaman) supaya tidak ada listener ganda.
+    const el = d.createElement("div");
+    el.className = "modal-overlay"; el.hidden = true;
+    el.innerHTML = '<div class="modal" role="dialog" aria-modal="true"><button type="button" data-modal-close>Tutup</button></div>';
+    d.body.appendChild(el);
+    let closeCount = 0;
+    const ctl = w.createModalController(el, { onClose: () => closeCount++ });
+
+    ctl.open();
+    ok("A1. open(): overlay tampil & satu frame dijadwalkan", el.hidden === false && clock.pendingFrames() === 1 && clock.pendingTimers() === 0);
+    ctl.close();
+    ok("A2. close(): frame buka dibatalkan, satu timer hide dijadwalkan", clock.pendingFrames() === 0 && clock.pendingTimers() === 1 && el.hidden === false);
+    ctl.close();
+    ok("A3. close() kedua tidak menjadwalkan timer kedua & onClose tidak dobel", clock.pendingTimers() === 1 && closeCount === 1);
+    ctl.open(); // <-- buka ulang SEBELUM timer hide jalan
+    ok("A4. open() membatalkan timer hide milik close sebelumnya", clock.pendingTimers() === 0, `pending=${clock.pendingTimers()}`);
+    clock.flushTimers(); // jalankan semua timer yang tersisa (kalau bug: hidden = true)
+    ok("A5. TIMER LAMA TIDAK MENYEMBUNYIKAN MODAL BARU", el.hidden === false);
+    clock.flushFrames(2);
+    ok("A6. rAF bersarang memasang .is-open pada siklus yang benar", el.classList.contains("is-open"));
+
+    ctl.close();
+    clock.flushFrames(2);
+    ok("A7. rAF lama tidak lagi memasang .is-open pada modal yang sudah ditutup", !el.classList.contains("is-open"));
+    clock.flushTimers();
+    ok("A8. setelah timer jalan, modal benar-benar hidden", el.hidden === true);
+    ok("A9. scroll lock dilepas saat tidak ada modal lain", !locked(d));
+    // Skenario asli bug: open -> close -> open, lalu flush frame DULU baru timer
+    ctl.open(); ctl.close(); ctl.open();
+    clock.flushFrames(2); clock.flushTimers();
+    ok("A10. urutan frame-lalu-timer pun modal tetap terbuka", el.hidden === false && el.classList.contains("is-open"));
+    ctl.close(); clock.flushTimers(); clock.flushFrames(2);
+    ok("A11. state akhir bersih (hidden, tanpa is-open, tanpa scroll lock)", el.hidden === true && !el.classList.contains("is-open") && !locked(d));
+    el.remove();
+    clock.restore();
+  }
+
+  /* A12+. Modal transaksi (transactions-shared.js) lewat jalur user asli */
+  r = await load("index.html"); d = r.d; w = r.w;
+  {
+    const ov = $(d, "transaction-modal-overlay");
+    const clock = fakeClock(w);
+    d.querySelector('[data-action="add-transaction"]').click();
+    ok("A12. modal transaksi terbuka, frame dijadwalkan", ov.hidden === false && clock.pendingFrames() >= 1);
+    $(d, "modal-close").click();
+    ok("A13. tutup: satu timer hide dijadwalkan", clock.pendingTimers() === 1);
+    d.querySelector('[data-action="add-transaction"]').click();
+    ok("A14. buka ulang membatalkan timer hide", clock.pendingTimers() === 0);
+    clock.flushTimers();
+    ok("A15. TIMER LAMA TIDAK MENUTUP MODAL TRANSAKSI YANG BARU", ov.hidden === false);
+    clock.flushFrames(2);
+    ok("A16. .is-open terpasang pada siklus yang benar", ov.classList.contains("is-open"));
+    $(d, "modal-close").click(); clock.flushFrames(2); clock.flushTimers();
+    ok("A17. tutup bersih", ov.hidden === true && !ov.classList.contains("is-open") && !locked(d));
+    clock.restore();
+  }
+
+  /* A18+. Financial Check-in (dashboard.js, 220ms) */
+  r = await load("index.html", { dismissCheckin: false }); d = r.d; w = r.w;
+  {
+    const ov = $(d, "checkin-overlay");
+    ok("A18. check-in tampil otomatis sekali per sesi", ov.hidden === false);
+    const clock = fakeClock(w);
+    $(d, "checkin-close").click();
+    ok("A19. tutup check-in: satu timer hide (220ms) dijadwalkan", clock.pendingTimers() === 1 && ov.hidden === false);
+    $(d, "checkin-close").click(); $(d, "checkin-cta").click();
+    ok("A20. close berulang tidak menumpuk timer", clock.pendingTimers() === 1);
+    // modal lain dibuka selagi timer check-in menggantung
+    d.querySelector('[data-action="add-transaction"]').click();
+    clock.flushTimers();
+    ok("A21. timer check-in hanya menyembunyikan overlay-nya sendiri", ov.hidden === true);
+    ok("A22. modal transaksi yang dibuka di jendela itu tetap terbuka", $(d, "transaction-modal-overlay").hidden === false);
+    ok("A23. scroll lock tetap terpasang (masih ada modal terbuka)", locked(d));
+    $(d, "modal-close").click(); clock.flushTimers(); clock.flushFrames(2);
+    ok("A24. setelah semua ditutup, scroll lock lepas", !locked(d) && $(d, "transaction-modal-overlay").hidden === true);
+    clock.restore();
+  }
+
+  /* ===================================================================
+     B. WAKTU NYATA (rAF headless tidak dipakai sebagai syarat lulus)
+     =================================================================== */
+
+  /* B1. Modal Tambah Target (createModalController) */
+  r = await load("goals.html"); d = r.d;
+  let ov = $(d, "goal-modal-overlay");
+  await raceCase("B1. goal editor", { d, overlay: ov, trigger: $(d, "btn-add-goal"), openFn: () => tap($(d, "btn-add-goal")), closeFn: async () => { ov.querySelector("[data-modal-close]").click(); await wait(20); } });
+  ok("B1x. tanpa error konsol", r.errors.length === 0, r.errors.join(" | "));
+
+  /* B2. Modal konfirmasi hapus target (controller kedua di halaman yang sama) */
+  r = await load("goals.html"); d = r.d;
+  ov = $(d, "goal-confirm-overlay");
+  await raceCase("B2. konfirmasi hapus goal", { d, overlay: ov, trigger: d.querySelector('[data-action="delete-goal"]'), openFn: () => tap(d.querySelector('[data-action="delete-goal"]')), closeFn: async () => { ov.querySelector("[data-modal-close]").click(); await wait(20); } });
+  ok("B2x. data goals tidak berubah oleh skenario race", r.w.localStorage.getItem("financeData.goals") === JSON.stringify(GOALS));
+
+  /* B3. Modal import backup (settings.html) */
+  r = await load("settings.html"); d = r.d;
+  ov = $(d, "import-modal-overlay");
+  ok("B3a. modal import memakai createModalController", /setupSettingsImport[\s\S]{0,1500}createModalController\(overlay/.test(appJs));
+  const backup = JSON.stringify({ app: "personal-finance", appName: "Personal Finance", schema: 1, appVersion: "V2.2", exportedAt: new Date().toISOString(), counts: { transactions: 1, categories: 0 }, data: { transactions: [{ id: 1, title: "Dari Backup", category: "makanan", type: "expense", amount: 12000, isoDate: T, time: "" }], budget: null, settings: null } });
+  const pickImport = async () => {
+    const input = $(d, "import-file");
+    const dt = new r.w.DataTransfer(); dt.items.add(new r.w.File([backup], "backup.json", { type: "application/json" }));
+    input.files = dt.files;
+    input.dispatchEvent(new r.w.Event("change", { bubbles: true }));
+    for (let i = 0; i < 100 && ov.hidden; i++) await wait(50); // FileReader asinkron
+    await wait(60);
+  };
+  await raceCase("B3. import backup", { d, overlay: ov, openFn: pickImport, closeFn: async () => { $(d, "import-modal-close").click(); await wait(20); } });
+  ok("B3x. tidak ada data yang ditulis saat modal import hanya dibuka/ditutup", r.w.localStorage.getItem("financeData.transactions") === JSON.stringify(TX));
+  ok("B3y. tanpa error konsol di settings", r.errors.length === 0, r.errors.join(" | "));
+
+  /* B4. Modal konfirmasi reset data (settings.html) */
+  r = await load("settings.html"); d = r.d;
+  ov = $(d, "reset-modal-overlay");
+  await raceCase("B4. reset data", { d, overlay: ov, trigger: d.querySelector('[data-reset-target="transactions"]'), openFn: () => tap(d.querySelector('[data-reset-target="transactions"]')), closeFn: async () => { $(d, "reset-modal-close").click(); await wait(20); } });
+  ok("B4x. reset tidak dijalankan (transaksi utuh)", r.w.localStorage.getItem("financeData.transactions") === JSON.stringify(TX));
+
+  /* B5. Modal transaksi (dashboard) */
+  r = await load("index.html"); d = r.d;
+  ov = $(d, "transaction-modal-overlay");
+  await raceCase("B5. modal transaksi", { d, overlay: ov, trigger: d.querySelector('[data-action="add-transaction"]'), openFn: () => tap(d.querySelector('[data-action="add-transaction"]')), closeFn: async () => { $(d, "modal-close").click(); await wait(20); } });
+  ok("B5x. transaksi tidak berubah", r.w.localStorage.getItem("financeData.transactions") === JSON.stringify(TX));
+  ok("B5y. tanpa error konsol di dashboard", r.errors.length === 0, r.errors.join(" | "));
+
+  /* B6. Check-in: tutup lalu buka modal lain di dalam jendela 220ms */
+  r = await load("index.html", { dismissCheckin: false }); d = r.d;
+  ov = $(d, "checkin-overlay");
+  const txOv = $(d, "transaction-modal-overlay");
+  ok("B6a. check-in tampil", !ov.hidden);
+  await tap($(d, "checkin-close"));
+  ok("B6b. klik tutup: is-open dilepas segera, hidden masih menunggu 220ms", !ov.classList.contains("is-open") && ov.hidden === false);
+  await wait(40);
+  await tap(d.querySelector('[data-action="add-transaction"]'));
+  await wait(450);
+  ok("B6c. modal transaksi yang dibuka 40ms setelah check-in ditutup tetap terbuka", txOv.hidden === false);
+  ok("B6d. overlay check-in sudah hidden", ov.hidden === true);
+  ok("B6e. scroll lock tetap terpasang untuk modal transaksi", locked(d));
+  ok("B6f. fokus di dalam modal transaksi", txOv.contains(d.activeElement), activeId(d));
+  d.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+  await wait(450);
+  ok("B6g. Escape menutup modal transaksi & scroll lock lepas", txOv.hidden === true && !locked(d));
+  ok("B6h. checkinDismissed ditulis", r.w.sessionStorage.getItem("checkinDismissed") === "true");
+  ok("B6i. tanpa error konsol", r.errors.length === 0, r.errors.join(" | "));
+
+  /* B7. Buka-tutup beruntun (stress) */
+  r = await load("goals.html"); d = r.d;
+  ov = $(d, "goal-modal-overlay");
+  for (let i = 0; i < 6; i++) { await tap($(d, "btn-add-goal")); ov.querySelector("[data-modal-close]").click(); await wait(30); }
+  await tap($(d, "btn-add-goal"));
+  await wait(500);
+  ok("B7a. setelah 6 siklus cepat, modal terakhir tetap terbuka", ov.hidden === false);
+  ok("B7b. scroll lock benar", locked(d));
+  ov.querySelector("[data-modal-close]").click(); await wait(500);
+  ok("B7c. tutup terakhir bersih", ov.hidden === true && !ov.classList.contains("is-open") && !locked(d));
+  ok("B7d. fokus kembali ke tombol pemicu", d.activeElement === $(d, "btn-add-goal"), activeId(d));
+  ok("B7e. tanpa error konsol", r.errors.length === 0, r.errors.join(" | "));
+
+  /* B8. Focus trap & Escape tetap jalan setelah perbaikan */
+  r = await load("goals.html"); d = r.d;
+  ov = $(d, "goal-modal-overlay");
+  await tap($(d, "btn-add-goal"));
+  const focusables = [...ov.querySelectorAll("button:not([disabled]), input:not([disabled]):not([type=hidden])")].filter(el => !el.hidden && el.getClientRects().length > 0);
+  ok("B8a. fokus awal = tombol tutup modal", d.activeElement === ov.querySelector(".modal-close"), activeId(d));
+  focusables[focusables.length - 1].focus();
+  const evTab = new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true });
+  d.dispatchEvent(evTab);
+  ok("B8b. Tab di elemen terakhir diputar ke elemen pertama", evTab.defaultPrevented && d.activeElement === focusables[0], activeId(d));
+  d.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+  await wait(450);
+  ok("B8c. Escape menutup modal", ov.hidden === true);
+  ok("B8d. fokus kembali ke pemicu setelah Escape", d.activeElement === $(d, "btn-add-goal"), activeId(d));
+
+  document.getElementById("r").textContent = out.join("\n") + `\n\nTOTAL PASS=${out.filter(l => l.startsWith("PASS")).length} FAIL=${out.filter(l => l.startsWith("FAIL")).length}`;
+})().catch(e => { document.getElementById("r").textContent = out.join("\n") + "\nEXCEPTION " + e.message + "\n" + e.stack; });
+</script>

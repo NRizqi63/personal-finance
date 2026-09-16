@@ -1,0 +1,252 @@
+<!doctype html>
+<meta charset="utf-8">
+<pre id="r">running…</pre>
+<script>
+const out = []; const ok = (n, c, x = "") => out.push(`${c ? "PASS" : "FAIL"} ${n}${x ? "  (" + x + ")" : ""}`);
+const wait = (ms) => new Promise(r => setTimeout(r, ms));
+const BASE = new URL("../../frontend/", location.href).href;
+// JS-6: style.css sudah dihapus. Sumber CSS HIDUP untuk pemeriksaan selector = gabungan 7 file split.
+const CSS_SPLIT_FILES = ["base.css", "dashboard.css", "goals.css", "analytics.css", "budget.css", "transactions.css", "settings.css"];
+async function fetchStyleCss(base) { const parts = []; for (const f of CSS_SPLIT_FILES) parts.push(`/* ==== ${f} ==== */\n` + await (await fetch(base + "css/" + f)).text()); return parts.join("\n"); }
+// JS-6: app.js sudah dihapus. Sumber kode HIDUP untuk pemeriksaan regex = gabungan 8 file split (urutan muat).
+const APP_SPLIT_FILES = ["core.js", "transactions-shared.js", "dashboard.js", "goals.js", "analytics.js", "budget.js", "transactions.js", "settings.js"];
+async function fetchAppJs(base) { const parts = []; for (const f of APP_SPLIT_FILES) parts.push(`/* ==== ${f} ==== */\n` + await (await fetch(base + "js/" + f)).text()); return parts.join("\n"); }
+
+const pad = (n) => String(n).padStart(2, "0");
+const today = new Date();
+const isoToday = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`;
+
+const LIVE_TX = [{ id: 7, title: "Kopi Aktif", category: "makanan", type: "expense", amount: 18000, isoDate: isoToday, time: "" }];
+const LIVE_BUDGET = { monthly: 1234000, categories: { makanan: { name: "Makanan", emoji: "🍜", budget: 800000 } } };
+const LIVE_SETTINGS = { name: "Rizqi Aktif", hideBalanceOnOpen: true, showCheckin: false };
+const KEYS = ["financeData.transactions", "financeData.budget", "financeData.settings"];
+
+const backup = (data, over = {}) => JSON.stringify(Object.assign({
+  app: "personal-finance", appName: "Personal Finance", schema: 1, appVersion: "V2.2",
+  exportedAt: "2026-09-14T01:32:11.281Z", counts: { transactions: 99, categories: 99 }, data,
+}, over));
+const tx = (o = {}) => Object.assign({ id: 500, title: "Makan", category: "makanan", type: "expense", amount: 25000, isoDate: isoToday, time: "Hari ini, 12:30" }, o);
+const IMPORT_BUDGET = { monthly: 2000000, categories: { belanja: { name: "Belanja", emoji: "🛍️", budget: 500000 } } };
+const IMPORT_SETTINGS = { name: "Dina Import", hideBalanceOnOpen: false, showCheckin: true };
+// 3 baris: 2 valid + 1 dilewati (amount 0)
+const GOOD_FILE = backup({
+  transactions: [tx({ id: 900, title: "Gaji", type: "income", amount: 5000000 }), tx({ id: 900, title: "Nasi" }), tx({ amount: 0 })],
+  budget: IMPORT_BUDGET, settings: IMPORT_SETTINGS,
+});
+
+let frame = null;
+async function load(page = "settings.html", width = 390) {
+  if (frame) frame.remove();
+  frame = document.createElement("iframe"); frame.width = width; frame.height = 1600; frame.src = BASE + page;
+  document.body.appendChild(frame);
+  await new Promise(r => frame.onload = r); await wait(400);
+  return { d: frame.contentDocument, w: frame.contentWindow };
+}
+const txt = (el) => (el ? el.textContent.replace(/\s+/g, " ").trim() : "");
+const snapLS = (w) => JSON.stringify(KEYS.map(k => w.localStorage.getItem(k)));
+const allKeys = (w) => { const ks = []; for (let i = 0; i < w.localStorage.length; i += 1) ks.push(w.localStorage.key(i)); return ks.sort().join(); };
+async function seed(w, opts = {}) {
+  try {
+    w.localStorage.clear(); w.sessionStorage.clear();
+    if (!opts.noTx) w.localStorage.setItem("financeData.transactions", JSON.stringify(LIVE_TX));
+    if (!opts.noBudget) w.localStorage.setItem("financeData.budget", JSON.stringify(LIVE_BUDGET));
+    if (!opts.noSettings) w.localStorage.setItem("financeData.settings", JSON.stringify(LIVE_SETTINGS));
+    w.sessionStorage.setItem("checkinDismissed", "true");
+    w.localStorage.setItem("catatanLain", "jangan-disentuh");
+  } catch (e) {}
+}
+async function pickFile(d, w, name, content, type = "application/json") {
+  const input = d.getElementById("import-file");
+  const fb = d.getElementById("settings-data-status");
+  const before = fb.textContent;
+  const dt = new w.DataTransfer();
+  dt.items.add(new w.File([content], name, { type }));
+  input.files = dt.files;
+  input.dispatchEvent(new w.Event("change", { bubbles: true }));
+  for (let i = 0; i < 40 && fb.textContent === before; i += 1) await wait(100);
+  await wait(200); // animasi modal
+}
+/** Stub reloadPage supaya alur bisa diuji tanpa benar-benar memuat ulang. */
+function stubReload(w) {
+  const calls = { n: 0 };
+  w.reloadPage = () => { calls.n += 1; };
+  return calls;
+}
+
+(async () => {
+  let { d, w } = await load();
+  await seed(w);
+  ({ d, w } = await load());
+  const errors = []; w.addEventListener("error", e => errors.push(e.message));
+  const overlay = () => d.getElementById("import-modal-overlay");
+  const applyBtn = () => d.getElementById("btn-import-apply");
+  const cancelBtn = () => d.getElementById("btn-import-cancel");
+  const statusEl = () => d.getElementById("import-modal-status");
+  const fb = () => d.getElementById("settings-data-status");
+  const summaryMap = () => Object.fromEntries([...d.querySelectorAll("#import-modal-summary .settings-meta-row")].map(r => [r.querySelector("dt").textContent, r.querySelector("dd").textContent]));
+  const before = snapLS(w);
+
+  // ================= 1. modal muncul / tidak =================
+  await pickFile(d, w, "backup.json", GOOD_FILE);
+  // Catatan: class .is-open dipasang lewat rAF bersarang yang tidak berjalan di
+  // headless (artefak yang sama dengan functest "add modal opens"), jadi yang
+  // diperiksa adalah atribut hidden-nya.
+  ok("1a. modal konfirmasi muncul setelah file valid", !overlay().hidden && txt(d.getElementById("import-modal-title")) === "Import Backup JSON", `hidden=${overlay().hidden}`);
+  const m = summaryMap();
+  ok("1b. modal menampilkan transaksi valid, dilewati, kategori, budget, settings, jumlah data lama", m["Transaksi valid"] === "2 dari 3" && m["Baris dilewati"] === "1" && m["Kategori"] === "1" && m["Budget bulanan"] === "Rp2.000.000" && m["Pengaturan"] === "dari file" && m["Data saat ini"] === "1 transaksi akan diganti", JSON.stringify(m));
+  ok("1c. peringatan timpa + tidak bisa dibatalkan tampil", /akan diganti dengan isi file ini/.test(txt(d.getElementById("import-modal-sub"))) && /tidak bisa dikembalikan/.test(txt(d.getElementById("import-modal-sub"))));
+  ok("1d. tiga tombol: Batal, Timpa Data (danger), Export dulu", txt(cancelBtn()) === "Batal" && txt(applyBtn()) === "Timpa Data" && applyBtn().classList.contains("btn--danger") && /Export data saat ini dulu/.test(txt(d.getElementById("btn-import-export-first"))));
+  ok("1e. ringkasan modal dibangun tanpa innerHTML dari isi file (tidak ada elemen asing)", d.querySelectorAll("#import-modal-summary img, #import-modal-summary script, #import-modal-summary b").length === 0);
+  ok("1f. localStorage belum berubah saat modal terbuka", snapLS(w) === before && w.sessionStorage.getItem("checkinDismissed") === "true");
+  ok("1g. hanya satu modal terbuka (tidak bertumpuk)", d.querySelectorAll(".modal-overlay:not([hidden])").length === 1);
+
+  // ================= 2. Batal =================
+  cancelBtn().click(); await wait(300);
+  ok("2a. Batal menutup modal & menghapus pendingImport", overlay().hidden && w.getPendingImport() === null);
+  ok("2b. Batal tidak mengubah localStorage / sessionStorage / data aktif", snapLS(w) === before && w.sessionStorage.getItem("checkinDismissed") === "true" && w.getUserName() === "Rizqi Aktif");
+  ok("2c. status di halaman memberi tahu import dibatalkan", fb().dataset.type === "error" && /dibatalkan/.test(txt(fb())));
+
+  // file invalid -> modal tidak muncul
+  await pickFile(d, w, "backup.json", "{rusak");
+  ok("2d. file invalid: modal TIDAK muncul, pendingImport null", overlay().hidden && w.getPendingImport() === null && fb().dataset.type === "error");
+  await pickFile(d, w, "catatan.txt", GOOD_FILE, "text/plain");
+  ok("2e. file non-JSON: modal TIDAK muncul", overlay().hidden && w.getPendingImport() === null);
+
+  // Escape menutup modal & membatalkan
+  await pickFile(d, w, "backup.json", GOOD_FILE);
+  d.dispatchEvent(new w.KeyboardEvent("keydown", { key: "Escape", bubbles: true })); await wait(300);
+  ok("2f. Escape menutup modal teratas & membatalkan (data tidak berubah)", overlay().hidden && w.getPendingImport() === null && snapLS(w) === before);
+  await pickFile(d, w, "backup.json", GOOD_FILE);
+  overlay().dispatchEvent(new w.MouseEvent("click", { bubbles: true })); await wait(300);
+  ok("2g. klik overlay menutup & membatalkan", overlay().hidden && w.getPendingImport() === null && snapLS(w) === before);
+
+  // ================= 3. Export dulu =================
+  await pickFile(d, w, "backup.json", GOOD_FILE);
+  const files = [];
+  const realClick = w.HTMLAnchorElement.prototype.click;
+  let lastBlob = null;
+  const realCreate = w.URL.createObjectURL.bind(w.URL);
+  w.URL.createObjectURL = (b) => { lastBlob = b; return "blob:stub"; };
+  w.HTMLAnchorElement.prototype.click = function () { if (this.download) files.push({ name: this.download, blob: lastBlob }); else realClick.call(this); };
+  d.getElementById("btn-import-export-first").click(); await wait(200);
+  ok("3a. 'Export dulu' memanggil export JSON 3A (satu file backup ter-unduh)", files.length === 1 && /^personal-finance-backup-\d{4}-\d{2}-\d{2}\.json$/.test(files[0].name), JSON.stringify(files.map(f => f.name)));
+  const exported = JSON.parse(await new Promise(res => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.readAsText(files[0].blob); }));
+  ok("3b. isi export = DATA AKTIF saat ini (bukan isi file import)", exported.data.transactions[0].title === "Kopi Aktif" && exported.data.budget.monthly === 1234000 && exported.schema === 1);
+  ok("3c. 'Export dulu' tidak menutup modal & tidak menghapus pendingImport", !overlay().hidden && !!w.getPendingImport() && w.getPendingImport().counts.validRows === 2);
+  ok("3d. 'Export dulu' tidak mengubah localStorage", snapLS(w) === before);
+  w.URL.createObjectURL = realCreate; w.HTMLAnchorElement.prototype.click = realClick;
+
+  // ================= 4. snapshot =================
+  const snap = w.snapshotStorage();
+  ok("4a. snapshot berisi persis tiga key financeData.* dengan nilai asli", Object.keys(snap).sort().join() === [...KEYS].sort().join() && snap["financeData.transactions"] === w.localStorage.getItem("financeData.transactions") && snap["financeData.settings"] === JSON.stringify(LIVE_SETTINGS));
+  ok("4b. snapshot TIDAK memuat checkinDismissed atau key lain", !("checkinDismissed" in snap) && !("catatanLain" in snap));
+  ok("4c. snapshot membedakan key yang belum ada (null)", (() => { w.localStorage.removeItem("financeData.settings"); const s2 = w.snapshotStorage(); w.localStorage.setItem("financeData.settings", JSON.stringify(LIVE_SETTINGS)); return s2["financeData.settings"] === null && typeof s2["financeData.budget"] === "string"; })());
+  ok("4d. snapshotStorage tidak menulis apa pun", snapLS(w) === before && allKeys(w).includes("catatanLain"));
+
+  // ================= 5. Timpa Data (sukses) =================
+  let reload = stubReload(w);
+  ok("5a. sebelum apply: reload belum dipanggil", reload.n === 0);
+  applyBtn().click(); await wait(300);
+  ok("5b. reload dipanggil TEPAT satu kali setelah semua write sukses", reload.n === 1);
+  const newTx = JSON.parse(w.localStorage.getItem("financeData.transactions"));
+  ok("5c. transactions ditulis dari hasil VALIDATOR: 2 baris (baris invalid tidak ikut), urutan file dipertahankan", newTx.length === 2 && newTx[0].title === "Gaji" && newTx[1].title === "Nasi");
+  ok("5d. ID baru dipakai (2,1) — ID lama 900/500 dari file tidak dipakai", newTx.map(t => t.id).join() === "2,1" && !newTx.some(t => t.id === 900 || t.id === 500));
+  ok("5e. tiap transaksi hanya 7 field standar (bukan objek mentah dari file)", newTx.every(t => Object.keys(t).sort().join() === "amount,category,id,isoDate,time,title,type"));
+  ok("5f. budget & settings ditulis dari hasil validator", JSON.parse(w.localStorage.getItem("financeData.budget")).monthly === 2000000 && JSON.parse(w.localStorage.getItem("financeData.settings")).name === "Dina Import" && Object.keys(JSON.parse(w.localStorage.getItem("financeData.budget"))).sort().join() === "categories,monthly");
+  ok("5g. hanya tiga key financeData.* yang ditulis; key lain tidak disentuh", w.localStorage.getItem("catatanLain") === "jangan-disentuh" && allKeys(w) === ["catatanLain", ...KEYS].slice().sort().join());
+  ok("5h. checkinDismissed tidak berubah", w.sessionStorage.getItem("checkinDismissed") === "true");
+  ok("5i. pendingImport dihapus setelah sukses", w.getPendingImport() === null);
+  ok("5j. session notice dibuat (key sendiri, bukan checkinDismissed)", /Import berhasil: 2 transaksi/.test(w.sessionStorage.getItem("financeData.importNotice") || ""));
+  ok("5k. status modal sempat menampilkan 'Menerapkan data…'", /Menerapkan data/.test(txt(statusEl())) || statusEl().hidden);
+
+  // klik ganda
+  reload = stubReload(w);
+  const afterImport = snapLS(w);
+  applyBtn().click(); applyBtn().click(); await wait(250);
+  ok("5l. klik ganda / klik lagi setelah sukses tidak menjalankan import kedua", reload.n === 0 && snapLS(w) === afterImport);
+
+  // notice dibaca sekali setelah reload
+  ({ d, w } = await load());
+  ok("5m. setelah reload: notice tampil sekali lalu key-nya dihapus", /Import berhasil: 2 transaksi/.test(txt(d.getElementById("settings-data-status"))) && w.sessionStorage.getItem("financeData.importNotice") === null);
+  ({ d, w } = await load());
+  ok("5n. reload berikutnya tidak menampilkan notice lagi", d.getElementById("settings-data-status").hidden);
+  ok("5o. data hasil import benar-benar terpakai aplikasi (nama & kategori baru)", w.getUserName() === "Dina Import" && w.getCategory("belanja").budget === 500000);
+
+  // ================= 6. double click pada proses berjalan =================
+  await seed(w); ({ d, w } = await load());
+  await pickFile(d, w, "backup.json", GOOD_FILE);
+  reload = stubReload(w);
+  let writeCalls = 0;
+  const realSet = w.localStorage.setItem.bind(w.localStorage);
+  w.localStorage.setItem = (k, v) => { writeCalls += 1; return realSet(k, v); };
+  const unstub = () => { delete w.localStorage.setItem; };
+  d.getElementById("btn-import-apply").click();
+  d.getElementById("btn-import-apply").click();
+  d.getElementById("btn-import-apply").click();
+  await wait(300);
+  unstub();
+  ok("6a. tiga klik beruntun -> hanya satu proses (3 setItem = 3 key, reload 1x)", writeCalls === 3 && reload.n === 1, `setItem=${writeCalls} reload=${reload.n}`);
+  ok("6b. tombol dinonaktifkan selama proses (cegah klik ganda)", d.getElementById("btn-import-apply").disabled === true);
+
+  // ================= 7. gagal tulis -> rollback =================
+  const failAt = async (nth, opts = {}) => {
+    await seed(w, opts); ({ d, w } = await load());
+    await pickFile(d, w, "backup.json", GOOD_FILE);
+    const snapBefore = snapLS(w);
+    const keysBefore = allKeys(w);
+    const rl = stubReload(w);
+    let n = 0;
+    const real = w.localStorage.setItem.bind(w.localStorage);
+    w.localStorage.setItem = (k, v) => { n += 1; if (n === nth) throw new DOMException("QuotaExceededError", "QuotaExceededError"); return real(k, v); };
+    d.getElementById("btn-import-apply").click(); await wait(300);
+    delete w.localStorage.setItem;
+    return { snapBefore, keysBefore, snapAfter: snapLS(w), keysAfter: allKeys(w), reloads: rl.n, d, w };
+  };
+  let r = await failAt(1);
+  ok("7a. setItem #1 gagal -> rollback: ketiga key kembali persis, tidak reload", r.snapAfter === r.snapBefore && r.reloads === 0);
+  r = await failAt(2);
+  ok("7b. setItem #2 gagal -> rollback penuh (transactions yang sudah tertulis dikembalikan)", r.snapAfter === r.snapBefore && r.reloads === 0);
+  r = await failAt(3);
+  ok("7c. setItem #3 gagal -> rollback penuh", r.snapAfter === r.snapBefore && r.reloads === 0);
+  ok("7d. key lain tidak tersentuh saat rollback", r.keysAfter === r.keysBefore && r.w.localStorage.getItem("catatanLain") === "jangan-disentuh");
+  ok("7e. checkinDismissed tetap utuh setelah rollback", r.w.sessionStorage.getItem("checkinDismissed") === "true");
+  ok("7f. pesan gagal + data lama dipulihkan tampil", /Import gagal/.test(txt(r.d.getElementById("settings-data-status"))) && /dikembalikan seperti semula/.test(txt(r.d.getElementById("settings-data-status"))));
+  ok("7g. tidak ada notice sukses saat gagal", r.w.sessionStorage.getItem("financeData.importNotice") === null);
+
+  // key yang sebelumnya TIDAK ADA harus tetap tidak ada setelah rollback
+  r = await failAt(3, { noSettings: true });
+  ok("7h. key yang sebelumnya tidak ada tetap TIDAK ADA setelah rollback (removeItem, bukan string kosong)", r.w.localStorage.getItem("financeData.settings") === null && r.snapAfter === r.snapBefore);
+  r = await failAt(2, { noTx: true, noBudget: true, noSettings: true });
+  ok("7i. ketiga key sebelumnya kosong -> setelah rollback ketiganya tetap tidak ada", KEYS.every(k => r.w.localStorage.getItem(k) === null) && r.keysAfter === r.keysBefore);
+
+  // ================= 8. batasan & keamanan =================
+  const appJs = await fetchAppJs(BASE);
+  ok("8a. tidak ada pemanggilan localStorage.clear() (komentar diabaikan)", !/localStorage\.clear\(\)/.test(appJs.replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, "")));
+  ok("8b. rollback memakai removeItem (bukan clear) & hanya tiga key import", /IMPORT_STORAGE_KEYS/.test(String(w.rollbackStorage)) && /removeItem/.test(String(w.rollbackStorage)) && !/clear\(/.test(String(w.rollbackStorage)));
+  ok("8c. writeImportedData hanya menulis tiga key financeData.* dari data tervalidasi", (String(w.writeImportedData).match(/localStorage\.setItem/g) || []).length === 3 && /JSON\.stringify\(data\.transactions\)/.test(String(w.writeImportedData)));
+  ok("8d. checkinDismissed tidak pernah ditulis/dihapus oleh jalur import", !/checkinDismissed/.test([w.applyPendingImport, w.snapshotStorage, w.writeImportedData, w.rollbackStorage, w.setImportNotice, w.consumeImportNotice].map(String).join("\n")));
+  ok("8e. tanpa fetch/XHR/eval/new Function di jalur import", !/[^.\w]eval\s*\(|new Function|XMLHttpRequest|WebSocket|\bfetch\s*\(/.test([w.applyPendingImport, w.writeImportedData, w.rollbackStorage, w.snapshotStorage, w.setupSettingsImport].map(String).join("\n")));
+  ok("8f. reset SELURUH data belum dibuat (hanya tiga reset parsial di Zona Berbahaya)", !d.querySelector('[data-reset-target="all"]') && d.querySelectorAll("#reset-actions [data-reset-target]").length === 3);
+  ok("8g. export JSON & CSV tetap ada", !!d.getElementById("btn-export-json") && !!d.getElementById("btn-export-csv"));
+  ok("8h. applyPendingImport menolak kalau pendingImport hilang (tidak percaya DOM)", (() => { const res = w.applyPendingImport(); return !res.ok && res.code === "no-pending" && /Pilih ulang/.test(res.message); })());
+
+  // ================= 9. responsif =================
+  for (const wd of [320, 375, 430, 768, 1024, 1280]) {
+    const r2 = await load("settings.html", wd);
+    await seed(r2.w);
+    const r3 = await load("settings.html", wd);
+    await pickFile(r3.d, r3.w, "backup.json", GOOD_FILE);
+    const de = r3.d.documentElement;
+    const modalBox = r3.d.querySelector("#import-modal-overlay .modal").getBoundingClientRect();
+    const btns = ["btn-import-cancel", "btn-import-apply", "btn-import-export-first"].map(id => r3.d.getElementById(id).getBoundingClientRect());
+    const inside = btns.every(b => b.right <= modalBox.right + 0.5 && b.left >= modalBox.left - 0.5 && b.height >= 36);
+    const rowsOk = [...r3.d.querySelectorAll("#import-modal-summary .settings-meta-row, #import-modal-overlay .modal-sub")].every(el => el.scrollWidth <= el.clientWidth + 1);
+    ok(`9-${wd}. modal tanpa overflow; tombol di dalam modal & >= 36px`, de.scrollWidth === de.clientWidth && inside && rowsOk && modalBox.width <= de.clientWidth, `sw=${de.scrollWidth} cw=${de.clientWidth}`);
+  }
+  const cssText = await fetchStyleCss(BASE);
+  ok("10. CSS: tombol modal punya hover/active/focus-visible & gaya disabled", /\.btn--danger:hover|\.btn--danger:not\(:disabled\):hover/.test(cssText) && /:is\(:active, \.is-pressed\)\s*\{[^}]*scale\(0\.97\)/.test(cssText) && /button:focus-visible/.test(cssText) && /\.btn:disabled/.test(cssText));
+  ok("11. console 0 error", errors.length === 0, errors.join(" | "));
+  try { w.localStorage.clear(); w.sessionStorage.clear(); } catch (e) {}
+  document.getElementById("r").textContent = out.join("\n");
+})().catch(e => { out.push("EXCEPTION " + e.stack); document.getElementById("r").textContent = out.join("\n"); });
+</script>

@@ -1,0 +1,200 @@
+<!doctype html>
+<meta charset="utf-8">
+<pre id="r">running…</pre>
+<script>
+const out = []; const ok = (n, c, x = "") => out.push(`${c ? "PASS" : "FAIL"} ${n}${x ? "  (" + x + ")" : ""}`);
+const wait = (ms) => new Promise(r => setTimeout(r, ms));
+const BASE = new URL("../../frontend/", location.href).href;
+// JS-6: style.css sudah dihapus. Sumber CSS HIDUP untuk pemeriksaan selector = gabungan 7 file split.
+const CSS_SPLIT_FILES = ["base.css", "dashboard.css", "goals.css", "analytics.css", "budget.css", "transactions.css", "settings.css"];
+async function fetchStyleCss(base) { const parts = []; for (const f of CSS_SPLIT_FILES) parts.push(`/* ==== ${f} ==== */\n` + await (await fetch(base + "css/" + f)).text()); return parts.join("\n"); }
+// JS-6: app.js sudah dihapus. Sumber kode HIDUP untuk pemeriksaan regex = gabungan 8 file split (urutan muat).
+const APP_SPLIT_FILES = ["core.js", "transactions-shared.js", "dashboard.js", "goals.js", "analytics.js", "budget.js", "transactions.js", "settings.js"];
+async function fetchAppJs(base) { const parts = []; for (const f of APP_SPLIT_FILES) parts.push(`/* ==== ${f} ==== */\n` + await (await fetch(base + "js/" + f)).text()); return parts.join("\n"); }
+
+const pad = (n) => String(n).padStart(2, "0");
+const iso = (dt) => `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`;
+const today = new Date(); today.setHours(0, 0, 0, 0);
+const rel = (n) => iso(new Date(today.getFullYear(), today.getMonth(), today.getDate() + n));
+const rupiah = (n) => "Rp" + Math.abs(n).toLocaleString("id-ID");
+const GOALS_KEY = "financeData.goals";
+const ALL_KEYS = ["financeData.transactions", "financeData.budget", "financeData.settings", GOALS_KEY];
+const G = (o) => Object.assign({ id: 1, name: "Dana Darurat", target: 10000000, saved: 3200000, deadline: "", createdAt: "2026-01-15" }, o);
+const SEED = () => [
+  G({ id: 1, name: "Dana Darurat", target: 10000000, saved: 3200000, deadline: rel(107) }),
+  G({ id: 2, name: "Beli Laptop", target: 8000000, saved: 8250000, deadline: rel(5) }),
+  G({ id: 3, name: "Liburan Keluarga ke Jepang Musim Semi", target: 25000000, saved: 1500000, deadline: rel(-4) }),
+  G({ id: 4, name: "Motor Baru", target: 18000000, saved: 9000000, deadline: rel(12) }),
+  G({ id: 5, name: "Modal Usaha", target: 5000000, saved: 0, deadline: "" }),
+];
+const TX = [{ id: 1, title: "Gaji", category: "lainnya", type: "income", amount: 5000000, isoDate: rel(0), time: "" }, { id: 2, title: "Makan", category: "makanan", type: "expense", amount: 50000, isoDate: rel(0), time: "" }];
+
+let frame = null;
+async function load(page = "index.html", width = 390) {
+  if (frame) frame.remove();
+  frame = document.createElement("iframe"); frame.width = width; frame.height = 1800; frame.src = BASE + page;
+  document.body.appendChild(frame);
+  await new Promise(r => frame.onload = r); await wait(450);
+  const d = frame.contentDocument, w = frame.contentWindow;
+  const r = { d, w, errors: [], warns: [] };
+  w.addEventListener("error", e => r.errors.push(e.message));
+  const cc = d.getElementById("checkin-close"); const ov = d.getElementById("checkin-overlay");
+  if (cc && ov && !ov.hidden) { cc.click(); await wait(250); }
+  return r;
+}
+async function openWith(raw, width = 390, page = "index.html") {
+  if (!frame) await load("index.html");
+  const w0 = frame.contentWindow;
+  try { if (raw === null) w0.localStorage.removeItem(GOALS_KEY); else w0.localStorage.setItem(GOALS_KEY, typeof raw === "string" ? raw : JSON.stringify(raw)); } catch (e) {}
+  return load(page, width);
+}
+const txt = (el) => (el ? el.textContent.replace(/\s+/g, " ").trim() : "");
+const snapAll = (w) => JSON.stringify(ALL_KEYS.map(k => w.localStorage.getItem(k)));
+const $ = (d, id) => d.getElementById(id);
+const card = (d) => $(d, "goals-card");
+const link = (d) => $(d, "link-goals-all");
+const items = (d) => [...d.querySelectorAll("#goals-card .goals-card-item")];
+
+(async () => {
+  const html = await (await fetch(BASE + "index.html")).text();
+  const appJs = await fetchAppJs(BASE);
+  const appCode = appJs.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|\s)\/\/.*$/gm, "$1");
+  const css = await fetchStyleCss(BASE);
+  let r = await load("index.html"); try { r.w.localStorage.clear(); r.w.sessionStorage.clear(); } catch (e) {}
+  frame.contentWindow.localStorage.setItem("financeData.transactions", JSON.stringify(TX));
+
+  /* ===================== 1-2. Card tampil & empty state ===================== */
+  r = await openWith(null); let { d, w } = r;
+  ok("1a. dashboard termuat tanpa error", r.errors.length === 0, r.errors.join(" | "));
+  ok("1b. section Target Keuangan ada, dengan judul", d.querySelector(".goals-dashboard") !== null && [...d.querySelectorAll(".goals-dashboard .section-title")].some(h => txt(h) === "Target Keuangan"));
+  ok("1c. card memakai kelas card dashboard (.budget-card)", card(d) !== null && card(d).classList.contains("budget-card"));
+  ok("1d. section berada di antara Budget dan Transaksi Terbaru (urutan DOM)", (() => { const secs = [...d.querySelectorAll(".app > section")].map(s => s.className.split(" ")[0]); return secs.indexOf("budget") < secs.indexOf("goals-dashboard") && secs.indexOf("goals-dashboard") < secs.indexOf("transactions"); })());
+  ok("1e. tanpa inline handler di index.html", !/\son[a-z]+=/i.test(html));
+  ok("2a. empty state: menjelaskan belum ada target", /belum membuat target/i.test(txt(card(d))));
+  ok("2b. empty state: tombol 'Buat Target Pertama' -> goals.html", (() => { const a = card(d).querySelector("a.goals-card-cta"); return a && txt(a) === "Buat Target Pertama" && a.getAttribute("href") === "goals.html"; })());
+  ok("2c. empty state: link 'Lihat Semua Target' disembunyikan (tanpa link duplikat)", link(d).hidden === true && d.querySelectorAll('.goals-dashboard a[href="goals.html"]:not([hidden])').length === 1);
+  ok("2d. empty state: tidak ada NaN/undefined/Rp", !/NaN|undefined|Infinity/.test(txt(card(d))));
+  ok("2e. tombol CTA mudah diklik (>= 36px)", card(d).querySelector(".goals-card-cta").getBoundingClientRect().height >= 36);
+
+  /* ===================== 3-6. Data tampil, hitungan, progres, Rupiah ===================== */
+  r = await openWith(SEED()); ({ d, w } = r);
+  const t = txt(card(d));
+  ok("3a. card berisi data saat ada target", items(d).length > 0 && r.errors.length === 0);
+  ok("3b. link 'Lihat Semua Target' tampil -> goals.html", link(d).hidden === false && link(d).getAttribute("href") === "goals.html" && /Lihat Semua Target/.test(txt(link(d))));
+  ok("3c. tidak ada CTA empty state saat ada data (tanpa link duplikat)", card(d).querySelector(".goals-card-cta") === null && d.querySelectorAll('.goals-dashboard a[href="goals.html"]:not([hidden])').length === 1);
+  ok("4a. total target = 5", /5 target/.test(t));
+  ok("4b. aktif = 4, tercapai = 1 (status G-1)", /4 aktif/.test(t) && /1 tercapai/.test(t));
+  ok("5a. progres nominal: total terkumpul Rp21.950.000 / Rp66.000.000", t.includes(rupiah(21950000)) && t.includes(rupiah(66000000)));
+  ok("5b. persen keseluruhan 33,3%", /33,3%/.test(t));
+  ok("5c. bar keseluruhan lebar = persen", Math.abs(parseFloat(card(d).querySelector(".progress-bar--goal > .progress-bar-fill").style.width) - 21950000 / 66000000 * 100) < 0.01);
+  ok("6a. format Rupiah identik dengan formatRupiah()", t.includes(w.formatRupiah(21950000)) && t.includes(w.formatRupiah(66000000)));
+  ok("6b. tidak ada 'Rp-' / NaN / undefined", !/Rp\s?-|NaN|undefined|Infinity/.test(t));
+  ok("6c. persen item tanpa desimal (id-ID)", items(d).every(li => /^\d+%$/.test(txt(li.querySelector(".goals-card-item-pct")))));
+
+  /* ===================== Target paling relevan ===================== */
+  ok("R1. menampilkan 2 target (DASHBOARD_GOAL_LIMIT)", items(d).length === 2);
+  const names = items(d).map(li => txt(li.querySelector(".goals-card-item-name")));
+  ok("R2. urutan mengikuti sortGoals: Terlewat dulu, lalu deadline terdekat", names[0].startsWith("Liburan") && names[1] === "Motor Baru", names.join(" > "));
+  ok("R3. status per item mengikuti G-1 (overdue, urgent)", items(d)[0].dataset.status === "overdue" && items(d)[1].dataset.status === "urgent" && txt(items(d)[0].querySelector(".goals-card-item-status")) === "Terlewat" && txt(items(d)[1].querySelector(".goals-card-item-status")) === "Mendesak");
+  ok("R4. persen item benar (6%, 50%)", txt(items(d)[0].querySelector(".goals-card-item-pct")) === "6%" && txt(items(d)[1].querySelector(".goals-card-item-pct")) === "50%");
+  ok("R5. '+3 target lainnya'", /\+3 target lainnya/.test(t));
+  ok("R6. progressbar item aksesibel", items(d).every(li => li.querySelector('[role="progressbar"][aria-valuenow][aria-label]')));
+  ok("R7. urutan utama halaman goals tidak diubah (sortGoals dipanggil dengan salinan)", /sortGoals\(goals, today\)\.slice\(0, DASHBOARD_GOAL_LIMIT\)/.test(appCode) && JSON.parse(w.localStorage.getItem(GOALS_KEY)).map(g => g.id).join() === "1,2,3,4,5");
+  ok("R8. warna status konsisten dengan goals.html (chip merah untuk Terlewat, kuning untuk Mendesak)", w.getComputedStyle(items(d)[0].querySelector(".goals-card-item-status")).color === "rgb(179, 65, 58)" && w.getComputedStyle(items(d)[1].querySelector(".goals-card-item-status")).color === "rgb(138, 90, 22)");
+
+  /* ===================== 8. Goal selesai tetap dihitung ===================== */
+  r = await openWith([G({ id: 1, saved: 10000000 }), G({ id: 2, name: "Dua", target: 4000000, saved: 4000000 })]); ({ d, w } = r);
+  const t8 = txt(card(d));
+  ok("8a. semua tercapai: 2 target, 0 aktif, 2 tercapai", /2 target/.test(t8) && /0 aktif/.test(t8) && /2 tercapai/.test(t8));
+  ok("8b. total terkumpul menyertakan target selesai (Rp14.000.000 / Rp14.000.000, 100%)", t8.includes(rupiah(14000000) + " / " + rupiah(14000000)) && /100%/.test(t8));
+  ok("8c. bar keseluruhan hijau saat semua tercapai", w.getComputedStyle(card(d).querySelector(".progress-bar--goal > .progress-bar-fill")).backgroundColor === "rgb(20, 83, 45)");
+  ok("8d. item selesai tetap ditampilkan (paling relevan = yang ada)", items(d).length === 2 && items(d).every(li => li.dataset.status === "done"));
+  r = await openWith([G({ id: 1, saved: 12000000 }), G({ id: 2, name: "Dua", target: 4000000, saved: 1000000 })]); ({ d, w } = r);
+  ok("8e. kelebihan tabungan tidak membuat persen > 100 (13jt/14jt = 92,9%)", /92,9%/.test(txt(card(d))) && parseFloat(card(d).querySelector(".progress-bar--goal > .progress-bar-fill").style.width) <= 100);
+  ok("8f. aktif dulu, selesai belakangan", items(d)[0].dataset.status !== "done" && items(d)[1].dataset.status === "done");
+
+  /* ===================== 9. Data korup / format lama ===================== */
+  r = await openWith("{rusak"); ({ d, w } = r);
+  ok("9a. JSON korup -> dashboard tetap render, empty state, 0 error", r.errors.length === 0 && card(d).querySelector(".goals-card-cta") !== null && txt($(d, "balance-value")).length > 0);
+  ok("9b. JSON korup tidak ditimpa", w.localStorage.getItem(GOALS_KEY) === "{rusak");
+  r = await openWith({ bukan: "array" }); ({ d, w } = r);
+  ok("9c. root objek -> empty state, 0 error", r.errors.length === 0 && card(d).querySelector(".goals-card-cta") !== null);
+  const mixed = [G({ id: 1, name: "Valid" }), null, "x", G({ id: 2, target: 0 }), { id: 9, name: "Tanpa nominal" }, G({ id: 3, name: "Valid B", deadline: "2026-02-30" })];
+  r = await openWith(mixed); ({ d, w } = r);
+  ok("9d. campuran: hanya baris valid dihitung (2 target)", /2 target/.test(txt(card(d))) && items(d).length === 2 && r.errors.length === 0);
+  ok("9e. tanpa NaN/undefined/Infinity", !/NaN|undefined|Infinity/.test(txt(card(d))));
+  ok("9f. data mentah tidak diubah", w.localStorage.getItem(GOALS_KEY) === JSON.stringify(mixed));
+  r = await openWith([G({ name: '<img src=x onerror="top.__x=1">A&"k"' })]); ({ d, w } = r);
+  ok("9g. XSS: nama dirender teks di card dashboard, aria-label di-escape", card(d).querySelector("img") === null && txt(card(d)).includes("<img src=x") && w.top.__x === undefined && card(d).querySelector('[role="progressbar"]').getAttribute("aria-label").includes('A&"k"'));
+
+  /* ===================== 10. Data tidak berubah setelah dashboard dibuka ===================== */
+  {
+    const w0 = frame.contentWindow;
+    w0.localStorage.setItem(GOALS_KEY, JSON.stringify(SEED()));
+    w0.localStorage.setItem("financeData.settings", JSON.stringify({ name: "Tester", hideBalanceOnOpen: false, showCheckin: true }));
+    w0.sessionStorage.setItem("checkinDismissed", "true");
+  }
+  const before = snapAll(frame.contentWindow);
+  r = await load("index.html"); ({ d, w } = r);
+  ok("10a. semua key localStorage identik sebelum & sesudah dashboard dibuka", snapAll(w) === before);
+  ok("10b. checkinDismissed tidak disentuh", w.sessionStorage.getItem("checkinDismissed") === "true");
+  ok("10c. renderGoalsDashboard tidak memanggil saveGoals / tidak memutasi goals (sumber)", (() => { const src = /function renderGoalsDashboard[\s\S]*?\n\}/.exec(appCode)[0]; return !/saveGoals|goals\.(push|unshift|splice|sort)\(|\.goals\s*=/.test(src); })());
+  ok("10d. tidak ada key baru", (() => { const keys = []; for (let i = 0; i < w.localStorage.length; i++) keys.push(w.localStorage.key(i)); return keys.every(k => ALL_KEYS.includes(k)); })());
+
+  /* ===================== 7. Tombol menuju goals.html bekerja ===================== */
+  link(d).click(); await wait(600);
+  ok("7a. klik 'Lihat Semua Target' berpindah ke goals.html", /goals\.html$/.test(frame.contentWindow.location.pathname) && frame.contentDocument.body.dataset.page === "goals");
+  ok("7b. goals.html menampilkan 5 target yang sama", frame.contentDocument.querySelectorAll("#goal-list .goal-card").length === 5);
+  r = await openWith(null); ({ d, w } = r);
+  card(d).querySelector(".goals-card-cta").click(); await wait(600);
+  ok("7c. klik 'Buat Target Pertama' berpindah ke goals.html", frame.contentDocument.body.dataset.page === "goals" && frame.contentDocument.getElementById("btn-add-goal") !== null);
+  ok("7d. tombol kembali di goals.html mengarah ke index.html", frame.contentDocument.querySelector('.page-header a[href="index.html"]') !== null);
+
+  /* ===================== 11. Fitur dashboard lama tetap bekerja ===================== */
+  r = await openWith(SEED()); ({ d, w } = r);
+  ok("11a. saldo/pemasukan/pengeluaran tetap dirender dari transaksi", txt($(d, "balance-value")).length > 0 && $(d, "income-value") && $(d, "expense-value"));
+  ok("11b. card budget & transaksi terbaru tetap ada", txt($(d, "budget-card")).includes("Rp") && $(d, "transaction-list").children.length > 0);
+  $(d, "btn-toggle-balance").click(); await wait(80);
+  ok("11c. toggle saldo masih bekerja", txt($(d, "balance-value")).includes("Rp") || txt($(d, "balance-value")).includes("•"));
+  const addBtn = d.querySelector('[data-action="add-transaction"]'); addBtn.focus(); addBtn.click(); await wait(100);
+  ok("11d. modal tambah transaksi masih terbuka & fokus masuk", !$(d, "transaction-modal-overlay").hidden && $(d, "transaction-modal-overlay").contains(d.activeElement));
+  d.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); await wait(250);
+  ok("11e. Escape menutup modal transaksi, fokus kembali", $(d, "transaction-modal-overlay").hidden && d.activeElement === addBtn);
+  ok("11f. dropdown notifikasi masih ada", $(d, "btn-notification") !== null && $(d, "notification-panel") !== null);
+  ok("11g. link Budget 'Lihat Detail' masih ada & tidak diduplikasi", d.querySelectorAll('.budget a[href="budget.html"]').length === 1);
+  ok("11h. check-in masih memakai blok goal contoh (G-8 belum)", /demo-tag/.test(appCode) && /financeData\.goal\b/.test((appCode.match(/function renderCheckin\(\)[\s\S]*?\n\}/) || [""])[0]));
+  ok("11i. TEPAT 2 listener keydown global", appJs.split('addEventListener("keydown"').length - 1 === 2);
+  ok("11j. refreshDashboard tidak menyentuh goals (goals tidak dihitung dari transaksi)", !/Goal/.test((appCode.match(/function refreshDashboard\(\)[\s\S]*?\n\}/) || [""])[0]));
+
+  /* ===================== 13. Responsif ===================== */
+  const longSet = [G({ id: 1, name: "x".repeat(40), target: 1234567890, saved: 1234567889, deadline: rel(400) }), G({ id: 2, name: "Liburan Keluarga ke Jepang Musim Semi", target: 99999999, saved: 12345678, deadline: rel(-40) }), G({ id: 3, name: "Tercapai", target: 5000000, saved: 7500000 })];
+  for (const wd of [320, 390, 768, 1280]) {
+    r = await openWith(longSet, wd); ({ d, w } = r);
+    const cw = d.documentElement.clientWidth;
+    let maxRight = 0, who = ""; d.querySelectorAll("body *").forEach(el => { const b = el.getBoundingClientRect(); if (b.right > maxRight) { maxRight = b.right; who = el.className || el.tagName; } });
+    ok(`13. @${wd}: tanpa overflow horizontal`, d.documentElement.scrollWidth <= cw && maxRight <= cw + 0.5, `scrollW=${d.documentElement.scrollWidth} cw=${cw} widest=${who}@${maxRight}`);
+    ok(`13. @${wd}: card tanpa overflow internal`, card(d).scrollWidth <= card(d).clientWidth + 1);
+    ok(`13. @${wd}: nama panjang satu baris (ellipsis)`, items(d).every(li => li.querySelector(".goals-card-item-name").getBoundingClientRect().height < 24));
+    ok(`13. @${wd}: link Lihat Semua Target terlihat & bisa diklik`, link(d).getBoundingClientRect().width > 40 && link(d).getBoundingClientRect().height > 10);
+    ok(`13. @${wd}: 0 error`, r.errors.length === 0);
+    if (wd >= 900) {
+      const gs = d.querySelector(".goals-dashboard").getBoundingClientRect(), tr = d.querySelector(".transactions").getBoundingClientRect(), bd = d.querySelector(".budget").getBoundingClientRect();
+      ok(`13. @${wd}: desktop — card goals di kolom kanan (sejajar Budget), di samping transaksi`, Math.abs(gs.left - bd.left) < 2 && gs.left > tr.left && gs.top >= tr.top - 2);
+    }
+  }
+  r = await openWith(null, 320); ({ d, w } = r);
+  ok("13. @320 empty state tanpa overflow, CTA muat", d.documentElement.scrollWidth <= d.documentElement.clientWidth && card(d).querySelector(".goals-card-cta").getBoundingClientRect().right <= card(d).getBoundingClientRect().right);
+
+  /* ===================== Halaman lain tak tersentuh ===================== */
+  for (const [page, id] of [["transactions.html", "all-transaction-list"], ["analytics.html", "analytics-period-title"], ["budget.html", "budget-card"], ["settings.html", "settings-app-version"], ["goals.html", "goal-list"]]) {
+    const rr = await load(page); await wait(120);
+    ok(`X. ${page}: elemen kunci ada, 0 error, tanpa #goals-card`, rr.d.getElementById(id) !== null && rr.errors.length === 0 && rr.d.getElementById("goals-card") === null, rr.errors.join(" | "));
+  }
+  ok("X. settings.html belum menyebut goals (G-5 belum)", !/goals\.html/.test(await (await fetch(BASE + "settings.html")).text()));
+  ok("X. CSS grid desktop punya area 'goals' & area lama utuh", /"transactions goals"/.test(css) && /"quick        budget"/.test(css) && /\.goals-dashboard \{ grid-area: goals;/.test(css));
+
+  try { frame.contentWindow.localStorage.removeItem(GOALS_KEY); frame.contentWindow.localStorage.removeItem("financeData.transactions"); frame.contentWindow.localStorage.removeItem("financeData.settings"); } catch (e) {}
+  const pass = out.filter(l => l.startsWith("PASS")).length, fail = out.filter(l => l.startsWith("FAIL")).length;
+  document.getElementById("r").textContent = out.join("\n") + `\n\n== ${pass} PASS / ${fail} FAIL ==`;
+})().catch(e => { document.getElementById("r").textContent = out.join("\n") + "\nEXCEPTION " + e.message + "\n" + e.stack; });
+</script>

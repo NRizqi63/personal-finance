@@ -1,0 +1,311 @@
+<!doctype html>
+<meta charset="utf-8">
+<pre id="r">running…</pre>
+<script>
+const out = []; const ok = (n, c, x = "") => out.push(`${c ? "PASS" : "FAIL"} ${n}${x ? "  (" + x + ")" : ""}`);
+const wait = (ms) => new Promise(r => setTimeout(r, ms));
+const BASE = new URL("../../frontend/", location.href).href;
+// JS-6: style.css sudah dihapus. Sumber CSS HIDUP untuk pemeriksaan selector = gabungan 7 file split.
+const CSS_SPLIT_FILES = ["base.css", "dashboard.css", "goals.css", "analytics.css", "budget.css", "transactions.css", "settings.css"];
+async function fetchStyleCss(base) { const parts = []; for (const f of CSS_SPLIT_FILES) parts.push(`/* ==== ${f} ==== */\n` + await (await fetch(base + "css/" + f)).text()); return parts.join("\n"); }
+// JS-6: app.js sudah dihapus. Sumber kode HIDUP untuk pemeriksaan regex = gabungan 8 file split (urutan muat).
+const APP_SPLIT_FILES = ["core.js", "transactions-shared.js", "dashboard.js", "goals.js", "analytics.js", "budget.js", "transactions.js", "settings.js"];
+async function fetchAppJs(base) { const parts = []; for (const f of APP_SPLIT_FILES) parts.push(`/* ==== ${f} ==== */\n` + await (await fetch(base + "js/" + f)).text()); return parts.join("\n"); }
+
+const pad = (n) => String(n).padStart(2, "0");
+const iso = (dt) => `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`;
+const today = new Date(); today.setHours(0, 0, 0, 0);
+const rel = (n) => iso(new Date(today.getFullYear(), today.getMonth(), today.getDate() + n));
+const rupiah = (n) => "Rp" + Math.abs(n).toLocaleString("id-ID");
+const GOALS_KEY = "financeData.goals";
+const ALL_KEYS = ["financeData.transactions", "financeData.budget", "financeData.settings", GOALS_KEY];
+const G = (o) => Object.assign({ id: 1, name: "Dana Darurat", target: 10000000, saved: 3200000, deadline: "", createdAt: rel(-10) }, o);
+
+let frame = null;
+async function load(page = "goals.html", width = 390) {
+  if (frame) frame.remove();
+  frame = document.createElement("iframe"); frame.width = width; frame.height = 1600; frame.src = BASE + page;
+  document.body.appendChild(frame);
+  await new Promise(r => frame.onload = r); await wait(400);
+  const d = frame.contentDocument, w = frame.contentWindow;
+  const cc = d.getElementById("checkin-close"); const ov = d.getElementById("checkin-overlay");
+  if (cc && ov && !ov.hidden) { cc.click(); await wait(250); }
+  const r = { d, w, errors: [] }; w.addEventListener("error", e => r.errors.push(e.message));
+  return r;
+}
+async function openWith(raw, width = 390) {
+  if (!frame) await load("index.html");
+  const w0 = frame.contentWindow;
+  try { if (raw === null) w0.localStorage.removeItem(GOALS_KEY); else w0.localStorage.setItem(GOALS_KEY, typeof raw === "string" ? raw : JSON.stringify(raw)); } catch (e) {}
+  return load("goals.html", width);
+}
+const txt = (el) => (el ? el.textContent.replace(/\s+/g, " ").trim() : "");
+const snapAll = (w) => JSON.stringify(ALL_KEYS.map(k => w.localStorage.getItem(k)));
+const stored = (w) => JSON.parse(w.localStorage.getItem(GOALS_KEY) || "[]");
+const cards = (d) => [...d.querySelectorAll("#goal-list .goal-card")];
+const $ = (d, id) => d.getElementById(id);
+const overlay = (d) => $(d, "goal-modal-overlay");
+const isOpen = (d) => !overlay(d).hidden;
+// Buka modal seperti user: fokus dulu ke tombol (click() programatik tidak memindahkan fokus), lalu klik.
+async function openModal(d) { const b = $(d, "btn-add-goal"); b.focus(); b.click(); await wait(80); }
+function type(d, id, value) { const f = $(d, id); f.value = value; f.dispatchEvent(new Event("input", { bubbles: true })); f.dispatchEvent(new Event("change", { bubbles: true })); }
+async function fill(d, { name, target, saved, deadline }) {
+  if (name !== undefined) type(d, "field-goal-name", name);
+  if (target !== undefined) type(d, "field-goal-target", target);
+  if (saved !== undefined) type(d, "field-goal-saved", saved);
+  if (deadline !== undefined) type(d, "field-goal-deadline", deadline);
+}
+async function submit(d) { $(d, "goal-form").requestSubmit(); await wait(80); }
+const invalidField = (d) => [...$(d, "goal-form").querySelectorAll("input")].find(f => !f.checkValidity());
+const msgOf = (d, id) => $(d, id).validationMessage;
+const key = (d, k, extra = {}) => d.dispatchEvent(new KeyboardEvent("keydown", Object.assign({ key: k, bubbles: true, cancelable: true }, extra)));
+
+(async () => {
+  const appJs = await fetchAppJs(BASE);
+  const html = await (await fetch(BASE + "goals.html")).text();
+  let r = await load("index.html"); try { r.w.localStorage.clear(); r.w.sessionStorage.clear(); } catch (e) {}
+
+  /* ===================== 1. Modal dapat dibuka ===================== */
+  r = await openWith(null); let { d, w } = r;
+  ok("1a. halaman termuat, tombol Tambah Target ada", r.errors.length === 0 && $(d, "btn-add-goal") !== null && txt($(d, "btn-add-goal")).includes("Tambah Target"));
+  ok("1b. modal tersembunyi saat awal", !isOpen(d) && overlay(d).hasAttribute("hidden"));
+  await openModal(d);
+  ok("1c. klik Tambah Target membuka modal", isOpen(d));
+  ok("1d. modal ber-role dialog + aria-modal + judul", overlay(d).querySelector('[role="dialog"][aria-modal="true"]') !== null && txt($(d, "goal-modal-title")).includes("Tambah Target"));
+  ok("1e. form berisi 4 field yang diminta", ["field-goal-name", "field-goal-target", "field-goal-saved", "field-goal-deadline"].every(id => $(d, id) !== null));
+  ok("1f. field nominal memakai inputmode numeric + prefix Rp", $(d, "field-goal-target").inputMode === "numeric" && $(d, "field-goal-saved").inputMode === "numeric" && overlay(d).querySelectorAll(".input-prefix-label").length === 2);
+  ok("1g. deadline memakai input type=date", $(d, "field-goal-deadline").type === "date");
+  ok("1h. tombol submit jelas: 'Simpan Target', primary, enabled", txt($(d, "goal-modal-submit")) === "Simpan Target" && $(d, "goal-modal-submit").classList.contains("btn--primary") && !$(d, "goal-modal-submit").disabled);
+  // Periksa KODE (tanpa komentar) — komentar "bukan alert()" tidak boleh ikut terhitung.
+  const appCode = appJs.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|\s)\/\/.*$/gm, "$1");
+  ok("1i. tidak ada inline onclick / alert / confirm / prompt", !/\son[a-z]+=/i.test(html) && !/\balert\(|\bconfirm\(|\bprompt\(|window\.confirm|window\.prompt/.test(appCode));
+  ok("1j. modal dibuat lewat createModalController (bukan sistem baru)", /function setupGoalEditor[\s\S]*?createModalController\(overlay/.test(appJs));
+  ok("1k. TEPAT 2 listener keydown global (Escape & Tab tidak ditambah listener baru)", appJs.split('addEventListener("keydown"').length - 1 === 2);
+
+  /* ===================== 2. Fokus awal ===================== */
+  ok("2a. fokus awal masuk ke dalam modal", overlay(d).contains(d.activeElement));
+  ok("2b. fokus awal = tombol tutup (konvensi UX-2: bukan field, agar keyboard HP tidak muncul sendiri)", d.activeElement === overlay(d).querySelector(".modal-close"));
+  ok("2c. field pertama (nama) adalah elemen fokus berikutnya via Tab (urutan DOM)", (() => { const f = [...overlay(d).querySelectorAll("button, input")].filter(el => !el.disabled && el.getClientRects().length); return f[0] === overlay(d).querySelector(".modal-close") && f[1] === $(d, "field-goal-name"); })());
+
+  /* ===================== 3. Escape menutup ===================== */
+  key(d, "Escape");
+  await wait(250);
+  ok("3a. Escape menutup modal", !isOpen(d));
+  ok("3b. modal benar-benar hidden setelah animasi", overlay(d).hidden === true);
+
+  /* ===================== 4. Focus restore ===================== */
+  ok("4a. fokus kembali ke tombol Tambah Target", d.activeElement === $(d, "btn-add-goal"), d.activeElement && (d.activeElement.id || d.activeElement.tagName));
+  await openModal(d); overlay(d).querySelector("[data-modal-close]").click(); await wait(250);
+  ok("4b. tutup via tombol X -> fokus kembali ke pemicu", d.activeElement === $(d, "btn-add-goal"));
+  await openModal(d); overlay(d).querySelectorAll("[data-modal-close]")[1].click(); await wait(250);
+  ok("4c. tutup via Batal -> fokus kembali ke pemicu", d.activeElement === $(d, "btn-add-goal"));
+  await openModal(d); overlay(d).dispatchEvent(new MouseEvent("click", { bubbles: true })); await wait(250);
+  ok("4d. klik area gelap overlay menutup modal (pola app) + fokus kembali", !isOpen(d) && d.activeElement === $(d, "btn-add-goal"));
+
+  /* ===================== 5. Tab trap ===================== */
+  await openModal(d);
+  const focusables = () => [...overlay(d).querySelectorAll("button:not([disabled]), input:not([disabled])")].filter(el => !el.hidden && el.getClientRects().length > 0);
+  focusables()[focusables().length - 1].focus();
+  const evTab = new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true }); d.dispatchEvent(evTab);
+  ok("5a. Tab dari elemen terakhir berputar ke elemen pertama", d.activeElement === focusables()[0] && evTab.defaultPrevented);
+  focusables()[0].focus();
+  const evShift = new KeyboardEvent("keydown", { key: "Tab", shiftKey: true, bubbles: true, cancelable: true }); d.dispatchEvent(evShift);
+  ok("5b. Shift+Tab dari elemen pertama berputar ke elemen terakhir", d.activeElement === focusables()[focusables().length - 1] && evShift.defaultPrevented);
+  $(d, "btn-add-goal").focus(); // fokus "lolos" ke luar modal
+  const evOut = new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true }); d.dispatchEvent(evOut);
+  ok("5c. fokus di luar modal ditarik kembali ke dalam", overlay(d).contains(d.activeElement) && evOut.defaultPrevented);
+
+  /* ===================== 6. Scroll lock ===================== */
+  ok("6a. body terkunci saat modal terbuka", d.body.classList.contains("is-modal-open"));
+  key(d, "Escape"); await wait(250);
+  ok("6b. body dilepas saat modal ditutup", !d.body.classList.contains("is-modal-open"));
+  ok("6c. CSS is-modal-open memang mengunci scroll", (await fetchStyleCss(BASE)).includes("is-modal-open"));
+
+  /* ===================== 7-14. Validasi ===================== */
+  const oldSnap = () => snapAll(w);
+  // Data awal: satu target supaya "data lama tetap utuh" bisa diuji.
+  r = await openWith([G({ id: 7, name: "Lama" })]); ({ d, w } = r);
+  const before = oldSnap();
+  const tryInvalid = async (label, values, fieldId, msgPart) => {
+    await openModal(d);
+    await fill(d, Object.assign({ name: "Valid", target: "1000000", saved: "", deadline: "" }, values));
+    await submit(d);
+    const f = invalidField(d);
+    ok(`${label}: submit ditolak, field ${fieldId} ditandai`, isOpen(d) && f && f.id === fieldId, f ? f.id + ": " + f.validationMessage : "tidak ada field invalid");
+    ok(`${label}: pesan error dekat field & spesifik`, msgOf(d, fieldId).includes(msgPart), msgOf(d, fieldId));
+    ok(`${label}: storage TIDAK berubah`, oldSnap() === before);
+    ok(`${label}: daftar TIDAK bertambah`, w.sortGoals().length === 1 && cards(d).length === 1);
+    key(d, "Escape"); await wait(250);
+  };
+  await tryInvalid("7. nama kosong", { name: "" }, "field-goal-name", "Isi nama target");
+  await tryInvalid("7b. nama hanya spasi", { name: "    " }, "field-goal-name", "Isi nama target");
+  await tryInvalid("8. nama 41 karakter", { name: "x".repeat(41) }, "field-goal-name", "maksimal 40");
+  ok("8b. maxlength=40 di input nama (mencegah pengetikan berlebih)", $(d, "field-goal-name").maxLength === 40);
+  await tryInvalid("9. nominal target kosong", { target: "" }, "field-goal-target", "Isi nominal target");
+  await tryInvalid("10a. nominal target 0", { target: "0" }, "field-goal-target", "lebih dari 0");
+  // Nilai dengan minus/huruf tidak bisa diketik (formatter live), jadi di-set langsung tanpa event input.
+  const setRaw = (id, v) => { $(d, id).value = v; };
+  await openModal(d); await fill(d, { name: "Valid", target: "1000", saved: "", deadline: "" }); setRaw("field-goal-target", "-500000"); await submit(d);
+  ok("10b. nominal target negatif ditolak", isOpen(d) && invalidField(d) && invalidField(d).id === "field-goal-target" && /minus/.test(msgOf(d, "field-goal-target")), msgOf(d, "field-goal-target"));
+  ok("10b. storage tidak berubah", oldSnap() === before); key(d, "Escape"); await wait(250);
+  await openWith([G({ id: 7, name: "Lama" })]).then(x => ({ d, w } = x));
+  await openModal(d); await fill(d, { name: "Valid", target: "1000", saved: "", deadline: "" }); setRaw("field-goal-target", "abc"); await submit(d);
+  ok("10c. nominal target huruf ditolak", isOpen(d) && invalidField(d) && invalidField(d).id === "field-goal-target");
+  key(d, "Escape"); await wait(250);
+  await openModal(d); await fill(d, { name: "Valid", target: "1000", saved: "", deadline: "" }); setRaw("field-goal-target", "1e309"); await submit(d);
+  ok("10d. '1e309' (Infinity) ditolak", isOpen(d) && invalidField(d) && invalidField(d).id === "field-goal-target");
+  key(d, "Escape"); await wait(250);
+  await openModal(d); await fill(d, { name: "Valid", target: "1000", saved: "", deadline: "" }); setRaw("field-goal-target", "NaN"); await submit(d);
+  ok("10e. 'NaN' ditolak", isOpen(d) && invalidField(d) && invalidField(d).id === "field-goal-target");
+  key(d, "Escape"); await wait(250);
+  ok("10f. semua penolakan di atas: storage tetap sama", oldSnap() === before && w.sortGoals().length === 1);
+
+  // 11. terkumpul kosong / nol -> valid (saved = 0)
+  await openModal(d); await fill(d, { name: "Kosong Terkumpul", target: "500000", saved: "", deadline: "" }); await submit(d); await wait(250);
+  ok("11a. terkumpul kosong -> diterima sebagai 0", !isOpen(d) && stored(w).some(g => g.name === "Kosong Terkumpul" && g.saved === 0));
+  await openModal(d); await fill(d, { name: "Nol Terkumpul", target: "500000", saved: "0", deadline: "" }); await submit(d); await wait(250);
+  ok("11b. terkumpul '0' -> diterima sebagai 0", !isOpen(d) && stored(w).some(g => g.name === "Nol Terkumpul" && g.saved === 0));
+  ok("11c. card baru menampilkan 0% & Rp0", cards(d).some(c => txt(c).includes("Nol Terkumpul") && txt(c).includes("0%") && txt(c).includes("Terkumpul: Rp0")));
+
+  // 12. terkumpul negatif
+  r = await openWith([G({ id: 7, name: "Lama" })]); ({ d, w } = r); const before2 = oldSnap();
+  await openModal(d); await fill(d, { name: "Valid", target: "1000000", saved: "", deadline: "" }); setRaw("field-goal-saved", "-100"); await submit(d);
+  ok("12a. terkumpul negatif ditolak di field terkumpul", isOpen(d) && invalidField(d) && invalidField(d).id === "field-goal-saved" && /minus/.test(msgOf(d, "field-goal-saved")), msgOf(d, "field-goal-saved"));
+  ok("12b. storage tidak berubah", oldSnap() === before2);
+  key(d, "Escape"); await wait(250);
+
+  // 13. terkumpul > target -> DITERIMA (aturan resmi G-1: normalizeGoal C9), tampil Tercapai
+  await openModal(d); await fill(d, { name: "Lebih", target: "1000000", saved: "1250000", deadline: "" }); await submit(d); await wait(250);
+  const lebih = stored(w).find(g => g.name === "Lebih");
+  ok("13a. terkumpul > target diterima (aturan G-1 mengizinkan)", !isOpen(d) && !!lebih && lebih.saved === 1250000 && lebih.target === 1000000);
+  ok("13b. card menampilkan Tercapai · lebih Rp250.000 & 100%", cards(d).some(c => txt(c).includes("Lebih") && txt(c).includes("Tercapai") && txt(c).includes("lebih " + rupiah(250000)) && txt(c).includes("100%")));
+  ok("13c. feedback menyebut sudah tercapai", txt($(d, "goals-feedback")).includes("tercapai"));
+
+  // 14. deadline invalid
+  r = await openWith([G({ id: 7, name: "Lama" })]); ({ d, w } = r); const before3 = oldSnap();
+  // <input type="date"> MENYANITASI nilai tidak valid yang di-set lewat .value
+  // menjadi "" (ketikan user yang bukan tanggal justru memicu validity.badInput,
+  // yang sudah ditangani kode). Untuk menguji penjaga JS-nya (isValidIsoDate),
+  // tipe input diubah ke text HANYA di dalam test ini.
+  await openModal(d); await fill(d, { name: "Valid", target: "1000000", saved: "", deadline: "" });
+  $(d, "field-goal-deadline").type = "text"; setRaw("field-goal-deadline", "2026-02-30"); await submit(d);
+  ok("14a. deadline '2026-02-30' (tanggal tidak ada) ditolak oleh penjaga JS", isOpen(d) && invalidField(d) && invalidField(d).id === "field-goal-deadline" && /tidak valid/.test(msgOf(d, "field-goal-deadline")), invalidField(d) ? invalidField(d).id + ": " + invalidField(d).validationMessage : "-");
+  ok("14a. storage tidak berubah", oldSnap() === before3);
+  key(d, "Escape"); await wait(250);
+  await openModal(d); await fill(d, { name: "Valid", target: "1000000", saved: "", deadline: "" });
+  $(d, "field-goal-deadline").type = "text"; setRaw("field-goal-deadline", "31/12/2026"); await submit(d);
+  ok("14b. deadline format salah (31/12/2026) ditolak oleh penjaga JS", isOpen(d) && invalidField(d) && invalidField(d).id === "field-goal-deadline");
+  ok("14b. storage tidak berubah", oldSnap() === before3);
+  key(d, "Escape"); await wait(250);
+  $(d, "field-goal-deadline").type = "date";
+  ok("14b2. kode menangani validity.badInput (ketikan bukan tanggal pada input date)", /fieldDeadline\.validity\.badInput/.test(appJs));
+  ok("14b3. input date native menyanitasi nilai invalid programatik menjadi \"\" (perilaku browser, bukan kode app)", (() => { const f = $(d, "field-goal-deadline"); f.value = "2026-02-30"; const v = f.value; f.value = ""; return v === ""; })());
+  r = await openWith([G({ id: 7, name: "Lama" })]); ({ d, w } = r);
+  await openModal(d); await fill(d, { name: "Lampau", target: "1000000", saved: "", deadline: rel(-3) }); await submit(d); await wait(250);
+  ok("14c. deadline lampau DITERIMA (aturan G-1) -> status Terlewat", !isOpen(d) && stored(w).some(g => g.name === "Lampau" && g.deadline === rel(-3)) && cards(d).some(c => txt(c).includes("Lampau") && txt(c).includes("Terlewat")));
+  await openModal(d); await fill(d, { name: "Kosong Deadline", target: "1000000", saved: "", deadline: "" }); await submit(d); await wait(250);
+  ok("14d. deadline kosong DITERIMA -> disimpan sebagai \"\"", stored(w).some(g => g.name === "Kosong Deadline" && g.deadline === ""));
+  ok("14e. deadline disimpan apa adanya (yyyy-mm-dd lokal, tidak bergeser)", stored(w).find(g => g.name === "Lampau").deadline === rel(-3) && !/toISOString/.test(/function setupGoalEditor[\s\S]*?\n\}/.exec(appJs)[0]));
+
+  /* ===================== 15-17. Submit valid ===================== */
+  r = await openWith([G({ id: 3, name: "Lama A", saved: 100 }), G({ id: 9, name: "Lama B", saved: 200 })]); ({ d, w } = r);
+  const oldRaw = w.localStorage.getItem(GOALS_KEY);
+  await openModal(d);
+  await fill(d, { name: "  Beli Laptop  ", target: "8000000", saved: "1.500.000", deadline: rel(120) });
+  ok("15a. nominal diformat live saat diketik", $(d, "field-goal-target").value === "8.000.000" && $(d, "field-goal-saved").value === "1.500.000");
+  await submit(d); await wait(250);
+  const all = stored(w); const baru = all.find(g => g.name === "Beli Laptop");
+  ok("15b. submit valid menyimpan TEPAT satu target baru", all.length === 3 && !!baru);
+  ok("15c. nama di-trim", baru.name === "Beli Laptop");
+  ok("15d. nominal disimpan sebagai number", typeof baru.target === "number" && typeof baru.saved === "number" && baru.target === 8000000 && baru.saved === 1500000);
+  ok("15e. deadline & createdAt = tanggal lokal hari ini", baru.deadline === rel(120) && baru.createdAt === rel(0));
+  ok("15f. hanya 6 field, tanpa turunan (progress/status/sisa/hari)", Object.keys(baru).sort().join(",") === "createdAt,deadline,id,name,saved,target", Object.keys(baru).join(","));
+  ok("15g. target baru di posisi pertama array (terbaru di atas)", all[0].name === "Beli Laptop");
+  ok("15h. modal tertutup setelah sukses", !isOpen(d));
+  ok("16a. ID unik & = max(id)+1", baru.id === 10 && new Set(all.map(g => g.id)).size === 3);
+  ok("17a. dua target lama tetap utuh (byte-per-byte)", JSON.stringify(all.slice(1)) === oldRaw);
+  ok("17b. key lama (transaksi/budget/settings) tidak tersentuh", (() => { const s = JSON.parse(snapAll(w)); return s[0] === null && s[1] === null && s[2] === null; })());
+  ok("17c. checkinDismissed tidak disentuh", !/checkinDismissed/.test(/function setupGoalEditor[\s\S]*?\n\}/.exec(appJs)[0]));
+  // ID unik walau storage punya id acak/duplikat
+  r = await openWith([G({ id: 5 }), G({ id: 5, name: "Dup" }), G({ id: 2, name: "Dua" })]); ({ d, w } = r);
+  await openModal(d); await fill(d, { name: "Baru", target: "100", saved: "", deadline: "" }); await submit(d); await wait(250);
+  ok("16b. setelah load dengan id duplikat, id baru tetap unik", new Set(stored(w).map(g => g.id)).size === stored(w).length && stored(w).length === 4, JSON.stringify(stored(w).map(g => g.id)));
+
+  /* ===================== 18. Validasi gagal tidak mengubah storage (sudah di 7-14) + save gagal ===================== */
+  r = await openWith([G({ id: 1, name: "Lama" })]); ({ d, w } = r);
+  const beforeFail = snapAll(w);
+  w.localStorage.setItem = () => { throw new Error("QuotaExceeded (simulasi)"); };
+  await openModal(d); await fill(d, { name: "Gagal Simpan", target: "100000", saved: "", deadline: "" }); await submit(d); await wait(120);
+  ok("18a. simpan gagal -> modal tetap terbuka, isian tidak hilang", isOpen(d) && $(d, "field-goal-name").value === "Gagal Simpan");
+  ok("18b. simpan gagal -> feedback error DI DALAM modal", !$(d, "goal-modal-status").hidden && $(d, "goal-modal-status").dataset.type === "error" && /tidak bisa disimpan/.test(txt($(d, "goal-modal-status"))));
+  ok("18c. simpan gagal -> daftar di memori TIDAK bertambah (rollback)", w.sortGoals().length === 1 && cards(d).length === 1);
+  ok("18d. simpan gagal -> tombol submit aktif lagi", !$(d, "goal-modal-submit").disabled);
+  delete w.localStorage.setItem; // lepas stub (metode kembali ke prototype Storage)
+  ok("18e. storage tidak berubah selama kegagalan", snapAll(w) === beforeFail);
+  await submit(d); await wait(250);
+  ok("18f. coba lagi setelah storage pulih -> tersimpan", !isOpen(d) && stored(w).some(g => g.name === "Gagal Simpan"));
+  ok("18g. tidak ada error runtime sepanjang skenario gagal", r.errors.length === 0, r.errors.join(" | "));
+
+  /* ===================== 19. Feedback ===================== */
+  ok("19a. feedback sukses tampil di halaman, role=status", !$(d, "goals-feedback").hidden && $(d, "goals-feedback").dataset.type === "success" && $(d, "goals-feedback").getAttribute("role") === "status" && txt($(d, "goals-feedback")).includes("Gagal Simpan"));
+  await wait(3200);
+  ok("19b. feedback sukses hilang sendiri (~3 detik)", $(d, "goals-feedback").hidden);
+  await openModal(d);
+  ok("19c. status error di modal dibersihkan saat dibuka lagi", $(d, "goal-modal-status").hidden && $(d, "field-goal-name").value === "");
+  key(d, "Escape"); await wait(250);
+
+  /* ===================== 20. Daftar & summary refresh ===================== */
+  r = await openWith([G({ id: 1, name: "Lama", target: 1000000, saved: 250000 })]); ({ d, w } = r);
+  const sumBefore = txt($(d, "goals-summary"));
+  await openModal(d); await fill(d, { name: "Tambahan", target: "2000000", saved: "500000", deadline: rel(10) }); await submit(d); await wait(250);
+  ok("20a. daftar bertambah tanpa reload", cards(d).length === 2 && cards(d).some(c => txt(c).includes("Tambahan")));
+  ok("20b. target baru ditampilkan benar (25%, sisa, Mendesak)", (() => { const c = cards(d).find(x => txt(x).includes("Tambahan")); return txt(c).includes("25%") && txt(c).includes("Sisa " + rupiah(1500000)) && txt(c).includes("Mendesak"); })());
+  ok("20c. summary ikut diperbarui", txt($(d, "goals-summary")) !== sumBefore && txt($(d, "goals-summary")).includes(rupiah(750000)) && txt($(d, "goals-summary")).includes(rupiah(3000000)) && /Target Aktif 2/.test(txt($(d, "goals-summary"))));
+  ok("20d. sub-judul '2 target'", txt($(d, "goals-count-sub")) === "2 target");
+  ok("20e. urutan mengikuti sortGoals (deadline dekat di atas)", txt(cards(d)[0]).includes("Tambahan"));
+  r = await openWith(null); ({ d, w } = r);
+  await openModal(d); await fill(d, { name: "Pertama", target: "100000", saved: "", deadline: "" }); await submit(d); await wait(250);
+  ok("20f. dari kosong: empty state hilang, summary muncul, hint tampil", !d.querySelector(".goal-empty") && !$(d, "goals-summary-section").hidden && !$(d, "goals-hint").hidden && cards(d).length === 1);
+  ok("20g. form direset untuk pembukaan berikutnya", (() => { $(d, "btn-add-goal").focus(); $(d, "btn-add-goal").click(); const empty = ["field-goal-name", "field-goal-target", "field-goal-saved", "field-goal-deadline"].every(id => $(d, id).value === ""); return empty; })());
+  key(d, "Escape"); await wait(250);
+
+  /* ===================== 21. XSS ===================== */
+  r = await openWith(null); ({ d, w } = r);
+  const XSS = '<img src=x onerror="top.__x=1">A&"k"';
+  await openModal(d); await fill(d, { name: XSS, target: "100000", saved: "", deadline: "" }); await submit(d); await wait(250);
+  ok("21a. nama berisi markup disimpan apa adanya sebagai teks", stored(w)[0].name === XSS);
+  ok("21b. dirender sebagai teks: tidak ada <img>, handler tidak jalan", cards(d)[0].querySelector("img") === null && txt(cards(d)[0]).includes("<img src=x") && w.top.__x === undefined);
+  ok("21c. feedback sukses juga tidak menyuntik markup (textContent)", $(d, "goals-feedback").querySelector("img") === null && /textContent/.test(/function showGoalsFeedback[\s\S]*?\n\}/.exec(appJs)[0]));
+  ok("21d. aria-label di-escape", cards(d)[0].querySelector('[role="progressbar"]').getAttribute("aria-label").includes('A&"k"'));
+
+  /* ===================== Batas 50 target ===================== */
+  r = await openWith(Array.from({ length: 50 }, (_, i) => G({ id: i + 1, name: `T${i + 1}` }))); ({ d, w } = r);
+  const before50 = snapAll(w);
+  await openModal(d); await fill(d, { name: "Ke-51", target: "100000", saved: "", deadline: "" }); await submit(d); await wait(120);
+  ok("L1. target ke-51 ditolak dengan pesan di modal", isOpen(d) && /50/.test(txt($(d, "goal-modal-status"))) && snapAll(w) === before50 && w.sortGoals().length === 50);
+  key(d, "Escape"); await wait(250);
+
+  /* ===================== 22. Halaman lama & responsif ===================== */
+  const PAGES = [["index.html", "balance-value"], ["transactions.html", "all-transaction-list"], ["analytics.html", "analytics-period-title"], ["budget.html", "budget-card"], ["settings.html", "settings-app-version"]];
+  for (const [page, id] of PAGES) {
+    const rr = await load(page); await wait(120);
+    ok(`22. ${page}: elemen kunci ada, 0 error, tanpa modal target`, rr.d.getElementById(id) !== null && rr.errors.length === 0 && rr.d.getElementById("goal-modal-overlay") === null, rr.errors.join(" | "));
+  }
+  ok("22x. index.html menautkan goals.html (G-4 ada); settings belum (G-5 belum)", /href="goals\.html"/.test(await (await fetch(BASE + "index.html")).text()) && !/goals\.html/.test(await (await fetch(BASE + "settings.html")).text()));
+  // G-3B sudah ada: edit/hapus per card + konfirmasi. Yang belum boleh: integrasi dashboard (dicek 22x).
+  ok("22y. G-3B ada: konfirmasi hapus di goals.html & delegasi edit/hapus di kode", /goal-confirm-overlay/.test(html) && /data-action="edit-goal"/.test(appCode) && /data-action="delete-goal"/.test(appCode));
+  for (const wd of [320, 375, 768, 1280]) {
+    r = await openWith([G({ deadline: rel(3) })], wd); ({ d, w } = r);
+    await openModal(d); await fill(d, { name: "x".repeat(40), target: "1234567890", saved: "1234567", deadline: "" });
+    const box = overlay(d).querySelector(".modal").getBoundingClientRect();
+    ok(`R. @${wd}: modal muat di viewport, tanpa overflow`, box.right <= d.documentElement.clientWidth + 0.5 && box.left >= -0.5 && d.documentElement.scrollWidth <= d.documentElement.clientWidth && overlay(d).querySelector(".modal").scrollWidth <= overlay(d).querySelector(".modal").clientWidth + 1, `right=${box.right} cw=${d.documentElement.clientWidth}`);
+    ok(`R. @${wd}: tombol submit & tutup >= 36px`, $(d, "goal-modal-submit").getBoundingClientRect().height >= 36 && overlay(d).querySelector(".modal-close").getBoundingClientRect().height >= 30);
+    ok(`R. @${wd}: tombol Tambah Target >= 44px tinggi & lebar penuh`, (() => { key(d, "Escape"); const b = $(d, "btn-add-goal").getBoundingClientRect(); return b.height >= 44 && b.width >= 200; })());
+    await wait(200);
+  }
+
+  try { w.localStorage.removeItem(GOALS_KEY); } catch (e) {}
+  const pass = out.filter(l => l.startsWith("PASS")).length, fail = out.filter(l => l.startsWith("FAIL")).length;
+  document.getElementById("r").textContent = out.join("\n") + `\n\n== ${pass} PASS / ${fail} FAIL ==`;
+})().catch(e => { document.getElementById("r").textContent = out.join("\n") + "\nEXCEPTION " + e.message + "\n" + e.stack; });
+</script>

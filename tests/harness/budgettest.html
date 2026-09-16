@@ -1,0 +1,172 @@
+<!doctype html>
+<meta charset="utf-8">
+<pre id="r">running…</pre>
+<script>
+const out = []; const ok = (n, c, x = "") => out.push(`${c ? "PASS" : "FAIL"} ${n}${x ? "  (" + x + ")" : ""}`);
+const wait = (ms) => new Promise(r => setTimeout(r, ms));
+const LEGACY_SEED = JSON.stringify([
+  { id: 1, title: "Makan Siang", category: "makanan", type: "expense", amount: 25000, isoDate: "2026-09-09", time: "Hari ini, 12:30" },
+  { id: 2, title: "Bensin Motor", category: "bensin", type: "expense", amount: 30000, isoDate: "2026-09-09", time: "Hari ini, 09:15" },
+  { id: 3, title: "Gaji Bulanan", category: "lainnya", type: "income", amount: 5000000, isoDate: "2026-09-01", time: "1 Sep, 08:00" },
+]); // aplikasi tidak lagi punya transaksi contoh -> test menyemai datanya sendiri
+const confirmDelete = async (d, w) => { const btn = d.getElementById("confirm-delete"); if (btn && !d.getElementById("confirm-modal-overlay").hidden) { btn.click(); await new Promise(r => setTimeout(r, 260)); } };
+
+const BASE = new URL("../../frontend/", location.href).href;
+let frame = null;
+async function load(page, width = 390) {
+  if (frame) frame.remove();
+  frame = document.createElement("iframe"); frame.width = width; frame.height = 1200; frame.src = BASE + page;
+  document.body.appendChild(frame);
+  await new Promise(r => frame.onload = r); await wait(350);
+  const d = frame.contentDocument, w = frame.contentWindow;
+  const cc = d.getElementById("checkin-close"); if (cc) { cc.click(); await wait(300); }
+  return { d, w };
+}
+const rp = (n) => "Rp" + n.toLocaleString("id-ID");
+const typeInto = (el, v) => { el.value = v; el.dispatchEvent(new Event("input", { bubbles: true })); };
+
+(async () => {
+  let { d, w } = await load("budget.html");
+  try { w.localStorage.clear(); w.localStorage.setItem("financeData.transactions", LEGACY_SEED); } catch (e) {}
+  ({ d, w } = await load("budget.html"));
+
+  // ---- baseline ----
+  ok("edit button beside 'Budget Bulan Ini' heading", !!d.getElementById("btn-edit-budget") && d.getElementById("btn-edit-budget").closest(".section-header-row") !== null);
+  ok("budget card shows default monthly budget Rp2.400.000", /Rp2\.400\.000/.test(d.getElementById("budget-card").textContent));
+  ok("every category card has an Edit button aligned in the head row", [...d.querySelectorAll("#category-list .category-card")].every(c => c.querySelector('.category-card-head [data-action="edit-category"]')));
+  ok("category cards show emoji identity", [...d.querySelectorAll("#category-list .category-card")].every(c => c.querySelector(".category-emoji").textContent.trim().length > 0));
+  ok("'+ Tambah Kategori' action present below the list", !!d.getElementById("btn-add-category") && d.getElementById("btn-add-category").previousElementSibling.id === "category-list");
+  ok("no warning note when category total (2.4jt) <= monthly (2.4jt)", d.getElementById("budget-note").hidden);
+
+  // ---- 1-4. edit monthly budget, refresh ----
+  d.getElementById("btn-edit-budget").click(); await wait(400);
+  const bo = d.getElementById("budget-modal-overlay");
+  ok("budget popup opens (custom modal, not prompt)", !bo.hidden);
+  ok("budget popup: personal wording + Rp input", /Berapa budget yang ingin kamu gunakan/.test(bo.textContent) && d.getElementById("field-budget-monthly").previousElementSibling.textContent === "Rp");
+  ok("budget popup: input prefilled with current budget", d.getElementById("field-budget-monthly").value === "2.400.000", d.getElementById("field-budget-monthly").value);
+  const chips = [...d.querySelectorAll("#budget-quick-amounts .quick-amount")];
+  ok("budget popup: quick choices incl. 'Total kategori' + 1/2/3 jt, no duplicates", chips.length === 4 && chips[0].textContent.includes("Total kategori") && new Set(chips.map(c => c.dataset.amount)).size === 4, chips.map(c => c.textContent.trim()).join(" | "));
+  ok("budget popup: chip matching current value is active", chips[0].classList.contains("is-active"));
+  chips.find(c => c.dataset.amount === "3000000").click(); await wait(50);
+  ok("quick chip fills the input (formatted)", d.getElementById("field-budget-monthly").value === "3.000.000");
+  typeInto(d.getElementById("field-budget-monthly"), "1800000");
+  ok("typing formats live + deactivates chips", d.getElementById("field-budget-monthly").value === "1.800.000" && !d.querySelector("#budget-quick-amounts .is-active"));
+  d.getElementById("budget-form").requestSubmit(); await wait(400);
+  ok("save closes popup", bo.hidden);
+  ok("budget card updated: Rp55.000 / Rp1.800.000, 3,1%, sisa Rp1.745.000", /Rp55\.000/.test(d.getElementById("budget-card").textContent) && /Rp1\.800\.000/.test(d.getElementById("budget-card").textContent) && /3,1%/.test(d.getElementById("budget-card").textContent) && /Rp1\.745\.000/.test(d.getElementById("budget-card").textContent), d.getElementById("budget-card").textContent.replace(/\s+/g, " ").trim());
+  ok("warning note appears: category total (2.4jt) > monthly (1.8jt), soft wording", !d.getElementById("budget-note").hidden && /melebihi budget bulanan/.test(d.getElementById("budget-note").textContent));
+  let saved = JSON.parse(w.localStorage.getItem("financeData.budget"));
+  ok("localStorage financeData.budget = { monthly, categories }", saved && saved.monthly === 1800000 && saved.categories && saved.categories.makanan && saved.categories.makanan.budget === 800000);
+  ({ d, w } = await load("budget.html"));
+  ok("after refresh: monthly budget persists (Rp1.800.000)", /Rp1\.800\.000/.test(d.getElementById("budget-card").textContent));
+
+  // validation: empty budget is rejected
+  d.getElementById("btn-edit-budget").click(); await wait(300);
+  typeInto(d.getElementById("field-budget-monthly"), "");
+  d.getElementById("budget-form").requestSubmit(); await wait(200);
+  ok("validation: empty budget not saved, popup stays open", !d.getElementById("budget-modal-overlay").hidden && JSON.parse(w.localStorage.getItem("financeData.budget")).monthly === 1800000);
+  d.querySelector("#budget-modal-overlay [data-modal-close]").click(); await wait(300);
+
+  // ---- 5-10. edit category: name, emoji, budget; refresh ----
+  d.querySelector('#category-list [data-action="edit-category"][data-key="makanan"]').click(); await wait(400);
+  const co = d.getElementById("category-modal-overlay");
+  ok("category popup opens with emoji title + sub text", !co.hidden && d.getElementById("category-modal-title").textContent === "🍜 Edit Kategori Makanan" && /sesuai kebutuhan kamu/.test(d.getElementById("category-modal-sub").textContent));
+  ok("category popup: fields prefilled", d.getElementById("field-category-name").value === "Makanan" && d.getElementById("field-category-budget").value === "800.000");
+  const opts = [...d.querySelectorAll("#emoji-picker .emoji-option")];
+  ok("emoji picker: choices rendered, current emoji active, 44px tap targets", opts.length >= 12 && opts.find(o => o.classList.contains("is-active")).dataset.emoji === "🍜" && opts.every(o => o.getBoundingClientRect().height >= 43 && o.getBoundingClientRect().width >= 36), `n=${opts.length} w=${opts[0].getBoundingClientRect().width.toFixed(0)} h=${opts[0].getBoundingClientRect().height.toFixed(1)} active=${(opts.find(o => o.classList.contains("is-active"))||{dataset:{}}).dataset.emoji}`);
+  ok("delete action shown as secondary destructive button in edit mode", !d.getElementById("btn-delete-category").hidden && /Hapus Kategori/.test(d.getElementById("btn-delete-category").textContent));
+  typeInto(d.getElementById("field-category-name"), "Makan & Jajan");
+  typeInto(d.getElementById("field-category-budget"), "950000");
+  opts.find(o => o.dataset.emoji === "☕").click(); await wait(50);
+  ok("emoji selection updates active state + title live", d.querySelector("#emoji-picker .is-active").dataset.emoji === "☕" && d.getElementById("category-modal-title").textContent === "☕ Edit Kategori Makan & Jajan");
+  d.getElementById("category-form").requestSubmit(); await wait(400);
+  ok("save closes category popup", co.hidden);
+  const mk = d.querySelector('#category-list .category-card[data-category="makanan"]');
+  ok("card updated: name, emoji, budget, % and sisa recomputed", mk && /Makan & Jajan/.test(mk.textContent) && mk.querySelector(".category-emoji").textContent === "☕" && /Rp950\.000/.test(mk.textContent) && /2,6%/.test(mk.textContent) && /Rp925\.000/.test(mk.textContent), mk && mk.textContent.replace(/\s+/g, " ").trim());
+  ok("key unchanged (transactions still linked): makanan used = Rp25.000", /Terpakai: Rp25\.000/.test(mk.textContent));
+  ({ d, w } = await load("budget.html"));
+  const mk2 = d.querySelector('#category-list .category-card[data-category="makanan"]');
+  ok("after refresh: category name/emoji/budget persist", mk2 && /Makan & Jajan/.test(mk2.textContent) && mk2.querySelector(".category-emoji").textContent === "☕" && /Rp950\.000/.test(mk2.textContent));
+
+  // ---- 11-13. add category, refresh ----
+  d.getElementById("btn-add-category").click(); await wait(400);
+  ok("add popup: title/sub/submit wording for add mode, delete hidden", d.getElementById("category-modal-title").textContent === "➕ Tambah Kategori" && d.getElementById("category-modal-submit").textContent === "Tambah Kategori" && d.getElementById("btn-delete-category").hidden && d.getElementById("field-category-name").value === "");
+  d.getElementById("category-form").requestSubmit(); await wait(200);
+  ok("validation: empty name rejected", !d.getElementById("category-modal-overlay").hidden && !JSON.parse(w.localStorage.getItem("financeData.budget")).categories.kategori);
+  typeInto(d.getElementById("field-category-name"), "Kesehatan");
+  typeInto(d.getElementById("field-category-budget"), "250000");
+  d.querySelector('#emoji-picker [data-emoji="💊"]').click();
+  d.getElementById("category-form").requestSubmit(); await wait(400);
+  const ks = d.querySelector('#category-list .category-card[data-category="kesehatan"]');
+  ok("new category appears immediately with emoji + budget (slug key 'kesehatan')", ks && /💊/.test(ks.textContent) && /Kesehatan/.test(ks.textContent) && /Rp250\.000/.test(ks.textContent) && /Terpakai: Rp0/.test(ks.textContent));
+  ok("category count now 6", d.querySelectorAll("#category-list .category-card").length === 6);
+  ({ d, w } = await load("budget.html"));
+  ok("after refresh: new category persists", !!d.querySelector('#category-list .category-card[data-category="kesehatan"]') && d.querySelectorAll("#category-list .category-card").length === 6);
+  // duplicate name -> unique key
+  d.getElementById("btn-add-category").click(); await wait(300);
+  typeInto(d.getElementById("field-category-name"), "Kesehatan"); typeInto(d.getElementById("field-category-budget"), "100000");
+  d.getElementById("category-form").requestSubmit(); await wait(300);
+  ok("duplicate name gets a unique key (kesehatan-2), no overwrite", !!d.querySelector('[data-category="kesehatan-2"]') && !!d.querySelector('[data-category="kesehatan"]'));
+
+  // ---- transaction form on dashboard offers the new categories ----
+  ({ d, w } = await load("index.html"));
+  d.querySelector('[data-action="add-transaction"]').click(); await wait(300);
+  const optTexts = [...d.querySelectorAll("#field-category option")].map(o => o.textContent);
+  ok("dashboard transaction form lists user categories (+ Lainnya fallback once)", optTexts.some(t => /Kesehatan/.test(t)) && optTexts.some(t => /Makan & Jajan/.test(t)) && optTexts.filter(t => /Lainnya/.test(t)).length === 1, optTexts.join(","));
+  ok("dashboard budget card reads the same saved monthly budget (Rp1.800.000)", /Rp1\.800\.000/.test(d.getElementById("budget-card").textContent));
+  ok("dashboard transaction cards use category emoji (☕ for renamed Makanan)", [...d.querySelectorAll("#transaction-list .transaction-icon")].some(el => el.textContent.trim() === "☕"));
+  ok("dashboard transaction label uses new category name", /Makan & Jajan/.test(d.getElementById("transaction-list").textContent));
+  // check-in uses the same budget
+  try { w.sessionStorage.removeItem("checkinDismissed"); } catch (e) {}
+  ({ d, w } = await load("index.html"));
+  // load() already closed the check-in; re-render its body to inspect
+  w.eval("renderCheckin()");
+  ok("Financial Check-in uses the edited monthly budget", /Rp1\.800\.000/.test(d.getElementById("checkin-body").textContent));
+
+  // ---- 14-15. delete category with existing transactions ----
+  ({ d, w } = await load("budget.html"));
+  const getTx = () => JSON.parse(w.localStorage.getItem("financeData.transactions")) || w.eval("financeData.transactions");
+  const txBefore = getTx();
+  const nBensin = txBefore.filter(t => t.category === "bensin").length;
+  d.querySelector('#category-list [data-action="edit-category"][data-key="bensin"]').click(); await wait(300);
+  d.getElementById("btn-delete-category").click(); await wait(400);
+  const cf = d.getElementById("confirm-modal-overlay");
+  ok("delete asks for confirmation in a custom modal with clear wording", !cf.hidden && /Yakin ingin menghapus kategori Bensin\?/.test(d.getElementById("confirm-title").textContent) && /tidak akan ikut terhapus/.test(d.getElementById("confirm-text").textContent) && new RegExp(`${nBensin} transaksi`).test(d.getElementById("confirm-text").textContent), d.getElementById("confirm-text").textContent);
+  d.querySelector("#confirm-modal-overlay [data-modal-close]").click(); await wait(300);
+  ok("cancel keeps the category", cf.hidden && !!d.querySelector('[data-category="bensin"]'));
+  d.getElementById("btn-delete-category").click(); await wait(300);
+  d.getElementById("confirm-delete").click(); await wait(400);
+  ok("confirm removes category from list + closes both popups", !d.querySelector('[data-category="bensin"]') && cf.hidden && d.getElementById("category-modal-overlay").hidden);
+  const txAfter = getTx();
+  ok("transactions untouched after category delete (same count, keys kept)", txAfter.length === txBefore.length && txAfter.filter(t => t.category === "bensin").length === nBensin);
+  ok("saved budget no longer has 'bensin'", !JSON.parse(w.localStorage.getItem("financeData.budget")).categories.bensin);
+  ({ d, w } = await load("index.html"));
+  const bensinCard = [...d.querySelectorAll("#transaction-list .transaction-item")].find(li => /Bensin Motor/.test(li.textContent));
+  ok("dashboard still shows the old transaction, labelled 'Lainnya' with fallback emoji", !!bensinCard && /Lainnya/.test(bensinCard.querySelector(".transaction-meta").textContent) && bensinCard.querySelector(".transaction-icon").textContent.trim() === "💼");
+  ok("summary/expense still counts the orphaned transaction (Rp55.000 used)", /Rp55\.000/.test(d.getElementById("budget-card").textContent));
+  ({ d, w } = await load("transactions.html"));
+  { // pilih tanggal transaksi "Bensin Motor" di kalender dulu (daftar difilter per tanggal)
+    const bensinTx = getTx().find(t => t.title === "Bensin Motor");
+    const dt = new Date(`${bensinTx.isoDate}T00:00:00`), now = new Date();
+    for (let i = 0; i < 12 && (dt.getFullYear() !== now.getFullYear() || dt.getMonth() !== now.getMonth()); i++) { d.querySelector(dt < now ? '[data-cal-nav="-1"]' : '[data-cal-nav="1"]').click(); now.setMonth(now.getMonth() + (dt < now ? -1 : 1)); await wait(30); }
+    d.querySelector(`.calendar-day[data-date="${bensinTx.isoDate}"]`).click(); await wait(100);
+  }
+  const editBensin = [...d.querySelectorAll('[data-action="edit"]')].find(b => /Bensin Motor/.test(b.getAttribute("aria-label")));
+  editBensin.click(); await wait(300);
+  ok("editing an orphaned transaction falls back to 'Lainnya' in the select", d.getElementById("field-category").value === "lainnya");
+
+  // ---- delete all categories -> empty state, no crash ----
+  ({ d, w } = await load("budget.html"));
+  for (const key of Object.keys(JSON.parse(w.localStorage.getItem("financeData.budget")).categories)) {
+    d.querySelector(`#category-list [data-action="edit-category"][data-key="${key}"]`).click(); await wait(250);
+    d.getElementById("btn-delete-category").click(); await wait(250);
+    d.getElementById("confirm-delete").click(); await wait(300);
+  }
+  ok("all categories deleted -> friendly empty state, budget card still renders", !!d.querySelector("#category-list .category-empty") && /Rp1\.800\.000/.test(d.getElementById("budget-card").textContent));
+  ({ d, w } = await load("index.html"));
+  ok("dashboard survives with zero categories (form still offers Lainnya)", (d.querySelector('[data-action="add-transaction"]').click(), true) && [...d.querySelectorAll("#field-category option")].some(o => o.value === "lainnya"));
+
+  try { w.localStorage.removeItem("financeData.budget"); } catch (e) {}
+  document.getElementById("r").textContent = out.join("\n");
+})().catch(e => { out.push("EXCEPTION " + e.stack); document.getElementById("r").textContent = out.join("\n"); });
+</script>

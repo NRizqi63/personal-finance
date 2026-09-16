@@ -1,0 +1,128 @@
+<!doctype html>
+<meta charset="utf-8">
+<pre id="r">running…</pre>
+<script>
+const out = []; const ok = (n, c, x = "") => out.push(`${c ? "PASS" : "FAIL"} ${n}${x ? "  (" + x + ")" : ""}`);
+const wait = (ms) => new Promise(r => setTimeout(r, ms));
+const confirmDelete = async (d, w) => { const btn = d.getElementById("confirm-delete"); if (btn && !d.getElementById("confirm-modal-overlay").hidden) { btn.click(); await new Promise(r => setTimeout(r, 260)); } };
+
+const BASE = new URL("../../frontend/", location.href).href;
+let frame = null;
+async function load(page, width = 390) {
+  if (frame) frame.remove();
+  frame = document.createElement("iframe"); frame.width = width; frame.height = 1400; frame.src = BASE + page;
+  document.body.appendChild(frame);
+  await new Promise(r => frame.onload = r); await wait(350);
+  const d = frame.contentDocument, w = frame.contentWindow;
+  const cc = d.getElementById("checkin-close"); if (cc) { cc.click(); await wait(300); }
+  return { d, w };
+}
+const pad = (n) => String(n).padStart(2, "0");
+const isoOf = (dt) => `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`;
+const daysAgo = (n) => { const d = new Date(); d.setDate(d.getDate() - n); return isoOf(d); };
+const txt = (el) => el.textContent.replace(/\s+/g, " ").trim();
+
+(async () => {
+  let { d, w } = await load("analytics.html");
+  try { w.localStorage.clear(); } catch (e) {}
+
+  // ---------- seed: this month + last month data (relative to today) ----------
+  const today = new Date();
+  const lastMonth = new Date(today.getFullYear(), today.getMonth() - 1, 15);
+  const seed = [
+    { id: 1, title: "Makan Siang", category: "makanan", type: "expense", amount: 25000, isoDate: isoOf(today), time: "12:30" },
+    { id: 2, title: "Bensin Motor", category: "bensin", type: "expense", amount: 30000, isoDate: isoOf(today), time: "09:15" },
+    { id: 3, title: "Gaji", category: "lainnya", type: "income", amount: 5000000, isoDate: isoOf(today), time: "08:00" },
+    { id: 4, title: "Kopi", category: "makanan", type: "expense", amount: 745000, isoDate: isoOf(today), time: "" },   // makanan total 770.000 / 800.000 = 96%
+    { id: 5, title: "Listrik", category: "tagihan", type: "expense", amount: 630000, isoDate: isoOf(today), time: "" }, // tagihan 105%
+    { id: 6, title: "Bioskop", category: "hiburan", type: "expense", amount: 150000, isoDate: isoOf(today), time: "" }, // hiburan 75%
+    { id: 7, title: "Belanja bulan lalu", category: "belanja", type: "expense", amount: 1000000, isoDate: isoOf(lastMonth), time: "" },
+  ];
+  w.localStorage.setItem("financeData.transactions", JSON.stringify(seed));
+  ({ d, w } = await load("analytics.html"));
+
+  ok("analytics page has no budget editor / category list (separated to budget.html)", !d.getElementById("btn-edit-budget") && !d.getElementById("category-list") && !d.getElementById("budget-card"));
+  ok("sections: summary, time chart, category chart, insight", ["analytics-summary", "time-chart", "category-chart", "insight-list"].every(id => d.getElementById(id)));
+
+  // ---------- summary ----------
+  const sum = txt(d.getElementById("analytics-summary"));
+  const thisTotal = 25000 + 30000 + 745000 + 630000 + 150000; // 1.580.000
+  ok("summary: total this month from actual data (Rp1.580.000)", sum.includes("Rp1.580.000"), sum);
+  ok("summary: top category = 🍜 Makanan Rp770.000", /🍜 Makanan/.test(sum) && sum.includes("Rp770.000"));
+  const chg = Math.round((thisTotal - 1000000) / 1000000 * 100); // +58
+  ok("summary: change vs last month computed (+58%)", sum.includes(`📈 +${chg}%`) && /dibanding bulan lalu/.test(sum), sum);
+
+  // ---------- time chart (per tanggal bulan ini, scrollable) ----------
+  const bars = [...d.querySelectorAll("#time-chart .bar-col")];
+  const barSum = bars.reduce((s, b) => s + Number(b.getAttribute("aria-label").match(/Rp([\d.]+)$/)[1].replace(/\./g, "")), 0);
+  const dim = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
+  ok(`time chart: ${dim} daily <button> bars, Σ = month total 1.580.000`, bars.length === dim && bars.every(b => b.tagName === "BUTTON") && barSum === thisTotal, `n=${bars.length} sum=${barSum}`);
+  ok("time chart: today's bar is-current and tallest", bars.find(b => b.classList.contains("is-current")).querySelector(".bar-fill").style.height === "100%");
+  ok("chart: no library, pure HTML/CSS (no <canvas>/<svg> chart, no external script)", !d.querySelector("#time-chart canvas") && [...d.scripts].every(s => !s.src || /\/js\/(app|core|analytics)\.js$/.test(s.src)) /* hanya script lokal aplikasi; refactor JS-4: core.js + analytics.js */);
+
+  // ---------- category chart ----------
+  const rows = [...d.querySelectorAll("#category-chart .cat-row")];
+  ok("category chart: rows sorted desc (Makanan, Tagihan, Hiburan, Bensin)", rows.map(r => r.querySelector(".cat-row-name").textContent.replace(/^[^A-Za-z]+/, "")).join(",") === "Makanan,Tagihan,Hiburan,Bensin", rows.map(r => txt(r)).join(" | "));
+  ok("category chart: amounts + share from actual data (Makanan 49%)", txt(rows[0]).includes("Rp770.000") && txt(rows[0]).includes("49% dari total"));
+  ok("category chart: bar widths proportional (top = 100%)", rows[0].querySelector(".cat-row-fill").style.width === "100%" && parseFloat(rows[3].querySelector(".cat-row-fill").style.width) < 5);
+
+  // ---------- insights (rendered) ----------
+  const ins = [...d.querySelectorAll("#insight-list .insight-item")].map(li => ({ level: li.dataset.level, text: txt(li) }));
+  const daysLeft = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate() - today.getDate();
+  const tag = ins.find(i => /Budget Tagihan/.test(i.text));
+  ok("insight: 100%+ detected -> 🔴 Tagihan terlewati 5% + action", tag && tag.level === "over" && /🔴 Budget Tagihan sudah terlewati 5%/.test(tag.text) && /Coba/.test(tag.text), tag && tag.text);
+  const mak = ins.find(i => /Budget Makanan/.test(i.text));
+  ok("insight: 90-99% detected -> 🟠 Makanan 96% + days left + action", mak && mak.level === "near" && /🟠 Budget Makanan sudah 96%/.test(mak.text) && new RegExp(daysLeft > 0 ? `${daysLeft} hari` : "hari terakhir").test(mak.text) && /kurangi/.test(mak.text), mak && mak.text);
+  const hib = ins.find(i => /Budget Hiburan/.test(i.text));
+  ok("insight: 70-89% -> 🟡 Hiburan 75% with sisa + per-day guidance", hib && hib.level === "watch" && /🟡 Budget Hiburan sudah 75%/.test(hib.text) && /Sisa Rp50\.000/.test(hib.text), hib && hib.text);
+  ok("insight: safe category (Bensin 10%) produces no warning", !ins.some(i => /Budget Bensin/.test(i.text)));
+  ok("insight: ordered most severe first (over before near before watch)", ins.findIndex(i => i.level === "over") < ins.findIndex(i => i.level === "near") && ins.findIndex(i => i.level === "near") < ins.findIndex(i => i.level === "watch"));
+  ok("insight: top category (Makanan) not duplicated when already flagged", !ins.some(i => /jadi pengeluaran terbesar/.test(i.text)));
+  ok("insight: monthly budget 66% -> no monthly warning, but pace projection may show", !ins.some(i => /Budget bulanan sudah/.test(i.text)));
+  ok("insight: each item is short (<= 2 sentences + action, < 220 chars)", ins.every(i => i.text.length < 220), String(Math.max(...ins.map(i => i.text.length))));
+
+  // ---------- pure insight rules with injected dates (28/29/30/31) ----------
+  const G = w.eval("getAnalyticsInsights"), DL = w.eval("getDaysLeftInMonth"), DIM = w.eval("getDaysInMonth");
+  ok("days in month: Feb 2027=28, Feb 2028=29, Apr=30, Jan=31", DIM(new Date(2027, 1, 10)) === 28 && DIM(new Date(2028, 1, 10)) === 29 && DIM(new Date(2027, 3, 10)) === 30 && DIM(new Date(2027, 0, 10)) === 31);
+  ok("days left: 25 Feb 2027 -> 3, 25 Feb 2028 -> 4, 25 Apr -> 5, 25 Jan -> 6, last day -> 0", DL(new Date(2027, 1, 25)) === 3 && DL(new Date(2028, 1, 25)) === 4 && DL(new Date(2027, 3, 25)) === 5 && DL(new Date(2027, 0, 25)) === 6 && DL(new Date(2027, 3, 30)) === 0);
+  // inject: pretend today is 25 Feb 2028 with same-month data
+  const feb = new Date(2028, 1, 25);
+  const febSeed = [
+    { id: 11, title: "A", category: "makanan", type: "expense", amount: 760000, isoDate: "2028-02-03", time: "" }, // 95%
+    { id: 12, title: "B", category: "bensin", type: "expense", amount: 330000, isoDate: "2028-02-10", time: "" },  // 110%
+  ];
+  w.eval(`financeData.transactions = ${JSON.stringify(febSeed)}`);
+  const febIns = G(feb).map(i => i.text);
+  ok("injected 25 Feb 2028 (leap): '95%, masih ada 4 hari sampai akhir bulan'", febIns.some(t => /🟠 Budget Makanan sudah 95%, sementara masih ada 4 hari sampai akhir bulan/.test(t)), febIns.join(" || "));
+  ok("injected: '🔴 Budget Bensin sudah terlewati 10%, dan masih ada 4 hari' + action", febIns.some(t => /🔴 Budget Bensin sudah terlewati 10%, dan masih ada 4 hari sampai akhir bulan\. Coba tahan pengeluaran Bensin/.test(t)));
+  const feb27 = G(new Date(2027, 1, 25)).map(i => i.text); // transactions are in 2028-02, so Feb 2027 has none
+  ok("injected Feb 2027: no same-month data -> no budget warnings (month-scoped)", !feb27.some(t => /Budget (Makanan|Bensin)/.test(t)));
+  const lastDay = G(new Date(2028, 1, 29)).map(i => i.text);
+  ok("injected last day of month: wording 'hari ini hari terakhir bulan ini' + evaluate-next-month action", lastDay.some(t => /terlewati 10%, dan hari ini hari terakhir bulan ini\. Coba evaluasi budget Bensin untuk bulan depan/.test(t)), lastDay.join(" || "));
+  w.eval("financeData.transactions = []");
+  const empty = G(new Date()).map(i => i.text);
+  ok("no data -> friendly neutral insight, nothing fabricated", empty.length === 1 && /🌱/.test(empty[0]));
+
+  // ---------- summary without last month ----------
+  w.localStorage.setItem("financeData.transactions", JSON.stringify(seed.filter(t => t.id !== 7)));
+  ({ d, w } = await load("analytics.html"));
+  ok("summary: no last-month data -> '💡 Belum cukup data' (no made-up %)", /💡 Belum cukup data/.test(txt(d.getElementById("analytics-summary"))) && !/dibanding bulan lalu/.test(txt(d.getElementById("analytics-summary"))));
+
+  // ---------- data flow: transaction CRUD + budget edit change analytics ----------
+  ({ d, w } = await load("transactions.html"));
+  w.confirm = () => true;
+  [...d.querySelectorAll('[data-action="delete"]')].find(b => /Listrik/.test(b.getAttribute("aria-label"))).click(); await wait(260); await confirmDelete(d, w);
+  ({ d, w } = await load("analytics.html"));
+  ok("delete transaction -> analytics total & insight update (no Tagihan warning, total Rp950.000)", txt(d.getElementById("analytics-summary")).includes("Rp950.000") && !/Budget Tagihan/.test(txt(d.getElementById("insight-list"))));
+  ({ d, w } = await load("budget.html"));
+  d.querySelector('#category-list [data-action="edit-category"][data-key="makanan"]').click(); await wait(300);
+  const fb = d.getElementById("field-category-budget"); fb.value = "2000000"; fb.dispatchEvent(new Event("input", { bubbles: true }));
+  d.getElementById("category-form").requestSubmit(); await wait(300);
+  ({ d, w } = await load("analytics.html"));
+  ok("category budget edit -> insight updates (Makanan now 39%, no warning)", !/Budget Makanan/.test(txt(d.getElementById("insight-list"))));
+  ok("dashboard link: budget page is separate, analytics has back link", !!d.querySelector('a.icon-btn[href="index.html"]'));
+
+  try { w.localStorage.clear(); } catch (e) {}
+  document.getElementById("r").textContent = out.join("\n");
+})().catch(e => { out.push("EXCEPTION " + e.stack); document.getElementById("r").textContent = out.join("\n"); });
+</script>

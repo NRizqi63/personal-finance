@@ -1,0 +1,230 @@
+<!doctype html>
+<meta charset="utf-8">
+<pre id="r">running…</pre>
+<script>
+const out = []; const ok = (n, c, x = "") => out.push(`${c ? "PASS" : "FAIL"} ${n}${x ? "  (" + x + ")" : ""}`);
+const wait = (ms) => new Promise(r => setTimeout(r, ms));
+const BASE = new URL("../../frontend/", location.href).href;
+// JS-6: app.js sudah dihapus. Sumber kode HIDUP untuk pemeriksaan regex = gabungan 8 file split (urutan muat).
+const APP_SPLIT_FILES = ["core.js", "transactions-shared.js", "dashboard.js", "goals.js", "analytics.js", "budget.js", "transactions.js", "settings.js"];
+async function fetchAppJs(base) { const parts = []; for (const f of APP_SPLIT_FILES) parts.push(`/* ==== ${f} ==== */\n` + await (await fetch(base + "js/" + f)).text()); return parts.join("\n"); }
+
+const pad = (n) => String(n).padStart(2, "0");
+const today = new Date();
+const isoToday = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`;
+const SEED_TX = [
+  { id: 3, title: "Kopi Susu", category: "makanan", type: "expense", amount: 18000, isoDate: isoToday, time: "" },
+  { id: 2, title: "Gaji", category: "lainnya", type: "income", amount: 5000000, isoDate: isoToday, time: "" },
+];
+
+let frame = null;
+async function load(page, width = 390, opts = {}) {
+  if (frame) frame.remove();
+  frame = document.createElement("iframe"); frame.width = width; frame.height = opts.height || 1400; frame.src = BASE + page;
+  document.body.appendChild(frame);
+  await new Promise(r => frame.onload = r); await wait(400);
+  const d = frame.contentDocument, w = frame.contentWindow;
+  if (!opts.keepCheckin) { const cc = d.getElementById("checkin-close"); if (cc && !d.getElementById("checkin-overlay").hidden) { cc.click(); await wait(350); } }
+  return { d, w };
+}
+const seed = (w) => { try { w.localStorage.clear(); w.sessionStorage.clear(); w.localStorage.setItem("financeData.transactions", JSON.stringify(SEED_TX)); } catch (e) {} };
+const txt = (el) => (el ? el.textContent.replace(/\s+/g, " ").trim() : "");
+const act = (d) => d.activeElement;
+const locked = (d) => d.body.classList.contains("is-modal-open");
+const tab = (d, w, shift = false) => d.dispatchEvent(new w.KeyboardEvent("keydown", { key: "Tab", shiftKey: shift, bubbles: true, cancelable: true }));
+const esc = (d, w) => d.dispatchEvent(new w.KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+
+/** Pemeriksaan standar untuk satu modal: fokus awal, kunci scroll, trap, restore. */
+async function checkModal(d, w, { label, overlayId, openFn, expectRestoreSel }) {
+  const overlay = d.getElementById(overlayId);
+  // Klik programatik tidak memindahkan fokus; fokuskan pemicu dulu supaya
+  // kondisinya sama dengan klik/tap nyata di browser.
+  if (expectRestoreSel) { const trg = d.querySelector(expectRestoreSel); if (trg) trg.focus(); }
+  await openFn(); await wait(350);
+  const focusables = w.getFocusable(overlay);
+  const first = focusables[0], last = focusables[focusables.length - 1];
+  ok(`${label}: fokus awal berada DI DALAM modal & bukan field teks`, overlay.contains(act(d)) && !["INPUT", "TEXTAREA"].includes(act(d).tagName), `fokus=${act(d).tagName}#${act(d).id || act(d).className}`);
+  ok(`${label}: scroll latar terkunci saat terbuka`, locked(d) && w.getComputedStyle(d.body).overflow.startsWith("hidden"));
+  // trap: dari elemen terakhir, Tab kembali ke elemen pertama
+  last.focus(); tab(d, w); await wait(60);
+  ok(`${label}: Tab dari kontrol terakhir kembali ke kontrol pertama (trap)`, act(d) === first, `aktif=${act(d).id || act(d).className}`);
+  // trap: Shift+Tab dari elemen pertama loncat ke terakhir
+  first.focus(); tab(d, w, true); await wait(60);
+  ok(`${label}: Shift+Tab dari kontrol pertama loncat ke kontrol terakhir`, act(d) === last);
+  // fokus di luar modal -> ditarik kembali
+  const outside = [...d.querySelectorAll("button, a[href]")].find(el => !overlay.contains(el) && el.getClientRects().length);
+  if (outside) { outside.focus(); tab(d, w); await wait(60); ok(`${label}: fokus yang terlanjur di latar ditarik kembali ke modal`, overlay.contains(act(d))); }
+  // tutup lewat Escape -> fokus balik ke pemicu
+  esc(d, w); await wait(350);
+  ok(`${label}: Escape menutup modal & melepas kunci scroll`, overlay.hidden && !locked(d));
+  if (expectRestoreSel) {
+    const expected = d.querySelector(expectRestoreSel);
+    ok(`${label}: fokus kembali ke pemicu (${expectRestoreSel})`, act(d) === expected, `aktif=${act(d).tagName}#${act(d).id || act(d).className}`);
+  }
+}
+
+(async () => {
+  let { d, w } = await load("transactions.html");
+  seed(w);
+  ({ d, w } = await load("transactions.html"));
+  const errors = []; w.addEventListener("error", e => errors.push(e.message));
+
+  // ---------- 1. helper tersedia ----------
+  ok("1a. helper bersama tersedia: getFocusable, lockBodyScroll, unlockBodyScroll", [w.getFocusable, w.lockBodyScroll, w.unlockBodyScroll].every(f => typeof f === "function"));
+  d.querySelector('#all-transaction-list [data-action="edit"]').click(); await wait(300);
+  ok("1b. getFocusable mengabaikan input[type=hidden] & elemen tersembunyi", (() => {
+    const list = w.getFocusable(d.getElementById("transaction-modal-overlay"));
+    return list.length > 0 && !list.includes(d.getElementById("field-id")) && list.every(el => el.getClientRects().length > 0);
+  })());
+  esc(d, w); await wait(350);
+  ok("1c. hanya 2 listener keydown global (dropdown + tumpukan modal)", (await fetchAppJs(BASE)).split('addEventListener("keydown"').length - 1 === 2);
+
+  // ---------- 2. modal transaksi (edit dari daftar) ----------
+  await checkModal(d, w, {
+    label: "2. modal transaksi (edit)",
+    overlayId: "transaction-modal-overlay",
+    openFn: async () => d.querySelector('#all-transaction-list [data-action="edit"]').click(),
+    expectRestoreSel: '#all-transaction-list [data-action="edit"]',
+  });
+
+  // ---------- 3. konfirmasi hapus transaksi ----------
+  await checkModal(d, w, {
+    label: "3. konfirmasi hapus transaksi",
+    overlayId: "confirm-modal-overlay",
+    openFn: async () => d.querySelector('#all-transaction-list [data-action="delete"]').click(),
+    expectRestoreSel: '#all-transaction-list [data-action="delete"]',
+  });
+
+  // ---------- 4. modal transaksi dari dashboard ----------
+  ({ d, w } = await load("index.html"));
+  await checkModal(d, w, {
+    label: "4. modal transaksi (tambah, dashboard)",
+    overlayId: "transaction-modal-overlay",
+    openFn: async () => d.querySelector('[data-action="add-transaction"]').click(),
+    expectRestoreSel: '[data-action="add-transaction"]',
+  });
+
+  // ---------- 5. check-in ----------
+  try { w.sessionStorage.clear(); } catch (e) {}
+  ({ d, w } = await load("index.html", 390, { keepCheckin: true }));
+  const co = d.getElementById("checkin-overlay");
+  ok("5a. check-in: terbuka otomatis, fokus di dalam modal, scroll terkunci", !co.hidden && co.contains(act(d)) && locked(d));
+  const cf = w.getFocusable(co);
+  cf[cf.length - 1].focus(); tab(d, w); await wait(60);
+  ok("5b. check-in: Tab berputar di dalam modal", act(d) === cf[0]);
+  d.getElementById("checkin-close").click(); await wait(400);
+  ok("5c. check-in: ditutup -> kunci scroll dilepas", co.hidden && !locked(d));
+
+  // ---------- 6. budget & kategori + modal bertumpuk ----------
+  ({ d, w } = await load("budget.html"));
+  await checkModal(d, w, {
+    label: "6. modal budget bulanan",
+    overlayId: "budget-modal-overlay",
+    openFn: async () => d.getElementById("btn-edit-budget").click(),
+    expectRestoreSel: "#btn-edit-budget",
+  });
+  await checkModal(d, w, {
+    label: "7. modal kategori (panjang, ada emoji picker)",
+    overlayId: "category-modal-overlay",
+    openFn: async () => d.querySelector('#category-list [data-action="edit-category"]').click(),
+    expectRestoreSel: '#category-list [data-action="edit-category"]',
+  });
+  // modal panjang tetap bisa discroll di dalam overlay walau body terkunci
+  d.querySelector('#category-list [data-action="edit-category"]').click(); await wait(350);
+  const catBox = d.querySelector("#category-modal-overlay .modal");
+  const scrollableInside = w.getComputedStyle(catBox).overflowY === "auto" || catBox.scrollHeight > catBox.clientHeight;
+  catBox.scrollTop = 40;
+  ok("8a. modal panjang tetap bisa di-scroll di dalamnya saat body terkunci", locked(d) && scrollableInside && (catBox.scrollTop > 0 || catBox.scrollHeight <= catBox.clientHeight), `scrollTop=${catBox.scrollTop} sh=${catBox.scrollHeight} ch=${catBox.clientHeight}`);
+  // bertumpuk: konfirmasi hapus kategori di atas modal kategori
+  d.getElementById("btn-delete-category").focus(); // klik nyata selalu memfokus tombolnya
+  d.getElementById("btn-delete-category").click(); await wait(350);
+  const confirmOv = d.getElementById("confirm-modal-overlay"), catOv = d.getElementById("category-modal-overlay");
+  ok("8b. modal bertumpuk: konfirmasi terbuka di atas modal kategori, fokus pindah ke konfirmasi", !confirmOv.hidden && !catOv.hidden && confirmOv.contains(act(d)));
+  const cfs = w.getFocusable(confirmOv);
+  cfs[cfs.length - 1].focus(); tab(d, w); await wait(60);
+  ok("8c. modal bertumpuk: trap mengikuti modal TERATAS", act(d) === cfs[0] && confirmOv.contains(act(d)));
+  esc(d, w); await wait(350);
+  ok("8d. Escape menutup konfirmasi saja; kunci scroll TETAP aktif karena modal kategori masih terbuka", confirmOv.hidden && !catOv.hidden && locked(d));
+  ok("8e. fokus kembali ke pemicu di dalam modal kategori (Hapus Kategori)", act(d) === d.getElementById("btn-delete-category"));
+  esc(d, w); await wait(350);
+  ok("8f. Escape kedua menutup modal kategori & baru melepas kunci scroll", catOv.hidden && !locked(d));
+
+  // ---------- 9. settings: import & reset ----------
+  ({ d, w } = await load("settings.html"));
+  await checkModal(d, w, {
+    label: "9. modal reset",
+    overlayId: "reset-modal-overlay",
+    openFn: async () => d.querySelector('[data-reset-target="budget"]').click(),
+    expectRestoreSel: '[data-reset-target="budget"]',
+  });
+  const importFile = JSON.stringify({ app: "personal-finance", appName: "Personal Finance", schema: 1, appVersion: "V2.2", exportedAt: "2026-09-14T01:32:11.281Z", counts: { transactions: 1, categories: 1 }, data: { transactions: [{ id: 1, title: "Dari File", category: "makanan", type: "expense", amount: 12000, isoDate: isoToday, time: "" }], budget: { monthly: 1000000, categories: {} }, settings: { name: "Uji", hideBalanceOnOpen: false, showCheckin: true } } });
+  const input = d.getElementById("import-file");
+  const dt = new w.DataTransfer(); dt.items.add(new w.File([importFile], "backup.json", { type: "application/json" }));
+  input.files = dt.files; input.dispatchEvent(new w.Event("change", { bubbles: true }));
+  for (let i = 0; i < 40 && d.getElementById("import-modal-overlay").hidden; i += 1) await wait(100);
+  await wait(200);
+  const impOv = d.getElementById("import-modal-overlay");
+  ok("10a. modal import: fokus di dalam modal & scroll latar terkunci", !impOv.hidden && impOv.contains(act(d)) && locked(d));
+  const ifs = w.getFocusable(impOv);
+  ifs[ifs.length - 1].focus(); tab(d, w); await wait(60);
+  ok("10b. modal import: Tab berputar di dalam modal", act(d) === ifs[0]);
+  esc(d, w); await wait(350);
+  ok("10c. modal import: Escape menutup & melepas kunci scroll (data tidak berubah)", impOv.hidden && !locked(d) && w.getPendingImport() === null);
+
+  // ---------- 11. guard edit transaksi hilang ----------
+  ({ d, w } = await load("transactions.html"));
+  d.querySelector('#all-transaction-list [data-action="edit"]').click(); await wait(300);
+  // transaksi yang sedang diedit "hilang" dari data (mis. dihapus di tab lain)
+  w.financeDataRemoveForTest = null;
+  const editedId = Number(d.getElementById("field-id").value);
+  w.eval(`financeData.transactions = financeData.transactions.filter((t) => t.id !== ${editedId});`);
+  d.getElementById("field-title").value = "Diubah";
+  d.getElementById("transaction-form").requestSubmit(); await wait(350);
+  ok("11a. edit transaksi yang sudah tidak ada: modal tertutup dengan aman, tanpa error", d.getElementById("transaction-modal-overlay").hidden && errors.length === 0);
+  ok("11b. pesan 'Transaksi tidak ditemukan, mungkin sudah dihapus.' tampil", txt(d.getElementById("transaction-feedback")) === "Transaksi tidak ditemukan, mungkin sudah dihapus." && d.getElementById("transaction-feedback").dataset.type === "error");
+  ok("11c. data di localStorage tidak ditimpa oleh data memori yang basi", JSON.parse(w.localStorage.getItem("financeData.transactions")).length === 2);
+  ok("11d. kunci scroll ikut dilepas setelah modal ditutup lewat guard", !locked(d));
+
+  // ---------- 12. window.confirm dihapus ----------
+  const appJs = await fetchAppJs(BASE);
+  const cleanJs = appJs.replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, "");
+  ok("12a. tidak ada window.confirm/alert/prompt di app.js", !/window\.(confirm|alert|prompt)\s*\(/.test(cleanJs) && !/[^.\w](confirm|alert|prompt)\s*\(/.test(cleanJs));
+  ok("12b. jalur hapus tanpa modal konfirmasi memakai feedback, bukan dialog browser", /Konfirmasi hapus tidak tersedia di halaman ini/.test(appJs));
+
+  // ---------- 13. responsif dengan modal terbuka ----------
+  for (const wd of [320, 375, 768, 1280]) {
+    const r = await load("budget.html", wd);
+    r.d.querySelector('#category-list [data-action="edit-category"]').click(); await wait(350);
+    const de = r.d.documentElement;
+    const box = r.d.querySelector("#category-modal-overlay .modal").getBoundingClientRect();
+    ok(`13-${wd}. modal terbuka: tanpa overflow horizontal, modal muat di viewport, scroll terkunci`,
+      de.scrollWidth === de.clientWidth && box.width <= de.clientWidth && box.height <= de.clientHeight + 1 && r.d.body.classList.contains("is-modal-open"),
+      `sw=${de.scrollWidth} cw=${de.clientWidth} modal=${box.width.toFixed(0)}x${box.height.toFixed(0)}`);
+    r.d.querySelector("#category-modal-overlay [data-modal-close]").click(); await wait(300);
+    ok(`13b-${wd}. setelah ditutup: kunci scroll dilepas & halaman bisa di-scroll lagi`, !r.d.body.classList.contains("is-modal-open"));
+  }
+
+  // ---------- 15. UX-3A: area tap tombol tutup & overscroll ----------
+  ({ d, w } = await load("budget.html"));
+  d.getElementById("btn-edit-budget").click(); await wait(350);
+  const ovA = d.getElementById("budget-modal-overlay");
+  const closeBtn = ovA.querySelector(".modal-close");
+  const halo = parseFloat(w.getComputedStyle(closeBtn, "::before").insetBlockStart || w.getComputedStyle(closeBtn, "::before").top);
+  const rectC = closeBtn.getBoundingClientRect();
+  const cs = w.getComputedStyle(closeBtn);
+  ok("15a. .modal-close punya halo ::before negatif & ukuran visual tetap 36px", w.getComputedStyle(closeBtn, "::before").content !== "none" && halo < 0 && cs.width === "36px" && cs.height === "36px" && cs.position === "relative");
+  ok("15b. area tap efektif >= 44px (36 + 2 x halo)", 36 + 2 * Math.abs(halo) >= 44, `halo=${halo}px efektif=${36 + 2 * Math.abs(halo)}px`);
+  ok("15c. titik di dalam halo (tepat di luar tepi tombol) tetap mengenai tombol tutup", (() => {
+    const pad = Math.min(Math.abs(halo) - 1, 3);
+    const el = d.elementFromPoint(rectC.left - pad, rectC.top + rectC.height / 2);
+    return el === closeBtn || closeBtn.contains(el);
+  })(), `halo=${halo}`);
+  ok("15d. overlay & .modal memakai overscroll-behavior: contain", w.getComputedStyle(ovA).overscrollBehavior === "contain" && w.getComputedStyle(ovA.querySelector(".modal")).overscrollBehavior === "contain");
+  ok("15e. modal tetap bisa di-scroll sendiri (overflow-y auto) & body terkunci", w.getComputedStyle(ovA.querySelector(".modal")).overflowY === "auto" && locked(d));
+  esc(d, w); await wait(350);
+
+  ok("14. console 0 error", errors.length === 0, errors.join(" | "));
+  try { w.localStorage.clear(); } catch (e) {}
+  document.getElementById("r").textContent = out.join("\n");
+})().catch(e => { out.push("EXCEPTION " + e.stack); document.getElementById("r").textContent = out.join("\n"); });
+</script>

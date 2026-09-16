@@ -1,0 +1,279 @@
+<!doctype html>
+<meta charset="utf-8">
+<pre id="r">running…</pre>
+<script>
+const out = []; const ok = (n, c, x = "") => out.push(`${c ? "PASS" : "FAIL"} ${n}${x ? "  (" + x + ")" : ""}`);
+const wait = (ms) => new Promise(r => setTimeout(r, ms));
+const BASE = new URL("../../frontend/", location.href).href;
+// JS-6: style.css sudah dihapus. Sumber CSS HIDUP untuk pemeriksaan selector = gabungan 7 file split.
+const CSS_SPLIT_FILES = ["base.css", "dashboard.css", "goals.css", "analytics.css", "budget.css", "transactions.css", "settings.css"];
+async function fetchStyleCss(base) { const parts = []; for (const f of CSS_SPLIT_FILES) parts.push(`/* ==== ${f} ==== */\n` + await (await fetch(base + "css/" + f)).text()); return parts.join("\n"); }
+// JS-6: app.js sudah dihapus. Sumber kode HIDUP untuk pemeriksaan regex = gabungan 8 file split (urutan muat).
+const APP_SPLIT_FILES = ["core.js", "transactions-shared.js", "dashboard.js", "goals.js", "analytics.js", "budget.js", "transactions.js", "settings.js"];
+async function fetchAppJs(base) { const parts = []; for (const f of APP_SPLIT_FILES) parts.push(`/* ==== ${f} ==== */\n` + await (await fetch(base + "js/" + f)).text()); return parts.join("\n"); }
+
+const pad = (n) => String(n).padStart(2, "0");
+const iso = (dt) => `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`;
+const today = new Date(); today.setHours(0, 0, 0, 0);
+const rel = (n) => iso(new Date(today.getFullYear(), today.getMonth(), today.getDate() + n));
+const BULAN = ["Jan","Feb","Mar","Apr","Mei","Jun","Jul","Agu","Sep","Okt","Nov","Des"];
+const dateID = (isoStr) => { const [y, m, d] = isoStr.split("-").map(Number); return `${d} ${BULAN[m - 1]} ${y}`; };
+const rupiah = (n) => "Rp" + Math.abs(n).toLocaleString("id-ID");
+
+const GOALS_KEY = "financeData.goals";
+const ALL_KEYS = ["financeData.transactions", "financeData.budget", "financeData.settings", GOALS_KEY];
+const G = (o) => Object.assign({ id: 1, name: "Dana Darurat", target: 10000000, saved: 3200000, deadline: "", createdAt: rel(-10) }, o);
+
+let frame = null;
+async function load(page = "goals.html", width = 390) {
+  if (frame) frame.remove();
+  frame = document.createElement("iframe"); frame.width = width; frame.height = 1600; frame.src = BASE + page;
+  document.body.appendChild(frame);
+  await new Promise(r => frame.onload = r); await wait(400);
+  const d = frame.contentDocument, w = frame.contentWindow;
+  const cc = d.getElementById("checkin-close"); const ov = d.getElementById("checkin-overlay");
+  if (cc && ov && !ov.hidden) { cc.click(); await wait(250); }
+  return { d, w };
+}
+const txt = (el) => (el ? el.textContent.replace(/\s+/g, " ").trim() : "");
+const snapAll = (w) => JSON.stringify(ALL_KEYS.map(k => w.localStorage.getItem(k)));
+// Seed goals (string mentah atau array) lewat frame yang sudah ada, lalu buka ulang halaman.
+async function openWith(raw, page = "goals.html", width = 390) {
+  if (!frame) await load("index.html");
+  const w0 = frame.contentWindow;
+  try {
+    if (raw === null) w0.localStorage.removeItem(GOALS_KEY);
+    else w0.localStorage.setItem(GOALS_KEY, typeof raw === "string" ? raw : JSON.stringify(raw));
+  } catch (e) {}
+  const r = await load(page, width);
+  r.errors = []; r.w.addEventListener("error", e => r.errors.push(e.message));
+  return r;
+}
+const cards = (d) => [...d.querySelectorAll("#goal-list .goal-card")];
+const card = (d, i = 0) => cards(d)[i];
+const cardStatus = (c) => c.querySelector(".goal-status");
+const cardPercent = (c) => txt(c.querySelector(".goal-percent"));
+const cardFill = (c) => c.querySelector(".progress-bar-fill").style.width;
+const cardFoot = (c) => txt(c.querySelector(".goal-card-foot"));
+const cardDeadline = (c) => txt(c.querySelector(".goal-deadline"));
+const noOverflow = (d) => d.documentElement.scrollWidth <= d.documentElement.clientWidth;
+const widest = (d) => { let m = 0, who = ""; d.querySelectorAll("body *").forEach(el => { const r = el.getBoundingClientRect(); if (r.right > m) { m = r.right; who = el.className || el.tagName; } }); return { m, who }; };
+
+(async () => {
+  const html = await (await fetch(BASE + "goals.html")).text();
+  const appJs = await fetchAppJs(BASE);
+  const css = await fetchStyleCss(BASE);
+
+  // Reset penuh storage dari frame dashboard, lalu bersihkan.
+  let r = await load("index.html");
+  try { r.w.localStorage.clear(); r.w.sessionStorage.clear(); } catch (e) {}
+
+  /* ===================== 0. Struktur halaman ===================== */
+  r = await openWith(null);
+  let { d, w } = r;
+  ok("0a. goals.html termuat tanpa error", r.errors.length === 0, r.errors.join(" | "));
+  ok("0b. body data-page=goals", d.body.dataset.page === "goals");
+  ok("0c. header: tombol kembali ke dashboard + judul", d.querySelector('.page-header a.icon-btn[href="index.html"]') !== null && txt(d.querySelector(".page-header h1")) === "Target Keuangan");
+  ok("0d. deskripsi singkat ada", txt(d.querySelector(".goals-intro")).length > 20);
+  ok("0e. memakai container & header yang sama dengan halaman lain", d.querySelector(".app.app--page") !== null && d.querySelector("header.app-header.page-header") !== null);
+  ok("0f. section daftar & ringkasan ada", d.getElementById("goal-list") !== null && d.getElementById("goals-summary") !== null);
+  ok("0g. tidak ada inline onclick/onload di goals.html", !/\son[a-z]+=/i.test(html));
+  // G-3A menambahkan tombol Tambah + modal; yang belum boleh ada: edit/hapus (G-3B).
+  // G-3A/G-3B sudah ada: tombol Tambah + modal editor + konfirmasi hapus. Halaman kosong -> belum ada card, jadi belum ada Edit/Hapus.
+  ok("0h. kerangka CRUD ada (tambah, editor, konfirmasi) & tanpa card saat kosong", d.getElementById("btn-add-goal") !== null && d.getElementById("goal-modal-overlay") !== null && d.getElementById("goal-confirm-overlay") !== null && d.querySelector('[data-action="edit-goal"]') === null);
+  // Refactor JS-3: goals.html memuat core.js lalu goals.js (tanpa app.js).
+  ok("0i. script: core.js lalu goals.js, tanpa app.js", (html.match(/<script/g) || []).length === 2 && html.indexOf('src="js/core.js"') > -1 && html.indexOf('src="js/goals.js"') > html.indexOf('src="js/core.js"') && !html.includes('src="js/app.js"'));
+  // Refactor tahap 1: goals.html memuat base.css + goals.css (bukan style.css lagi).
+  ok("0j. font & stylesheet: base.css lalu goals.css, font Poppins sama", html.indexOf('href="css/base.css"') > -1 && html.indexOf('href="css/goals.css"') > html.indexOf('href="css/base.css"') && !html.includes('href="css/style.css"') && html.includes("Poppins"));
+
+  /* ===================== 1. Daftar kosong ===================== */
+  ok("1a. empty state tampil", d.querySelector("#goal-list .goal-empty") !== null && txt(d.getElementById("goal-list")).includes("Belum ada target keuangan"));
+  ok("1b. empty state memberi contoh & ajakan (copy G-3A)", /dana darurat/i.test(txt(d.getElementById("goal-list"))) && /membuat yang pertama/.test(txt(d.getElementById("goal-list"))));
+  ok("1c. tidak ada card", cards(d).length === 0);
+  ok("1d. section ringkasan disembunyikan", d.getElementById("goals-summary-section").hidden === true);
+  ok("1e. sub-judul jumlah kosong", txt(d.getElementById("goals-count-sub")) === "");
+  ok("1f. catatan 'dicatat manual' disembunyikan saat kosong", d.getElementById("goals-hint").hidden === true);
+  // Sejak G-3A tombol Tambah Target memang ada, jadi empty state boleh mengarahkannya.
+  ok("1g. empty state mengarahkan ke tombol yang memang ada (Tambah Target)", /Tambah Target/.test(txt(d.getElementById("goal-list"))) && d.getElementById("btn-add-goal") !== null);
+  ok("1h. membuka halaman kosong tidak menulis key goals", w.localStorage.getItem(GOALS_KEY) === null);
+  ok("1i. tanpa overflow horizontal", noOverflow(d));
+
+  /* ===================== 2. Satu target aktif ===================== */
+  r = await openWith([G({ deadline: rel(107) })]); ({ d, w } = r);
+  let c = card(d);
+  ok("2a. satu card dirender tanpa error", cards(d).length === 1 && r.errors.length === 0);
+  ok("2b. nama target tampil", txt(c.querySelector(".category-name")).includes("Dana Darurat"));
+  ok("2c. target dana Rp10.000.000", txt(c.querySelector(".category-budget-row")).includes(rupiah(10000000)));
+  ok("2d. terkumpul Rp3.200.000", cardFoot(c).includes("Terkumpul: " + rupiah(3200000)));
+  ok("2e. sisa Rp6.800.000", cardFoot(c).includes("Sisa " + rupiah(6800000)));
+  ok("2f. persen 32%", cardPercent(c) === "32%");
+  ok("2g. progress bar 32%", cardFill(c) === "32%");
+  ok("2h. status Aktif (data-status=active)", txt(cardStatus(c)) === "Aktif" && cardStatus(c).dataset.status === "active" && c.dataset.status === "active");
+  ok("2i. deadline: tanggal ID + '107 hari lagi'", cardDeadline(c).includes(dateID(rel(107))) && cardDeadline(c).includes("107 hari lagi"));
+  ok("2j. progressbar aksesibel", c.querySelector('[role="progressbar"]').getAttribute("aria-valuenow") === "32" && c.querySelector('[role="progressbar"]').getAttribute("aria-label").includes("Dana Darurat"));
+  ok("2k. ringkasan tampil & benar", d.getElementById("goals-summary-section").hidden === false && txt(d.getElementById("goals-summary")).includes(rupiah(3200000)) && txt(d.getElementById("goals-summary")).includes(rupiah(10000000)));
+  const statVals = [...d.querySelectorAll("#goals-summary .stat")].map(s => txt(s));
+  ok("2l. ringkasan: 1 aktif, 0 tercapai", statVals.some(s => /Target Aktif 1/.test(s)) && statVals.some(s => /Tercapai 0/.test(s)), statVals.join(" || "));
+  ok("2m. sub-judul '1 target'", txt(d.getElementById("goals-count-sub")) === "1 target");
+  ok("2n. catatan 'dicatat manual' tampil", d.getElementById("goals-hint").hidden === false && txt(d.getElementById("goals-hint")).includes("belum terhubung"));
+  ok("2o. progress bar gold (bukan status budget)", c.querySelector(".progress-bar").classList.contains("progress-bar--goal") && !c.querySelector(".progress-bar-fill").hasAttribute("data-status"));
+
+  /* ===================== 3. Progress 0% ===================== */
+  r = await openWith([G({ saved: 0 })]); ({ d, w } = r); c = card(d);
+  ok("3a. persen 0%", cardPercent(c) === "0%");
+  ok("3b. bar 0%", cardFill(c) === "0%");
+  ok("3c. sisa = target", cardFoot(c).includes("Sisa " + rupiah(10000000)));
+  ok("3d. terkumpul Rp0", cardFoot(c).includes("Terkumpul: Rp0"));
+  ok("3e. status Aktif (tanpa deadline)", cardStatus(c).dataset.status === "active" && cardDeadline(c).includes("Tanpa tanggal target"));
+  ok("3f. aria-valuenow 0", c.querySelector('[role="progressbar"]').getAttribute("aria-valuenow") === "0");
+  ok("3g. tanpa NaN/undefined", !/NaN|undefined|null|Infinity/.test(txt(d.body)));
+
+  /* ===================== 4. Progress 100% ===================== */
+  r = await openWith([G({ id: 1, saved: 10000000, deadline: rel(5) }), G({ id: 2, name: "Beli Laptop", target: 8000000, saved: 8250000 })]); ({ d, w } = r);
+  const exact = cards(d).find(x => txt(x).includes("Dana Darurat")); const overC = cards(d).find(x => txt(x).includes("Beli Laptop"));
+  ok("4a. tepat 100%: status Tercapai", txt(cardStatus(exact)) === "Tercapai" && exact.dataset.status === "done");
+  ok("4b. tepat 100%: persen & bar 100%", cardPercent(exact) === "100%" && cardFill(exact) === "100%");
+  ok("4c. tepat 100%: 'Tercapai 🎉' tanpa 'Sisa'", cardFoot(exact).includes("Tercapai") && !cardFoot(exact).includes("Sisa"));
+  ok("4d. tepat 100%: done menang atas deadline dekat", cardStatus(exact).dataset.status === "done");
+  ok("4e. melebihi target: tetap 100% & bar tidak > 100%", cardPercent(overC) === "100%" && cardFill(overC) === "100%");
+  ok("4f. melebihi target: 'lebih Rp250.000'", cardFoot(overC).includes("lebih " + rupiah(250000)));
+  ok("4g. bar hijau saat tercapai", (() => { const bg = w.getComputedStyle(exact.querySelector(".progress-bar-fill")).backgroundColor; return bg === "rgb(20, 83, 45)"; })(), w.getComputedStyle(exact.querySelector(".progress-bar-fill")).backgroundColor);
+  ok("4h. ringkasan: 0 aktif, 2 tercapai", [...d.querySelectorAll("#goals-summary .stat")].map(txt).join("|").match(/Target Aktif 0/) && [...d.querySelectorAll("#goals-summary .stat")].map(txt).join("|").match(/Tercapai 2/));
+  ok("4i. total terkumpul menjumlahkan semua", txt(d.getElementById("goals-summary")).includes(rupiah(18250000)));
+
+  /* ===================== 5. Melewati deadline ===================== */
+  r = await openWith([G({ deadline: rel(-3) })]); ({ d, w } = r); c = card(d);
+  ok("5a. status Terlewat", txt(cardStatus(c)) === "Terlewat" && c.dataset.status === "overdue");
+  ok("5b. deadline 'Terlewat 3 hari' + tanggal", cardDeadline(c).includes("Terlewat 3 hari") && cardDeadline(c).includes(dateID(rel(-3))));
+  ok("5c. baris deadline merah", w.getComputedStyle(c.querySelector(".goal-deadline")).color === "rgb(179, 65, 58)");
+  ok("5d. bar TETAP gold (bukan merah)", w.getComputedStyle(c.querySelector(".progress-bar-fill")).backgroundColor === "rgb(200, 134, 43)");
+  ok("5e. sisa tetap ditampilkan", cardFoot(c).includes("Sisa " + rupiah(6800000)));
+  ok("5f. chip kontras: bg merah muda + teks merah", w.getComputedStyle(cardStatus(c)).color === "rgb(179, 65, 58)");
+  r = await openWith([G({ deadline: rel(0) })]); ({ d, w } = r); c = card(d);
+  ok("5g. deadline hari ini -> Mendesak + 'Hari ini'", txt(cardStatus(c)) === "Mendesak" && cardDeadline(c).includes("Hari ini"));
+  r = await openWith([G({ deadline: rel(20) })]); ({ d, w } = r); c = card(d);
+  ok("5h. deadline 20 hari -> Mendesak + 'Tinggal 20 hari'", c.dataset.status === "urgent" && cardDeadline(c).includes("Tinggal 20 hari"));
+  r = await openWith([G({ deadline: rel(-2), saved: 10000000 })]); ({ d, w } = r); c = card(d);
+  ok("5i. tercapai tapi deadline lewat: chip Tercapai, deadline netral 'sudah lewat'", c.dataset.status === "done" && cardDeadline(c).includes("sudah lewat") && w.getComputedStyle(c.querySelector(".goal-deadline")).color !== "rgb(179, 65, 58)");
+
+  /* ===================== 6. Data malformed ===================== */
+  r = await openWith("{rusak"); ({ d, w } = r);
+  ok("6a. JSON korup -> empty state, tanpa error", d.querySelector(".goal-empty") !== null && r.errors.length === 0);
+  ok("6b. JSON korup TIDAK ditimpa/dihapus oleh halaman", w.localStorage.getItem(GOALS_KEY) === "{rusak");
+  r = await openWith({ bukan: "array" }); ({ d, w } = r);
+  ok("6c. root objek -> empty state", d.querySelector(".goal-empty") !== null && r.errors.length === 0);
+  const mixed = [G({ id: 1, name: "Valid" }), null, "x", G({ id: 2, target: 0 }), G({ id: 3, name: "" }), G({ id: 4, saved: -5 }), G({ id: 5, name: "Valid Juga", deadline: "2026-02-30" }), { id: 6 }];
+  r = await openWith(mixed); ({ d, w } = r);
+  ok("6d. campuran: hanya baris valid dirender", cards(d).length === 2 && txt(d.getElementById("goal-list")).includes("Valid") && txt(d.getElementById("goal-list")).includes("Valid Juga"), String(cards(d).length));
+  ok("6e. deadline tidak valid -> 'Tanpa tanggal target' (target tidak hilang)", cardDeadline(cards(d).find(x => txt(x).includes("Valid Juga"))).includes("Tanpa tanggal target"));
+  ok("6f. tanpa NaN/undefined/Infinity di halaman", !/NaN|undefined|Infinity/.test(txt(d.body)));
+  ok("6g. data mentah di storage tidak diubah oleh render", w.localStorage.getItem(GOALS_KEY) === JSON.stringify(mixed));
+  ok("6h. sub-judul menghitung yang valid saja", txt(d.getElementById("goals-count-sub")) === "2 target");
+  r = await openWith([G({ target: "10000", saved: "5" })]); ({ d, w } = r);
+  ok("6i. nominal string ditolak -> empty state", d.querySelector(".goal-empty") !== null);
+  // Payload dijaga <= 40 karakter supaya lolos GOAL_NAME_MAX dan benar-benar dirender.
+  const XSS = '<img src=x onerror="top.__x=1">A&"k"';
+  r = await openWith([G({ name: XSS })]); ({ d, w } = r); c = card(d);
+  ok("6j. XSS: nama dirender sebagai teks (tidak ada <img>, handler tidak jalan)", XSS.length <= 40 && !!c && c.querySelector("img") === null && txt(c).includes('<img src=x') && w.top.__x === undefined);
+  ok("6k. XSS: aria-label ikut di-escape", !!c && c.querySelector('[role="progressbar"]').getAttribute("aria-label").includes('A&"k"'));
+
+  /* ===================== 7. Sorting ===================== */
+  const unsorted = [
+    G({ id: 1, name: "Aktif jauh", deadline: rel(200), saved: 0 }),
+    G({ id: 2, name: "Sudah tercapai", deadline: rel(1), saved: 10000000 }),
+    G({ id: 3, name: "Tanpa deadline", deadline: "", saved: 0 }),
+    G({ id: 4, name: "Terlewat", deadline: rel(-5), saved: 0 }),
+    G({ id: 5, name: "Aktif dekat", deadline: rel(3), saved: 0 }),
+  ];
+  r = await openWith(unsorted); ({ d, w } = r);
+  const order = cards(d).map(x => txt(x.querySelector(".category-name")).replace("🎯", "").trim());
+  ok("7a. urutan DOM = sortGoals()", order.join(" > ") === "Terlewat > Aktif dekat > Aktif jauh > Tanpa deadline > Sudah tercapai", order.join(" > "));
+  ok("7b. array sumber di storage tidak dimutasi", w.localStorage.getItem(GOALS_KEY) === JSON.stringify(unsorted));
+  ok("7c. urutan di memori juga tidak dimutasi (saveGoals -> sama persis)", (() => { w.saveGoals(); const same = w.localStorage.getItem(GOALS_KEY) === JSON.stringify(unsorted); return same; })());
+  ok("7d. data-goal-id sesuai id", cards(d).map(x => x.dataset.goalId).join() === "4,5,1,3,2");
+  ok("7e. ringkasan: 4 aktif, 1 tercapai, 5 target", txt(d.getElementById("goals-count-sub")) === "5 target" && /Target Aktif 4/.test([...d.querySelectorAll("#goals-summary .stat")].map(txt).join("|")));
+
+  /* ===================== 8. Format Rupiah ===================== */
+  r = await openWith([G({ id: 1, target: 1234567890, saved: 1234567 }), G({ id: 2, name: "Kecil", target: 1000, saved: 999 }), G({ id: 3, name: "Pecahan", target: 3, saved: 1 })]); ({ d, w } = r);
+  const big = cards(d).find(x => txt(x).includes("Dana Darurat"));
+  ok("8a. pemisah ribuan titik: Rp1.234.567.890", txt(big).includes("Rp1.234.567.890"));
+  ok("8b. Rp1.234.567", txt(big).includes("Rp1.234.567"));
+  ok("8c. tidak ada 'Rp-' atau 'Rp -' di halaman", !/Rp\s?-/.test(txt(d.body)));
+  ok("8d. persen pecahan pakai koma (id-ID): 99,9%", cardPercent(cards(d).find(x => txt(x).includes("Kecil"))) === "99,9%");
+  ok("8e. persen 1/3 dibulatkan 1 desimal: 33,3%", cardPercent(cards(d).find(x => txt(x).includes("Pecahan"))) === "33,3%");
+  ok("8f. format identik dengan formatRupiah() app", txt(big).includes(w.formatRupiah(1234567890)));
+  ok("8g. ringkasan memakai format yang sama", txt(d.getElementById("goals-summary")).includes(w.formatRupiah(1234567 + 999 + 1)));
+
+  /* ===================== 9. Tidak menulis ke localStorage ===================== */
+  const seedTx = [{ id: 1, title: "Gaji", category: "lainnya", type: "income", amount: 5000000, isoDate: rel(0), time: "" }];
+  const goalsRaw = JSON.stringify([G({ deadline: rel(30) })]);
+  {
+    const w0 = frame.contentWindow;
+    w0.localStorage.setItem("financeData.transactions", JSON.stringify(seedTx));
+    w0.localStorage.setItem("financeData.settings", JSON.stringify({ name: "Tester", hideBalanceOnOpen: false, showCheckin: true }));
+    w0.localStorage.setItem(GOALS_KEY, goalsRaw);
+    w0.sessionStorage.setItem("checkinDismissed", "true");
+  }
+  const before = snapAll(frame.contentWindow);
+  r = await load("goals.html"); ({ d, w } = r);
+  ok("9a. semua key localStorage identik sebelum & sesudah membuka halaman", snapAll(w) === before);
+  ok("9b. checkinDismissed tidak disentuh", w.sessionStorage.getItem("checkinDismissed") === "true");
+  ok("9c. tidak ada key baru yang muncul", (() => { const keys = []; for (let i = 0; i < w.localStorage.length; i++) keys.push(w.localStorage.key(i)); return keys.every(k => ALL_KEYS.includes(k)); })());
+  ok("9d. halaman tidak memanggil saveGoals saat init (sumber)", !/function initGoalsPage\(\)[\s\S]*?\n\}/.exec(appJs)[0].includes("saveGoals") && !/function renderGoalList[\s\S]*?\n\}/.exec(appJs)[0].includes("saveGoals"));
+
+  /* ===================== 10. Kompatibel dengan format G-1 ===================== */
+  ok("10a. string tersimpan tetap sama persis dengan yang ditulis", w.localStorage.getItem(GOALS_KEY) === goalsRaw);
+  ok("10b. loadGoals() (G-1) membaca data yang sama dengan yang dirender", (() => { w.loadGoals(); const g = w.sortGoals(); return g.length === 1 && g[0].name === "Dana Darurat" && cards(d).length === 1; })());
+  ok("10c. halaman tidak membuat format/field baru (sumber)", !/pinned|percent:\s*\d|status:\s*"/.test(/function renderGoalCard[\s\S]*?\n\}/.exec(appJs)[0]) && !/\.goals\s*=|goals\.push|goals\.unshift|goals\.splice/.test(/function renderGoal[\s\S]*?function renderGoalsPage[\s\S]*?\n\}/.exec(appJs)[0]));
+  ok("10d. render memakai helper G-1 (bukan hitung ulang)", (() => { const src = /function renderGoalCard[\s\S]*?\n\}/.exec(appJs)[0]; return src.includes("getGoalStatus(") && !/saved\s*\/\s*target|\* 100/.test(src); })());
+  ok("10e. daftar memakai sortGoals()", /function renderGoalList[\s\S]*?\n\}/.exec(appJs)[0].includes("sortGoals(financeData.goals"));
+  ok("10f. dispatcher: data-page=goals -> initGoalsPage (JS-1: lewat guard typeof di core.js)", /page === "goals"\)\s*\{\s*if \(typeof initGoalsPage === "function"\) initGoalsPage\(\);/.test(appJs));
+
+  /* ===================== 11. Halaman lama tetap berjalan ===================== */
+  const PAGES = [["index.html", "balance-value"], ["transactions.html", "all-transaction-list"], ["analytics.html", "analytics-period-title"], ["budget.html", "budget-card"], ["settings.html", "settings-app-version"]];
+  for (const [page, id] of PAGES) {
+    const rr = await load(page); const errs = []; rr.w.addEventListener("error", e => errs.push(e.message)); await wait(150);
+    ok(`11. ${page}: elemen kunci ada, tanpa error, dan TIDAK merender daftar target`, rr.d.getElementById(id) !== null && errs.length === 0 && rr.d.getElementById("goal-list") === null, errs.join(" | "));
+  }
+  // G-4 ada: dashboard punya card ringkasan target; settings belum (G-5).
+  ok("11x. index.html punya card target (G-4); settings belum menyebut goals (G-5 belum)", /id="goals-card"/.test(await (await fetch(BASE + "index.html")).text()) && !/goals\.html/.test(await (await fetch(BASE + "settings.html")).text()));
+  ok("11y. settings.html tidak menyebut goals (G-5 belum)", !/goals\.html/.test(await (await fetch(BASE + "settings.html")).text()));
+  ok("11z. TEPAT 2 listener keydown global", appJs.split('addEventListener("keydown"').length - 1 === 2);
+
+  /* ===================== 12. Responsif & overflow ===================== */
+  const longSet = [
+    G({ id: 1, name: "x".repeat(40), target: 1234567890, saved: 1234567890 - 1, deadline: rel(400) }),
+    G({ id: 2, name: "Liburan Keluarga ke Jepang Musim Semi", target: 99999999, saved: 12345678, deadline: rel(-40) }), // 37 karakter
+    G({ id: 3, name: "Tercapai", target: 5000000, saved: 7500000, deadline: rel(10) }),
+    G({ id: 4, name: "Tanpa deadline", target: 100000, saved: 0 }),
+  ];
+  ok("12pre. semua nama data uji <= 40 karakter", longSet.every(g => g.name.length <= 40));
+  for (const wd of [320, 375, 768, 1280]) {
+    r = await openWith(longSet, "goals.html", wd); ({ d, w } = r);
+    const wide = widest(d);
+    ok(`12. @${wd}: tanpa overflow horizontal (dokumen)`, noOverflow(d), `scrollW=${d.documentElement.scrollWidth} clientW=${d.documentElement.clientWidth}`);
+    ok(`12. @${wd}: tidak ada elemen melewati tepi viewport`, wide.m <= d.documentElement.clientWidth + 0.5, `${wide.who} right=${wide.m}`);
+    ok(`12. @${wd}: card tidak overflow internal`, cards(d).every(x => x.scrollWidth <= x.clientWidth + 1));
+    ok(`12. @${wd}: nama panjang dipotong ellipsis (satu baris)`, cards(d).every(x => { const n = x.querySelector(".category-name"); return n.getBoundingClientRect().height < 30; }));
+    ok(`12. @${wd}: 4 card dirender, 0 error`, cards(d).length === 4 && r.errors.length === 0);
+    ok(`12. @${wd}: progress bar terlihat (tinggi >= 6px, lebar > 100px)`, cards(d).every(x => { const b = x.querySelector(".progress-bar").getBoundingClientRect(); return b.height >= 6 && b.width > 100; }));
+    const back = d.querySelector(".page-header a.icon-btn").getBoundingClientRect();
+    ok(`12. @${wd}: tombol kembali >= 36px & bisa difokus`, back.width >= 36 && back.height >= 36 && (d.querySelector(".page-header a.icon-btn").tabIndex >= 0));
+  }
+  ok("12z. container desktop mengikuti .app--page (maks 640px)", (() => { const app = d.querySelector(".app"); return app.getBoundingClientRect().width <= 640 + 1; })(), String(d.querySelector(".app").getBoundingClientRect().width));
+
+  /* ===================== 13. Focus state & kontras ===================== */
+  ok("13a. CSS punya aturan focus-visible untuk .icon-btn/.btn", /:focus-visible/.test(css) && /\.icon-btn[^{]*:focus-visible|:focus-visible[^{]*\.icon-btn|\.btn[^{]*:focus-visible/.test(css) || /:focus-visible\s*\{/.test(css));
+  r = await openWith([G({ deadline: rel(5) }), G({ id: 2, name: "Done", saved: 10000000 }), G({ id: 3, name: "Late", deadline: rel(-1) }), G({ id: 4, name: "Plain" })]); ({ d, w } = r);
+  const chipColors = cards(d).map(x => [x.dataset.status, w.getComputedStyle(cardStatus(x)).color, w.getComputedStyle(cardStatus(x)).backgroundColor]);
+  ok("13b. empat status punya warna chip berbeda", new Set(chipColors.map(x => x[1] + x[2])).size === 4, JSON.stringify(chipColors));
+  ok("13c. chip status tidak transparan (bg terisi)", chipColors.every(x => x[2] !== "rgba(0, 0, 0, 0)"));
+  ok("13d. CSS goals terpisah di goals.css saja, tidak menyusup ke base/halaman lain (JS-6; dulu: blok terakhir style.css)", (() => { const i = css.indexOf("TARGET KEUANGAN (goals.html)"); const g = css.indexOf("/* ==== goals.css ==== */"), a = css.indexOf("/* ==== analytics.css ==== */"); return i > g && i < a && css.split("TARGET KEUANGAN (goals.html)").length === 2 && !/\.goal-card/.test(css.slice(0, g)); })());
+
+  // Bersihkan jejak.
+  try { w.localStorage.removeItem(GOALS_KEY); w.localStorage.removeItem("financeData.transactions"); w.localStorage.removeItem("financeData.settings"); } catch (e) {}
+
+  const pass = out.filter(l => l.startsWith("PASS")).length, fail = out.filter(l => l.startsWith("FAIL")).length;
+  document.getElementById("r").textContent = out.join("\n") + `\n\n== ${pass} PASS / ${fail} FAIL ==`;
+})().catch(e => { document.getElementById("r").textContent = out.join("\n") + "\nEXCEPTION " + e.message + "\n" + e.stack; });
+</script>

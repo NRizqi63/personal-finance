@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Target Keuangan</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@500;600;700&display=swap" rel="stylesheet" />
+  <!-- CSS dipisah (refactor tahap 1): base.css = token/reset/komponen bersama,
+       lalu gaya khusus halaman ini. Urutan penting: base dulu. -->
+  <link rel="stylesheet" href="../../../frontend/css/base.css" />
+  <link rel="stylesheet" href="../../../frontend/css/goals.css" />
+</head>
+<!-- data-page="goals" -> js/app.js menjalankan initGoalsPage().
+     Halaman Target Keuangan: daftar target dari financeData.goals (G-2),
+     popup Tambah/Edit Target + konfirmasi Hapus (G-3A/G-3B,
+     setupGoalEditor()). Semua angka lewat helper G-1 (sortGoals,
+     getGoalStatus, normalizeGoal, nextGoalId). Satu app.js & style.css
+     dipakai semua halaman. -->
+<body data-page="goals">
+  <div class="app app--page">
+
+    <!-- HEADER: tombol kembali + judul halaman (pola budget.html/analytics.html) -->
+    <header class="app-header page-header">
+      <a class="icon-btn" href="index.html" aria-label="Kembali ke dashboard">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M19 12H5" />
+          <path d="m12 19-7-7 7-7" />
+        </svg>
+      </a>
+      <h1 class="greeting-text">Target Keuangan</h1>
+    </header>
+
+    <p class="goals-intro">Pantau progress tabungan untuk hal-hal yang ingin kamu capai — dana darurat, laptop baru, liburan, atau target lainnya.</p>
+
+    <!-- RINGKASAN: total terkumpul vs total target, jumlah aktif & tercapai
+         (renderGoalsSummary()). Disembunyikan seluruhnya kalau belum ada
+         target — empty state di daftar sudah cukup menjelaskan. -->
+    <section class="goals-summary" id="goals-summary-section" aria-label="Ringkasan target" hidden>
+      <div class="stat-grid" id="goals-summary">
+        <!-- Diisi otomatis oleh js/app.js melalui renderGoalsSummary() -->
+      </div>
+    </section>
+
+    <!-- DAFTAR TARGET: satu card per target, urutan dari sortGoals()
+         (belum selesai dulu, deadline terdekat di atas, tercapai paling
+         akhir). Belum ada target -> empty state (renderGoalList()). -->
+    <section class="goals" aria-label="Daftar target">
+      <h2 class="section-title">Daftar Target <span class="section-title-sub" id="goals-count-sub"></span></h2>
+      <!-- Status hasil aksi target (diisi showGoalsFeedback()), pola yang
+           sama dengan #transaction-feedback di dashboard. -->
+      <p class="settings-feedback transaction-feedback" id="goals-feedback" role="status" aria-live="polite" hidden></p>
+      <div class="category-list goal-list" id="goal-list">
+        <!-- Diisi otomatis oleh js/app.js melalui renderGoalList() -->
+      </div>
+      <!-- Satu-satunya pemicu popup Tambah Target (setupGoalEditor()). -->
+      <button type="button" class="btn btn--ghost btn--block btn-add-goal" id="btn-add-goal">
+        <span class="btn-icon" aria-hidden="true">+</span> Tambah Target
+      </button>
+      <!-- Kejujuran data: nominal terkumpul tidak dihitung dari transaksi. -->
+      <p class="goals-hint" id="goals-hint" hidden>ℹ️ Nominal terkumpul dicatat manual dan belum terhubung dengan saldo atau transaksi.</p>
+    </section>
+
+  </div>
+
+  <!-- MODAL: TAMBAH / EDIT TARGET (setupGoalEditor() di app.js). Satu form
+       untuk dua mode — #field-goal-id kosong = tambah, terisi = edit (pola
+       #field-id pada form transaksi). Struktur & kelas sama dengan popup
+       kategori di budget.html; dikelola createModalController() -> fokus
+       awal, focus trap, Escape, klik overlay, scroll lock, dan pengembalian
+       fokus semuanya dari sana. -->
+  <div class="modal-overlay" id="goal-modal-overlay" hidden>
+    <div class="modal modal--form" role="dialog" aria-modal="true" aria-labelledby="goal-modal-title">
+      <div class="modal-header">
+        <h2 id="goal-modal-title">🎯 Tambah Target</h2>
+        <button type="button" class="modal-close" data-modal-close aria-label="Tutup">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M18 6 6 18" />
+            <path d="m6 6 12 12" />
+          </svg>
+        </button>
+      </div>
+      <p class="modal-sub" id="goal-modal-sub">Tentukan nama, nominal target, dan nominal yang sudah terkumpul.</p>
+      <form id="goal-form" novalidate>
+        <input type="hidden" id="field-goal-id" name="id" value="" />
+        <div class="form-field">
+          <label for="field-goal-name">Nama target</label>
+          <input type="text" id="field-goal-name" name="name" placeholder="Contoh: Dana Darurat" maxlength="40" autocomplete="off" required />
+        </div>
+        <div class="form-field">
+          <label for="field-goal-target">Nominal target</label>
+          <div class="input-prefix">
+            <span class="input-prefix-label">Rp</span>
+            <input type="text" inputmode="numeric" id="field-goal-target" name="target" placeholder="0" required />
+          </div>
+        </div>
+        <div class="form-field">
+          <label for="field-goal-saved">Sudah terkumpul</label>
+          <div class="input-prefix">
+            <span class="input-prefix-label">Rp</span>
+            <input type="text" inputmode="numeric" id="field-goal-saved" name="saved" placeholder="0" />
+          </div>
+          <p class="form-hint">Kosongkan kalau belum ada. Dicatat manual, tidak mengurangi saldo.</p>
+        </div>
+        <div class="form-field">
+          <label for="field-goal-deadline">Tanggal target</label>
+          <input type="date" id="field-goal-deadline" name="deadline" />
+          <p class="form-hint">Boleh dikosongkan.</p>
+        </div>
+        <!-- Kegagalan menyimpan (bukan validasi field) ditampilkan di sini,
+             di dalam popup, supaya user tidak kehilangan isian. -->
+        <p class="settings-feedback" id="goal-modal-status" role="status" aria-live="polite" hidden></p>
+        <div class="modal-actions">
+          <button type="button" class="btn btn--ghost" data-modal-close>Batal</button>
+          <button type="submit" class="btn btn--primary" id="goal-modal-submit">Simpan Target</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: KONFIRMASI HAPUS TARGET — markup & kelas sama dengan konfirmasi
+       hapus kategori (budget.html). Dibuka dari tombol Hapus di card, bukan
+       dari dalam popup edit. Fokus awal jatuh ke tombol tutup (bukan tombol
+       Hapus) supaya Enter yang kebablasan tidak langsung menghapus. -->
+  <div class="modal-overlay" id="goal-confirm-overlay" hidden>
+    <div class="modal modal--form modal--confirm" role="dialog" aria-modal="true" aria-labelledby="goal-confirm-title">
+      <div class="modal-header">
+        <h2 id="goal-confirm-title">Yakin ingin menghapus target?</h2>
+        <button type="button" class="modal-close" data-modal-close aria-label="Tutup">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M18 6 6 18" />
+            <path d="m6 6 12 12" />
+          </svg>
+        </button>
+      </div>
+      <p class="modal-sub" id="goal-confirm-text">Target yang dihapus tidak bisa dikembalikan.</p>
+      <!-- Kegagalan menyimpan saat menghapus ditampilkan di sini; konfirmasi
+           tetap terbuka sampai prosesnya benar-benar selesai. -->
+      <p class="settings-feedback" id="goal-confirm-status" role="status" aria-live="polite" hidden></p>
+      <div class="modal-actions">
+        <button type="button" class="btn btn--ghost" data-modal-close>Batal</button>
+        <button type="button" class="btn btn--danger" id="btn-goal-confirm-delete">Hapus Target</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="../legacy/app.js"></script>
+</body>
+</html>

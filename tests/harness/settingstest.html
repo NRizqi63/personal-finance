@@ -1,0 +1,105 @@
+<!doctype html>
+<meta charset="utf-8">
+<pre id="r">running…</pre>
+<script>
+const out = []; const ok = (n, c, x = "") => out.push(`${c ? "PASS" : "FAIL"} ${n}${x ? "  (" + x + ")" : ""}`);
+const wait = (ms) => new Promise(r => setTimeout(r, ms));
+const BASE = new URL("../../frontend/", location.href).href;
+// JS-6: style.css sudah dihapus. Sumber CSS HIDUP untuk pemeriksaan selector = gabungan 7 file split.
+const CSS_SPLIT_FILES = ["base.css", "dashboard.css", "goals.css", "analytics.css", "budget.css", "transactions.css", "settings.css"];
+async function fetchStyleCss(base) { const parts = []; for (const f of CSS_SPLIT_FILES) parts.push(`/* ==== ${f} ==== */\n` + await (await fetch(base + "css/" + f)).text()); return parts.join("\n"); }
+let frame = null;
+async function load(page, width = 390, height = 1400) {
+  if (frame) frame.remove();
+  frame = document.createElement("iframe"); frame.width = width; frame.height = height; frame.src = BASE + page;
+  document.body.appendChild(frame);
+  await new Promise(r => frame.onload = r); await wait(350);
+  const d = frame.contentDocument, w = frame.contentWindow;
+  const cc = d.getElementById("checkin-close"); if (cc) { cc.click(); await wait(300); }
+  return { d, w };
+}
+const txt = (el) => (el ? el.textContent.replace(/\s+/g, " ").trim() : "");
+const nextLoad = () => new Promise(r => { frame.onload = () => setTimeout(r, 350); });
+
+(async () => {
+  let { d, w } = await load("settings.html");
+  const errors = []; w.addEventListener("error", e => errors.push(e.message));
+
+  // ---------- 1. halaman & shell ----------
+  ok("1a. settings.html terbuka: body[data-page=settings], shell .app.app--page, judul 'Pengaturan'", d.body.dataset.page === "settings" && !!d.querySelector(".app.app--page") && txt(d.querySelector("h1.greeting-text")) === "Pengaturan" && d.title === "Pengaturan");
+  const back = d.querySelector("header.page-header a.icon-btn");
+  ok("1b. tombol kembali (.icon-btn) menuju index.html, 40x40, aria-label", !!back && back.getAttribute("href") === "index.html" && back.getBoundingClientRect().width >= 40 && /Kembali/.test(back.getAttribute("aria-label")));
+  ok("1c. enam section: #profil, #preferensi, #keuangan, #data, #keamanan, #tentang dengan judul .section-title", ["profil", "preferensi", "keuangan", "data", "keamanan", "tentang"].every(id => { const s = d.getElementById(id); return s && s.classList.contains("settings-section") && s.querySelector(".section-title"); }) && d.querySelectorAll(".settings-section").length === 6);
+
+  // ---------- 2. Keuangan ----------
+  const lb = d.getElementById("settings-link-budget"), lc = d.getElementById("settings-link-category");
+  ok("2a. Budget Bulanan -> budget.html, deskripsi benar, seluruh baris adalah <a>.settings-row-link", lb && lb.tagName === "A" && lb.getAttribute("href") === "budget.html" && lb.classList.contains("settings-row-link") && /Budget Bulanan/.test(txt(lb)) && /Kelola budget dan batas pengeluaran/.test(txt(lb)));
+  ok("2b. Kategori -> budget.html, deskripsi benar", lc && lc.getAttribute("href") === "budget.html" && /Kategori/.test(txt(lc)) && /Tambah, edit, atau hapus kategori/.test(txt(lc)));
+  ok("2c. area klik baris >= 52px tinggi, selebar card", [lb, lc].every(a => a.getBoundingClientRect().height >= 52 && Math.abs(a.getBoundingClientRect().width - a.closest(".settings-card").getBoundingClientRect().width) <= 2.5 /* 2px = border card */));
+  ok("2d. tidak ada form budget/kategori (satu-satunya form = profil; dua modal: import & reset, keduanya tertutup)", d.querySelectorAll("form").length === 1 && d.querySelector("form").id === "settings-profile-form" && !d.querySelector("#keuangan form") && d.querySelectorAll(".modal-overlay").length === 2 && d.getElementById("import-modal-overlay").hidden && d.getElementById("reset-modal-overlay").hidden);
+  lb.click(); await nextLoad(); d = frame.contentDocument;
+  ok("2e. klik Budget Bulanan benar-benar membuka budget.html", d.body.dataset.page === "budget" && !!d.getElementById("category-list"));
+  ({ d, w } = await load("settings.html"));
+
+  // ---------- 3. Keamanan ----------
+  const sec = d.getElementById("keamanan");
+  ok("3a. info: data lokal di browser + login/password/sinkronisasi belum tersedia", /lokal/i.test(txt(sec)) && /Login, password & sinkronisasi cloud/.test(txt(sec)) && /Belum tersedia/.test(txt(sec)));
+  ok("3b. badge 'Segera hadir' tampil (judul + baris)", sec.querySelectorAll(".badge-soon").length === 2 && [...sec.querySelectorAll(".badge-soon")].every(b => txt(b) === "Segera hadir" && w.getComputedStyle(b).backgroundColor !== "rgba(0, 0, 0, 0)"));
+  ok("3c. tidak ada fitur keamanan palsu: tanpa input/button/PIN/link di section Keamanan", !sec.querySelector("input, button, a") && !/PIN/i.test(txt(sec)));
+  ok("3d. catatan .settings-info tampil", !!sec.querySelector(".settings-info") && /menghapus data situs/.test(txt(sec.querySelector(".settings-info"))));
+
+  // ---------- 4. Tentang ----------
+  const about = d.getElementById("tentang");
+  ok("4a. nama 'Personal Finance', versi V2.2, penyimpanan 'Local browser storage', deskripsi singkat", /Personal Finance/.test(txt(about)) && txt(d.getElementById("settings-app-version")) === "V2.2" && /Local browser storage/.test(txt(about)) && /Catat pemasukan/.test(txt(about)));
+  const repo = about.querySelector("a.settings-inline-link");
+  ok("4b. link repository = remote git project (github.com/NRizqi63/personal-finance), target _blank + rel noopener", !!repo && repo.href === "https://github.com/NRizqi63/personal-finance" && repo.target === "_blank" && /noopener/.test(repo.rel));
+
+  // ---------- 5. dispatch ----------
+  ok("5a. initSettingsPage terdefinisi & dispatch data-page=settings tidak menjalankan dashboard (tanpa #greeting-text, tanpa check-in)", typeof w.initSettingsPage === "function" && !d.getElementById("greeting-text") && !d.getElementById("checkin-overlay"));
+  ok("5b. initSettingsPage() dipanggil ulang tidak error", (() => { try { w.initSettingsPage(); return true; } catch (e) { return false; } })());
+  ({ d, w } = await load("index.html"));
+  // Refactor JS-2: index.html memuat core/shared/dashboard, kode settings tidak dimuat sama sekali di dashboard.
+  ok("5c. dashboard: kode settings tidak dimuat (typeof initSettingsPage undefined), greeting tetap tampil", typeof w.initSettingsPage === "undefined" && txt(d.getElementById("greeting-text")).length > 0);
+  ({ d, w } = await load("settings.html#tentang", 390, 420));
+  await wait(400);
+  ok("5d. deep-link #tentang: halaman di-scroll ke section Tentang (atau mentok di bawah)", w.scrollY > 0 && (Math.abs(d.getElementById("tentang").getBoundingClientRect().top) < 40 || w.scrollY >= d.documentElement.scrollHeight - w.innerHeight - 1), `scrollY=${w.scrollY}`);
+
+  // ---------- 6. ikon Pengaturan di dashboard = tautan langsung ----------
+  ({ d, w } = await load("index.html"));
+  const gear = d.getElementById("btn-settings");
+  ok("6a. ikon gear adalah <a href=\"settings.html\"> (bukan tombol dropdown)", !!gear && gear.tagName === "A" && gear.getAttribute("href") === "settings.html" && gear.getAttribute("aria-label") === "Pengaturan" && !gear.hasAttribute("aria-haspopup"));
+  ok("6b. pop-up pengaturan lama sudah tidak ada di markup", !d.getElementById("settings-panel") && d.querySelectorAll(".settings-menu-item").length === 0 && d.querySelectorAll(".settings-menu").length === 0);
+  gear.click(); await nextLoad(); d = frame.contentDocument; w = frame.contentWindow;
+  ok("6c. klik ikon gear langsung membuka settings.html", /settings\.html$/.test(w.location.pathname) && d.body.dataset.page === "settings");
+  ({ d, w } = await load("index.html"));
+  d.getElementById("btn-notification").click(); await wait(250);
+  ok("6d. tombol notifikasi tidak terpengaruh (dropdown-nya tetap terbuka)", !d.getElementById("notification-panel").hidden);
+
+  // ---------- 7. responsif & gaya ----------
+  for (const wd of [320, 375, 1280]) {
+    const r = await load("settings.html", wd);
+    const de = r.d.documentElement;
+    const rows = [...r.d.querySelectorAll(".settings-row, .settings-meta-row, .section-title")];
+    const spill = rows.some(el => el.scrollWidth > el.clientWidth + 1);
+    const cards = [...r.d.querySelectorAll(".settings-card")];
+    const inside = cards.every(c => c.getBoundingClientRect().right <= de.clientWidth && c.getBoundingClientRect().left >= 0);
+    ok(`7-${wd}. tanpa overflow horizontal, baris/judul tidak meluber, card di dalam viewport`, de.scrollWidth === de.clientWidth && !spill && inside, `sw=${de.scrollWidth} cw=${de.clientWidth}`);
+  }
+  const cssText = await fetchStyleCss(BASE);
+  ok("7d. CSS: .settings-card/.settings-row/.settings-row-link/.badge-soon/.settings-info/.settings-section terdefinisi", [".settings-card", ".settings-row {", ".settings-row-link", ".badge-soon", ".settings-info", ".settings-section"].every(s => cssText.includes(s)));
+  ok("7e. CSS: hover, active/pressed, focus-visible untuk .settings-row-link; cursor pointer", /\.settings-row-link:hover/.test(cssText) && /\.settings-row-link:is\(:active, \.is-pressed\)/.test(cssText) && /\.settings-row-link:focus-visible/.test(cssText) && w.getComputedStyle(frame.contentDocument.getElementById("settings-link-budget")).cursor === "pointer");
+  const link = frame.contentDocument.getElementById("settings-link-budget");
+  link.style.transition = "none"; /* headless virtual-time tidak memajukan transisi CSS */ link.classList.add("is-pressed"); await wait(50); const pressedBg = frame.contentWindow.getComputedStyle(link).backgroundColor; link.classList.remove("is-pressed");
+  ok("7f. state pressed mengubah latar baris (feedback tekan), tanpa scale", pressedBg !== "rgba(0, 0, 0, 0)" && frame.contentWindow.getComputedStyle(link).transform === "none");
+
+  // ---------- 8. halaman lain tidak regresi ----------
+  for (const p of ["index.html", "transactions.html", "analytics.html", "budget.html"]) {
+    const r = await load(p);
+    const errs = []; r.w.addEventListener("error", e => errs.push(e.message));
+    const okPage = { "index.html": () => !!r.d.getElementById("budget-card") && txt(r.d.getElementById("greeting-text")).includes("Rizqi"), "transactions.html": () => !!r.d.getElementById("all-transaction-list") && !!r.d.querySelector(".calendar"), "analytics.html": () => !!r.d.getElementById("insight-list") && !!r.d.querySelector("#time-chart .bar-col, #time-chart"), "budget.html": () => !!r.d.getElementById("category-list") && !!r.d.getElementById("budget-period-title") }[p]();
+    ok(`8. ${p} tetap render normal`, okPage && errs.length === 0);
+  }
+  ok("9. console 0 error di settings.html", errors.length === 0, errors.join(" | "));
+  document.getElementById("r").textContent = out.join("\n");
+})().catch(e => { out.push("EXCEPTION " + e.stack); document.getElementById("r").textContent = out.join("\n"); });
+</script>

@@ -1,0 +1,179 @@
+<!doctype html>
+<meta charset="utf-8">
+<pre id="r">running…</pre>
+<script>
+const out = []; const ok = (n, c, x = "") => out.push(`${c ? "PASS" : "FAIL"} ${n}${x ? "  (" + x + ")" : ""}`);
+const wait = (ms) => new Promise(r => setTimeout(r, ms));
+const BASE = new URL("../../frontend/", location.href).href;
+const pad = (n) => String(n).padStart(2, "0");
+const iso = (dt) => `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`;
+const today = new Date(); today.setHours(0, 0, 0, 0);
+const rel = (n) => iso(new Date(today.getFullYear(), today.getMonth(), today.getDate() + n));
+const G = (o) => Object.assign({ id: 1, name: "Dana Darurat", target: 10000000, saved: 3200000, deadline: "", createdAt: "2026-01-15" }, o);
+const GOALS = [G({ id: 1, deadline: rel(107) }), G({ id: 2, name: "Beli Laptop", target: 8000000, saved: 8250000, deadline: rel(5) }), G({ id: 3, name: "Liburan Keluarga ke Jepang Musim Semi", target: 25000000, saved: 1500000, deadline: rel(-4) }), G({ id: 4, name: "Modal Usaha", target: 5000000, saved: 0 })];
+const TX = [
+  { id: 6, title: "Makan Siang", category: "makanan", type: "expense", amount: 25000, isoDate: rel(0), time: "" },
+  { id: 5, title: "Belanja Mingguan", category: "belanja", type: "expense", amount: 175000, isoDate: rel(-1), time: "" },
+  { id: 4, title: "Gaji", category: "lainnya", type: "income", amount: 5000000, isoDate: rel(0), time: "" },
+  { id: 3, title: "Bensin", category: "bensin", type: "expense", amount: 40000, isoDate: rel(-3), time: "" },
+  { id: 2, title: "Tagihan Listrik", category: "tagihan", type: "expense", amount: 310000, isoDate: rel(-10), time: "" },
+  { id: 1, title: "Nonton", category: "hiburan", type: "expense", amount: 60000, isoDate: rel(-40), time: "" },
+];
+
+let frame = null;
+async function load(page, width, { empty = false, dismissCheckin = true } = {}) {
+  if (frame) frame.remove();
+  frame = document.createElement("iframe"); frame.width = width; frame.height = 2200; frame.src = BASE + page;
+  // seed dari frame sebelumnya tidak ada -> seed lewat frame ini setelah load? Tidak: storage harus ada SEBELUM app.js jalan.
+  document.body.appendChild(frame);
+  await new Promise(r => frame.onload = r); await wait(300);
+  return { d: frame.contentDocument, w: frame.contentWindow };
+}
+async function seed(empty, dismissCheckin, extra = {}) {
+  if (!frame) { frame = document.createElement("iframe"); frame.src = BASE + "index.html"; document.body.appendChild(frame); await new Promise(r => frame.onload = r); }
+  const w = frame.contentWindow;
+  try {
+    w.localStorage.setItem("financeData.transactions", JSON.stringify(TX));
+    if (empty) w.localStorage.removeItem("financeData.goals"); else w.localStorage.setItem("financeData.goals", JSON.stringify(GOALS));
+    if (dismissCheckin) w.sessionStorage.setItem("checkinDismissed", "true"); else w.sessionStorage.removeItem("checkinDismissed");
+    w.localStorage.removeItem("financeData.budget"); w.localStorage.removeItem("financeData.settings"); w.sessionStorage.removeItem("financeData.importNotice");
+    if (extra.emptyBudget) w.localStorage.setItem("financeData.budget", JSON.stringify({ monthly: 2400000, categories: {} }));
+    if (extra.emptyTx) w.localStorage.removeItem("financeData.transactions");
+    if (extra.notice) w.sessionStorage.setItem("financeData.importNotice", "Import berhasil: 1 transaksi dipulihkan dari file backup.");
+  } catch (e) {}
+}
+// Snapshot computed style semua elemen + pseudo ::before/::after + rect.
+const SKIP = new Set(["transition", "transition-property", "transition-duration", "transition-timing-function", "transition-delay", "animation", "animation-name", "animation-duration"]);
+function snapshot(w, d) {
+  const els = [...d.querySelectorAll("html, body, body *")];
+  const rows = [];
+  for (const el of els) {
+    if (el.tagName === "SCRIPT" || el.tagName === "LINK" || el.tagName === "STYLE") continue;
+    const parts = [];
+    for (const pseudo of [null, "::before", "::after"]) {
+      const cs = w.getComputedStyle(el, pseudo);
+      const props = [];
+      for (let i = 0; i < cs.length; i++) { const p = cs[i]; if (!SKIP.has(p)) props.push(p + ":" + cs.getPropertyValue(p)); }
+      parts.push(props.join(";"));
+    }
+    const r = el.getBoundingClientRect();
+    rows.push({ path: pathOf(el), style: parts.join("|"), rect: [r.x, r.y, r.width, r.height].map(v => Math.round(v * 10) / 10).join(",") });
+  }
+  return rows;
+}
+function pathOf(el) {
+  const bits = [];
+  while (el && el.nodeType === 1 && bits.length < 6) { bits.unshift(el.tagName.toLowerCase() + (el.id ? "#" + el.id : "") + (el.className && typeof el.className === "string" ? "." + el.className.trim().split(/\s+/).join(".") : "")); el = el.parentElement; }
+  return bits.join(" > ");
+}
+async function swapToLegacy(d) {
+  // Matikan link CSS baru, muat style.css lama — DOM tidak disentuh.
+  const links = [...d.querySelectorAll('link[rel="stylesheet"]')].filter(l => /css\/(base|dashboard|goals|analytics|budget|transactions|settings)\.css/.test(l.getAttribute("href")));
+  // Referensi = salinan beku style.css legacy di tests/fixtures/legacy (file aslinya dihapus pada JS-6).
+  const legacy = d.createElement("link"); legacy.rel = "stylesheet"; legacy.href = new URL("../fixtures/legacy/style.css", location.href).href; legacy.dataset.legacy = "1";
+  const loaded = new Promise(r => { legacy.onload = r; legacy.onerror = r; });
+  d.head.appendChild(legacy); await loaded;
+  links.forEach(l => { l.disabled = true; });
+  await wait(150);
+  return links.length;
+}
+let timingOnly = 0;
+async function swapBackToSplit(d) {
+  const legacy = [...d.querySelectorAll('link[rel="stylesheet"][data-legacy]')];
+  legacy.forEach(l => l.remove());
+  [...d.querySelectorAll('link[rel="stylesheet"]')].forEach(l => { l.disabled = false; });
+  await wait(150);
+}
+function noMotion(d) { const st = d.createElement("style"); st.id = "__nomotion"; st.textContent = "*,*::before,*::after{transition:none!important;animation:none!important}"; d.head.appendChild(st); }
+function compare(a, b) {
+  const diffs = [];
+  if (a.length !== b.length) diffs.push(`jumlah elemen beda: ${a.length} vs ${b.length}`);
+  const n = Math.min(a.length, b.length);
+  for (let i = 0; i < n; i++) {
+    if (/^html( > body)?$/.test(a[i].path) || /div\.app(\.app--page)?$/.test(a[i].path)) continue; // kontainer: akibat, bukan sebab
+    if (/type-toggle-indicator/.test(a[i].path)) continue; // lebar/posisinya inline style dari JS (rAF positionIndicator), tidak deterministik di headless — bukan output CSS
+    if (a[i].style !== b[i].style) {
+      const pa = a[i].style.split(/[;|]/), pb = b[i].style.split(/[;|]/);
+      const firstDiff = pa.find((p, k) => p !== pb[k]) || "?"; const other = pb[pa.findIndex((p, k) => p !== pb[k])] || "?";
+      diffs.push(`${a[i].path} :: ${firstDiff}  vs  ${other}`);
+    } else if (a[i].rect !== b[i].rect) diffs.push(`${a[i].path} :: rect ${a[i].rect} vs ${b[i].rect}`);
+    if (diffs.length >= 6) break;
+  }
+  return diffs;
+}
+let scenario = async function (label, page, width, prep, opts = {}) {
+  await seed(opts.empty, opts.dismissCheckin !== false, opts);
+  let { d, w } = await load(page, width);
+  noMotion(d);
+  const errors = []; w.addEventListener("error", e => errors.push(e.message));
+  if (prep) { await prep(d, w); await wait(120); }
+  const A = snapshot(w, d);
+  const disabled = await swapToLegacy(d);
+  const B = snapshot(w, d);
+  // Tukar balik ke CSS split dan snapshot lagi: inline style yang di-set JS
+  // lewat rAF (mis. indikator type-toggle) sudah settle di kedua snapshot ini.
+  await swapBackToSplit(d);
+  const A2 = snapshot(w, d);
+  const diffs = compare(A2, B);
+  const early = compare(A, B);
+  timingOnly += (diffs.length === 0 && early.length > 0) ? 1 : 0;
+  ok(`${label} @${width}: computed style ${A.length} elemen identik (split vs style.css)`, disabled === 2 && diffs.length === 0 && errors.length === 0, diffs.slice(0, 3).join(" || ") || (disabled !== 2 ? `link baru ditemukan: ${disabled}` : "") || errors.join("|"));
+}
+const openTxModal = async (d) => { const b = d.querySelector('[data-action="add-transaction"]'); b.focus(); b.click(); await wait(60); d.getElementById("transaction-modal-overlay").classList.add("is-open"); await wait(500); /* biarkan rAF bersarang positionIndicator() (inline style dari JS) selesai sebelum snapshot */ };
+const openNotif = async (d) => { d.getElementById("btn-notification").click(); await wait(80); };
+const openGoalEdit = async (d) => { const b = d.querySelector('[data-action="edit-goal"]'); b.focus(); b.click(); await wait(60); d.getElementById("goal-modal-overlay").classList.add("is-open"); };
+const openGoalConfirm = async (d) => { const b = d.querySelector('[data-action="delete-goal"]'); b.focus(); b.click(); await wait(60); d.getElementById("goal-confirm-overlay").classList.add("is-open"); };
+const openGoalAdd = async (d) => { const b = d.getElementById("btn-add-goal"); b.focus(); b.click(); await wait(60); d.getElementById("goal-modal-overlay").classList.add("is-open"); d.getElementById("field-goal-name").value = ""; d.getElementById("goal-form").requestSubmit(); };
+const selectBar = async (d) => { const bar = d.querySelector(".bar-col.is-current") || d.querySelector(".bar-col"); if (bar) { bar.click(); await wait(80); } const t = d.getElementById("btn-detail-toggle"); if (t) { t.click(); await wait(80); } };
+const prevMonth = async (d) => { d.getElementById("analytics-prev-month").click(); await wait(80); };
+const hoverBtn = async (d) => { const b = d.querySelector(".btn"); if (b) { b.classList.add("is-pressed"); b.focus(); } };
+
+(async () => {
+  const q = new URLSearchParams(location.search); const only = q.get("only"); const widths = q.get("w") ? q.get("w").split(",").map(Number) : [320, 390, 768, 1280];
+  const _scenario = scenario; scenario = async (label, ...rest) => { if (only && !label.startsWith(only)) return; return _scenario(label, ...rest); };
+  for (const width of widths) {
+    await scenario("index (check-in terbuka)", "index.html", width, async (d) => { d.getElementById("checkin-overlay").classList.add("is-open"); }, { dismissCheckin: false });
+    await scenario("index", "index.html", width, null);
+    await scenario("index (goals kosong)", "index.html", width, null, { empty: true });
+    await scenario("index (modal transaksi terbuka)", "index.html", width, openTxModal);
+    await scenario("index (dropdown notifikasi)", "index.html", width, openNotif);
+    await scenario("index (tombol ditekan/fokus)", "index.html", width, hoverBtn);
+    await scenario("goals", "goals.html", width, null);
+    await scenario("goals (kosong)", "goals.html", width, null, { empty: true });
+    await scenario("goals (modal edit terbuka)", "goals.html", width, openGoalEdit);
+    await scenario("goals (konfirmasi hapus)", "goals.html", width, openGoalConfirm);
+    await scenario("goals (modal tambah + validasi gagal)", "goals.html", width, openGoalAdd);
+    await scenario("analytics", "analytics.html", width, null);
+    await scenario("analytics (bar terpilih + detail)", "analytics.html", width, selectBar);
+    await scenario("analytics (bulan sebelumnya)", "analytics.html", width, prevMonth);
+    await scenario("budget", "budget.html", width, null);
+    await scenario("budget (bulan sebelumnya)", "budget.html", width, async (d) => { d.getElementById("budget-prev-month").click(); await wait(80); });
+    await scenario("budget (modal budget bulanan)", "budget.html", width, async (d) => { const b = d.getElementById("btn-edit-budget"); b.focus(); b.click(); await wait(60); d.getElementById("budget-modal-overlay").classList.add("is-open"); });
+    await scenario("budget (modal kategori + konfirmasi)", "budget.html", width, async (d) => { const b = d.querySelector('[data-action="edit-category"]'); b.focus(); b.click(); await wait(60); d.getElementById("category-modal-overlay").classList.add("is-open"); d.getElementById("btn-delete-category").click(); await wait(60); d.getElementById("confirm-modal-overlay").classList.add("is-open"); });
+    await scenario("budget (tanpa kategori)", "budget.html", width, null, { emptyBudget: true });
+    await scenario("transactions", "transactions.html", width, null);
+    await scenario("transactions (panel filter + chip + cari)", "transactions.html", width, async (d) => { d.getElementById("btn-filter-toggle").click(); await wait(60); d.querySelector('[data-filter-type="income"]').click(); const s = d.getElementById("tx-search"); s.value = "a"; s.dispatchEvent(new Event("input", { bubbles: true })); await wait(100); });
+    await scenario("transactions (cari tanpa hasil + Hapus Filter)", "transactions.html", width, async (d) => { d.getElementById("btn-filter-toggle").click(); await wait(60); const s = d.getElementById("tx-search"); s.value = "zzz"; s.dispatchEvent(new Event("input", { bubbles: true })); await wait(100); });
+    await scenario("transactions (kalender bulan lalu + hari terpilih)", "transactions.html", width, async (d) => { d.querySelector('[data-cal-nav="-1"]').click(); await wait(60); const day = d.querySelector(".calendar-day:not(.is-outside)"); if (day) day.click(); await wait(60); });
+    await scenario("transactions (modal edit + konfirmasi hapus)", "transactions.html", width, async (d) => { const e = d.querySelector('[data-action="edit"]'); if (e) { e.focus(); e.click(); await wait(60); d.getElementById("transaction-modal-overlay").classList.add("is-open"); await wait(500); } });
+    await scenario("transactions (konfirmasi hapus)", "transactions.html", width, async (d) => { const x = d.querySelector('[data-action="delete"]'); if (x) { x.focus(); x.click(); await wait(60); d.getElementById("confirm-modal-overlay").classList.add("is-open"); } });
+    await scenario("transactions (kosong)", "transactions.html", width, null, { emptyTx: true });
+    await scenario("settings", "settings.html", width, null);
+    await scenario("settings (feedback profil + switch)", "settings.html", width, async (d) => { const n = d.getElementById("settings-name"); n.value = " "; n.dispatchEvent(new Event("input", { bubbles: true })); d.getElementById("settings-profile-form").requestSubmit(); d.getElementById("pref-hide-balance").click(); await wait(120); });
+    await scenario("settings (modal reset)", "settings.html", width, async (d) => { const b = d.querySelector('[data-reset-target="transactions"]'); b.focus(); b.click(); await wait(60); d.getElementById("reset-modal-overlay").classList.add("is-open"); });
+    await scenario("settings (modal import + ringkasan)", "settings.html", width, async (d, w) => { const dt = new w.DataTransfer(); dt.items.add(new w.File([JSON.stringify({ app: "personal-finance", schema: 1, data: { transactions: [{ id: 1, title: "X", category: "makanan", type: "expense", amount: 1000, isoDate: "2026-09-01", time: "" }], budget: { monthly: 1, categories: {} }, settings: {} } })], "b.json", { type: "application/json" })); const inp = d.getElementById("import-file"); inp.files = dt.files; inp.dispatchEvent(new w.Event("change", { bubbles: true })); await wait(600); d.getElementById("import-modal-overlay").classList.add("is-open"); });
+    await scenario("settings (notice + tombol ditekan)", "settings.html", width, async (d) => { const b = d.getElementById("btn-export-json"); b.classList.add("is-pressed"); b.focus(); }, { notice: true });
+  }
+  // JS-6: semua 6 halaman memuat base.css + <halaman>.css, tidak ada style.css, tidak ada sheet dimuat dua kali.
+  for (const page of ["index.html", "goals.html", "analytics.html", "budget.html", "transactions.html", "settings.html"]) {
+    const { d } = await load(page, 390);
+    const links = [...d.querySelectorAll('link[rel="stylesheet"]')].filter(l => /^css\//.test(l.getAttribute("href")));
+    const expected = "css/" + (page === "index.html" ? "dashboard" : page.replace(".html", "")) + ".css";
+    ok(`${page}: tepat 2 stylesheet lokal (base.css lalu ${expected}), keduanya berisi rule, tanpa style.css/duplikat`, links.length === 2 && links[0].getAttribute("href") === "css/base.css" && links[1].getAttribute("href") === expected && links.every(l => l.sheet && l.sheet.cssRules.length > 0) && new Set(links.map(l => l.getAttribute("href"))).size === 2, links.map(l => l.getAttribute("href") + ":" + (l.sheet ? l.sheet.cssRules.length : "x")).join(","));
+  }
+  try { frame.contentWindow.localStorage.removeItem("financeData.goals"); frame.contentWindow.localStorage.removeItem("financeData.transactions"); } catch (e) {}
+  out.push(`INFO skenario yang beda hanya karena timing inline-style JS (A≠B tapi A2=B): ${timingOnly}`);
+  const pass = out.filter(l => l.startsWith("PASS")).length, fail = out.filter(l => l.startsWith("FAIL")).length;
+  document.getElementById("r").textContent = out.join("\n") + `\n\n== ${pass} PASS / ${fail} FAIL ==`;
+})().catch(e => { document.getElementById("r").textContent = out.join("\n") + "\nEXCEPTION " + e.message + "\n" + e.stack; });
+</script>

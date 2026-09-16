@@ -1,0 +1,2 @@
+# Skrip shell harus selalu LF, kalau tidak runner gagal di macOS/Linux
+*.sh text eol=lf

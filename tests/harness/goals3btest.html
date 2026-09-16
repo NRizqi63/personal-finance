@@ -1,0 +1,292 @@
+<!doctype html>
+<meta charset="utf-8">
+<pre id="r">running…</pre>
+<script>
+const out = []; const ok = (n, c, x = "") => out.push(`${c ? "PASS" : "FAIL"} ${n}${x ? "  (" + x + ")" : ""}`);
+const wait = (ms) => new Promise(r => setTimeout(r, ms));
+const BASE = new URL("../../frontend/", location.href).href;
+// JS-6: app.js sudah dihapus. Sumber kode HIDUP untuk pemeriksaan regex = gabungan 8 file split (urutan muat).
+const APP_SPLIT_FILES = ["core.js", "transactions-shared.js", "dashboard.js", "goals.js", "analytics.js", "budget.js", "transactions.js", "settings.js"];
+async function fetchAppJs(base) { const parts = []; for (const f of APP_SPLIT_FILES) parts.push(`/* ==== ${f} ==== */\n` + await (await fetch(base + "js/" + f)).text()); return parts.join("\n"); }
+
+const pad = (n) => String(n).padStart(2, "0");
+const iso = (dt) => `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`;
+const today = new Date(); today.setHours(0, 0, 0, 0);
+const rel = (n) => iso(new Date(today.getFullYear(), today.getMonth(), today.getDate() + n));
+const rupiah = (n) => "Rp" + Math.abs(n).toLocaleString("id-ID");
+const GOALS_KEY = "financeData.goals";
+const ALL_KEYS = ["financeData.transactions", "financeData.budget", "financeData.settings", GOALS_KEY];
+const G = (o) => Object.assign({ id: 1, name: "Dana Darurat", target: 10000000, saved: 3200000, deadline: "", createdAt: "2026-01-15" }, o);
+const SEED = () => [G({ id: 3, name: "Dana Darurat", createdAt: "2026-01-15", deadline: rel(60) }), G({ id: 7, name: "Beli Laptop", target: 8000000, saved: 500000, createdAt: "2026-03-02" }), G({ id: 12, name: "Liburan", target: 5000000, saved: 5000000, createdAt: "2026-05-20", deadline: rel(10) })];
+
+let frame = null;
+async function load(page = "goals.html", width = 390) {
+  if (frame) frame.remove();
+  frame = document.createElement("iframe"); frame.width = width; frame.height = 1700; frame.src = BASE + page;
+  document.body.appendChild(frame);
+  await new Promise(r => frame.onload = r); await wait(400);
+  const d = frame.contentDocument, w = frame.contentWindow;
+  const cc = d.getElementById("checkin-close"); const ov = d.getElementById("checkin-overlay");
+  if (cc && ov && !ov.hidden) { cc.click(); await wait(250); }
+  const r = { d, w, errors: [] }; w.addEventListener("error", e => r.errors.push(e.message));
+  return r;
+}
+async function openWith(raw, width = 390) {
+  if (!frame) await load("index.html");
+  const w0 = frame.contentWindow;
+  try { if (raw === null) w0.localStorage.removeItem(GOALS_KEY); else w0.localStorage.setItem(GOALS_KEY, typeof raw === "string" ? raw : JSON.stringify(raw)); } catch (e) {}
+  return load("goals.html", width);
+}
+const txt = (el) => (el ? el.textContent.replace(/\s+/g, " ").trim() : "");
+const snapAll = (w) => JSON.stringify(ALL_KEYS.map(k => w.localStorage.getItem(k)));
+const stored = (w) => JSON.parse(w.localStorage.getItem(GOALS_KEY) || "[]");
+const cards = (d) => [...d.querySelectorAll("#goal-list .goal-card")];
+const cardOf = (d, id) => d.querySelector(`#goal-list .goal-card[data-goal-id="${id}"]`);
+const editBtn = (d, id) => d.querySelector(`[data-action="edit-goal"][data-id="${id}"]`);
+const delBtn = (d, id) => d.querySelector(`[data-action="delete-goal"][data-id="${id}"]`);
+const $ = (d, id) => d.getElementById(id);
+const editOv = (d) => $(d, "goal-modal-overlay"), confOv = (d) => $(d, "goal-confirm-overlay");
+const editOpen = (d) => !editOv(d).hidden, confOpen = (d) => !confOv(d).hidden;
+async function clickBtn(b) { b.focus(); b.click(); await wait(80); }
+function type(d, id, value) { const f = $(d, id); f.value = value; f.dispatchEvent(new Event("input", { bubbles: true })); f.dispatchEvent(new Event("change", { bubbles: true })); }
+async function submit(d) { $(d, "goal-form").requestSubmit(); await wait(80); }
+const invalidField = (d) => [...$(d, "goal-form").querySelectorAll("input")].find(f => !f.checkValidity());
+const key = (d, k, extra = {}) => { const ev = new KeyboardEvent("keydown", Object.assign({ key: k, bubbles: true, cancelable: true }, extra)); d.dispatchEvent(ev); return ev; };
+const focusables = (ov) => [...ov.querySelectorAll("button:not([disabled]), input:not([disabled]):not([type=hidden])")].filter(el => !el.hidden && el.getClientRects().length > 0);
+
+(async () => {
+  const appJs = await fetchAppJs(BASE);
+  const appCode = appJs.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|\s)\/\/.*$/gm, "$1");
+  const html = await (await fetch(BASE + "goals.html")).text();
+  let r = await load("index.html"); try { r.w.localStorage.clear(); r.w.sessionStorage.clear(); } catch (e) {}
+
+  /* ===================== 1. Tombol Edit & Hapus pada setiap card ===================== */
+  r = await openWith(SEED()); let { d, w } = r;
+  ok("1a. halaman termuat tanpa error, 3 card", r.errors.length === 0 && cards(d).length === 3);
+  ok("1b. setiap card punya tombol Edit", cards(d).every(c => c.querySelector('[data-action="edit-goal"]') && txt(c.querySelector('[data-action="edit-goal"]')).includes("Edit")));
+  ok("1c. setiap card punya tombol Hapus", cards(d).every(c => c.querySelector('[data-action="delete-goal"]') && txt(c.querySelector('[data-action="delete-goal"]')).includes("Hapus")));
+  ok("1d. data-id tombol = id card", cards(d).every(c => c.querySelector('[data-action="edit-goal"]').dataset.id === c.dataset.goalId && c.querySelector('[data-action="delete-goal"]').dataset.id === c.dataset.goalId));
+  ok("1e. aria-label menyebut nama target", editBtn(d, 7).getAttribute("aria-label") === "Edit target Beli Laptop" && delBtn(d, 7).getAttribute("aria-label") === "Hapus target Beli Laptop");
+  ok("1f. Hapus bergaya bahaya (danger-ghost), Edit ghost biasa", delBtn(d, 7).classList.contains("btn--danger-ghost") && editBtn(d, 7).classList.contains("btn--ghost") && !editBtn(d, 7).classList.contains("btn--danger-ghost"));
+  ok("1g. tanpa inline handler; delegasi klik di #goal-list", !/\son[a-z]+=/i.test(html) && /getElementById\("goal-list"\)\.addEventListener\("click"/.test(appCode));
+  ok("1h. tidak ada window.confirm/alert/prompt di kode", !/window\.confirm|\bconfirm\(|\balert\(|\bprompt\(/.test(appCode));
+  ok("1i. TEPAT 2 listener keydown global", appJs.split('addEventListener("keydown"').length - 1 === 2);
+  ok("1j. tombol Edit/Hapus >= 36px tinggi (btn--xs + halo)", editBtn(d, 7).getBoundingClientRect().height >= 36 && delBtn(d, 7).getBoundingClientRect().height >= 36);
+
+  /* ===================== 2-3. Modal edit terbuka & terisi ===================== */
+  await clickBtn(editBtn(d, 7));
+  ok("2a. klik Edit membuka modal editor yang sama (G-3A)", editOpen(d) && $(d, "goal-form") !== null);
+  ok("2b. judul & tombol menyesuaikan mode edit", txt($(d, "goal-modal-title")).includes("Edit Target") && txt($(d, "goal-modal-submit")) === "Simpan Perubahan");
+  ok("2c. sub-teks mode edit", /Ubah/.test(txt($(d, "goal-modal-sub"))));
+  ok("3a. prefill nama", $(d, "field-goal-name").value === "Beli Laptop");
+  ok("3b. prefill nominal target (diformat)", $(d, "field-goal-target").value === "8.000.000");
+  ok("3c. prefill terkumpul (diformat)", $(d, "field-goal-saved").value === "500.000");
+  ok("3d. prefill deadline kosong -> \"\"", $(d, "field-goal-deadline").value === "");
+  ok("3e. hidden id terisi", $(d, "field-goal-id").value === "7");
+  key(d, "Escape"); await wait(250);
+  await clickBtn(editBtn(d, 3));
+  ok("3f. prefill deadline terisi (yyyy-mm-dd, tidak bergeser)", $(d, "field-goal-deadline").value === rel(60));
+  key(d, "Escape"); await wait(250);
+  await clickBtn(editBtn(d, 12));
+  ok("3g. prefill target tercapai: terkumpul 5.000.000", $(d, "field-goal-saved").value === "5.000.000");
+  key(d, "Escape"); await wait(250);
+  await clickBtn($(d, "btn-add-goal"));
+  ok("3h. setelah edit, membuka Tambah kembali ke mode tambah & form kosong", txt($(d, "goal-modal-title")).includes("Tambah Target") && txt($(d, "goal-modal-submit")) === "Simpan Target" && $(d, "field-goal-id").value === "" && $(d, "field-goal-name").value === "");
+  key(d, "Escape"); await wait(250);
+
+  /* ===================== 4-6. Edit valid: id & createdAt tetap ===================== */
+  const before = stored(w);
+  await clickBtn(editBtn(d, 7));
+  type(d, "field-goal-name", "  Laptop Kerja  "); type(d, "field-goal-target", "9000000"); type(d, "field-goal-saved", "1250000"); type(d, "field-goal-deadline", rel(90));
+  await submit(d); await wait(250);
+  const after = stored(w); const edited = after.find(g => g.id === 7);
+  ok("4a. edit valid tersimpan", !!edited && edited.name === "Laptop Kerja" && edited.target === 9000000 && edited.saved === 1250000 && edited.deadline === rel(90));
+  ok("4b. jumlah target tidak berubah (tidak ada goal baru)", after.length === 3);
+  ok("4c. nominal number, nama di-trim", typeof edited.target === "number" && typeof edited.saved === "number");
+  ok("5. id tetap sama", edited.id === 7 && after.map(g => g.id).join() === before.map(g => g.id).join());
+  ok("6. createdAt tetap sama", edited.createdAt === "2026-03-02");
+  ok("6b. hanya 6 field, tanpa turunan", Object.keys(edited).sort().join(",") === "createdAt,deadline,id,name,saved,target");
+  ok("6c. posisi dalam array tetap (indeks 1)", after[1].id === 7);
+  ok("6d. dua target lain identik byte-per-byte", JSON.stringify(after.filter(g => g.id !== 7)) === JSON.stringify(before.filter(g => g.id !== 7)));
+  ok("4d. modal tertutup, daftar & summary ter-refresh", !editOpen(d) && txt(cardOf(d, 7)).includes("Laptop Kerja") && txt(cardOf(d, 7)).includes(rupiah(9000000)) && txt($(d, "goals-summary")).includes(rupiah(3200000 + 1250000 + 5000000)));
+  ok("4e. feedback sukses 'Perubahan … tersimpan'", !$(d, "goals-feedback").hidden && /Perubahan "Laptop Kerja" tersimpan/.test(txt($(d, "goals-feedback"))) && $(d, "goals-feedback").dataset.type === "success");
+  ok("4f. fokus kembali ke tombol Edit pengganti (card dirender ulang)", d.activeElement === editBtn(d, 7), d.activeElement && (d.activeElement.getAttribute("aria-label") || d.activeElement.id));
+  ok("4g. key lain tidak tersentuh", JSON.parse(snapAll(w)).slice(0, 3).every(v => v === null));
+
+  /* ===================== 7. Edit invalid ditolak ===================== */
+  const snap7 = snapAll(w);
+  await clickBtn(editBtn(d, 7)); type(d, "field-goal-name", ""); await submit(d);
+  ok("7a. nama kosong ditolak, modal tetap terbuka", editOpen(d) && invalidField(d) && invalidField(d).id === "field-goal-name");
+  ok("7a. storage tidak berubah", snapAll(w) === snap7);
+  key(d, "Escape"); await wait(250);
+  await clickBtn(editBtn(d, 7)); type(d, "field-goal-target", "0"); await submit(d);
+  ok("7b. target 0 ditolak", editOpen(d) && invalidField(d) && invalidField(d).id === "field-goal-target");
+  key(d, "Escape"); await wait(250);
+  await clickBtn(editBtn(d, 7)); $(d, "field-goal-saved").value = "-1"; await submit(d);
+  ok("7c. terkumpul negatif ditolak", editOpen(d) && invalidField(d) && invalidField(d).id === "field-goal-saved");
+  key(d, "Escape"); await wait(250);
+  await clickBtn(editBtn(d, 7)); $(d, "field-goal-deadline").type = "text"; $(d, "field-goal-deadline").value = "2026-02-30"; await submit(d);
+  ok("7d. deadline tidak valid ditolak", editOpen(d) && invalidField(d) && invalidField(d).id === "field-goal-deadline");
+  $(d, "field-goal-deadline").type = "date"; key(d, "Escape"); await wait(250);
+  ok("7e. semua penolakan: storage & memori tidak berubah", snapAll(w) === snap7 && JSON.stringify(w.sortGoals().map(g => g.id).sort()) === JSON.stringify([12, 3, 7].sort()));
+  ok("7f. Escape setelah gagal: form direset, mode kembali normal", $(d, "field-goal-id").value === "" && !editOpen(d));
+
+  /* ===================== 8. saved > target (aturan G-1) ===================== */
+  await clickBtn(editBtn(d, 7)); type(d, "field-goal-target", "1000000"); await submit(d); await wait(250);
+  const over = stored(w).find(g => g.id === 7);
+  ok("8a. edit target < saved diterima (G-1)", !editOpen(d) && over.target === 1000000 && over.saved === 1250000);
+  ok("8b. card menampilkan Tercapai · lebih Rp250.000", txt(cardOf(d, 7)).includes("Tercapai") && txt(cardOf(d, 7)).includes("lebih " + rupiah(250000)));
+  ok("8c. feedback menyebut tercapai", /tercapai/.test(txt($(d, "goals-feedback"))));
+
+  /* ===================== 9-10. Hapus: konfirmasi & Batal ===================== */
+  r = await openWith(SEED()); ({ d, w } = r);
+  const snap9 = snapAll(w);
+  ok("9a. konfirmasi tersembunyi awalnya", !confOpen(d));
+  await clickBtn(delBtn(d, 7));
+  ok("9b. klik Hapus membuka konfirmasi (bukan langsung menghapus)", confOpen(d) && stored(w).length === 3 && cards(d).length === 3);
+  ok("9c. konfirmasi menyebut nama target & tidak bisa dibatalkan", /Beli Laptop/.test(txt($(d, "goal-confirm-title"))) && /tidak bisa dibatalkan/.test(txt($(d, "goal-confirm-text"))));
+  ok("9d. konfirmasi menyebut nominal yang akan hilang", txt($(d, "goal-confirm-text")).includes(rupiah(500000)) && txt($(d, "goal-confirm-text")).includes(rupiah(8000000)));
+  ok("9e. tombol Batal & Hapus Target ada; Hapus bergaya danger", [...confOv(d).querySelectorAll("button")].some(b => txt(b) === "Batal") && txt($(d, "btn-goal-confirm-delete")) === "Hapus Target" && $(d, "btn-goal-confirm-delete").classList.contains("btn--danger"));
+  ok("9f. fokus awal BUKAN tombol Hapus (anti salah pencet), tapi di dalam modal", confOv(d).contains(d.activeElement) && d.activeElement !== $(d, "btn-goal-confirm-delete"));
+  ok("9g. role=dialog + aria-modal", confOv(d).querySelector('[role="dialog"][aria-modal="true"]') !== null);
+  ok("9h. konfirmasi memakai modal-controller yang sama (bukan sistem baru)", /createModalController\(confirmOverlay/.test(appCode));
+  const batal = [...confOv(d).querySelectorAll("[data-modal-close]")].find(b => txt(b) === "Batal");
+  batal.click(); await wait(250);
+  ok("10a. Batal menutup konfirmasi", !confOpen(d));
+  ok("10b. Batal: data & daftar tidak berubah", snapAll(w) === snap9 && cards(d).length === 3 && stored(w).length === 3);
+  ok("10c. Batal: fokus kembali ke tombol Hapus pemicu", d.activeElement === delBtn(d, 7));
+  await clickBtn(delBtn(d, 7)); key(d, "Escape"); await wait(250);
+  ok("10d. Escape pada konfirmasi = batal, data utuh", !confOpen(d) && snapAll(w) === snap9);
+  await clickBtn(delBtn(d, 7)); confOv(d).dispatchEvent(new MouseEvent("click", { bubbles: true })); await wait(250);
+  ok("10e. klik overlay = batal, data utuh", !confOpen(d) && snapAll(w) === snap9);
+
+  /* ===================== 11-13. Hapus berhasil ===================== */
+  await clickBtn(delBtn(d, 7)); $(d, "btn-goal-confirm-delete").click(); await wait(250);
+  const left = stored(w);
+  ok("11a. goal id=7 terhapus dari storage", !left.some(g => g.id === 7) && left.length === 2);
+  ok("11b. card id=7 hilang dari daftar", cardOf(d, 7) === null && cards(d).length === 2);
+  ok("11c. konfirmasi tertutup", !confOpen(d));
+  ok("12a. goal lain (3 & 12) tetap utuh byte-per-byte", JSON.stringify(left) === JSON.stringify(SEED().filter(g => g.id !== 7)));
+  ok("12b. urutan sisa tetap", left.map(g => g.id).join() === "3,12");
+  ok("13a. sub-judul jumlah -> '2 target'", txt($(d, "goals-count-sub")) === "2 target");
+  ok("13b. summary diperbarui (total terkumpul & aktif/tercapai)", txt($(d, "goals-summary")).includes(rupiah(3200000 + 5000000)) && /Target Aktif 1/.test(txt($(d, "goals-summary"))) && /Tercapai 1/.test(txt($(d, "goals-summary"))));
+  ok("13c. feedback sukses 'Target … dihapus'", !$(d, "goals-feedback").hidden && /"Beli Laptop" dihapus/.test(txt($(d, "goals-feedback"))));
+  ok("13d. fokus diarahkan ke tombol Tambah Target (pemicu sudah hilang)", d.activeElement === $(d, "btn-add-goal"), d.activeElement && (d.activeElement.id || d.activeElement.tagName));
+  await clickBtn(delBtn(d, 3)); $(d, "btn-goal-confirm-delete").click(); await wait(250);
+  await clickBtn(delBtn(d, 12)); $(d, "btn-goal-confirm-delete").click(); await wait(250);
+  ok("13e. hapus semua -> empty state, summary hidden, hint hidden, key tetap '[]'", d.querySelector(".goal-empty") !== null && $(d, "goals-summary-section").hidden && $(d, "goals-hint").hidden && w.localStorage.getItem(GOALS_KEY) === "[]");
+
+  /* ===================== 14. Storage gagal saat edit -> rollback ===================== */
+  r = await openWith(SEED()); ({ d, w } = r);
+  const snap14 = snapAll(w);
+  w.localStorage.setItem = () => { throw new Error("QuotaExceeded (simulasi)"); };
+  await clickBtn(editBtn(d, 7)); type(d, "field-goal-name", "Gagal Edit"); type(d, "field-goal-target", "123456"); await submit(d); await wait(120);
+  ok("14a. modal edit tetap terbuka, isian dipertahankan", editOpen(d) && $(d, "field-goal-name").value === "Gagal Edit" && $(d, "field-goal-target").value === "123.456");
+  ok("14b. pesan error di dalam modal", !$(d, "goal-modal-status").hidden && $(d, "goal-modal-status").dataset.type === "error" && /tidak bisa disimpan/.test(txt($(d, "goal-modal-status"))));
+  ok("14c. rollback memori: objek lama kembali (nama & target asli)", (() => { const g = w.sortGoals().find(x => x.id === 7); return g.name === "Beli Laptop" && g.target === 8000000 && g.saved === 500000 && g.createdAt === "2026-03-02"; })());
+  ok("14d. tombol submit aktif kembali", !$(d, "goal-modal-submit").disabled);
+  ok("14e. storage tidak berubah", snapAll(w) === snap14);
+  delete w.localStorage.setItem;
+  await submit(d); await wait(250);
+  ok("14f. coba lagi setelah storage pulih -> tersimpan, id & createdAt tetap", !editOpen(d) && stored(w).find(g => g.id === 7).name === "Gagal Edit" && stored(w).find(g => g.id === 7).createdAt === "2026-03-02" && stored(w).length === 3);
+
+  /* ===================== 15. Storage gagal saat delete -> rollback ===================== */
+  r = await openWith(SEED()); ({ d, w } = r);
+  const snap15 = snapAll(w);
+  w.localStorage.setItem = () => { throw new Error("QuotaExceeded (simulasi)"); };
+  await clickBtn(delBtn(d, 7)); $(d, "btn-goal-confirm-delete").click(); await wait(120);
+  ok("15a. konfirmasi TETAP terbuka saat gagal", confOpen(d));
+  ok("15b. error ditampilkan di dalam konfirmasi", !$(d, "goal-confirm-status").hidden && /tidak bisa dihapus/.test(txt($(d, "goal-confirm-status"))));
+  ok("15c. rollback memori: 3 target, urutan sama", w.sortGoals().length === 3 && (() => { w.saveGoals = w.saveGoals; return true; })());
+  ok("15d. tombol Hapus Target aktif kembali", !$(d, "btn-goal-confirm-delete").disabled);
+  ok("15e. storage tidak berubah", snapAll(w) === snap15);
+  delete w.localStorage.setItem;
+  ok("15f. goal masih tampil di daftar (belum dirender ulang sebagai hilang)", cardOf(d, 7) !== null);
+  $(d, "btn-goal-confirm-delete").click(); await wait(250);
+  ok("15g. coba lagi -> terhapus, posisi target lain utuh", !confOpen(d) && stored(w).map(g => g.id).join() === "3,12");
+  ok("15h. urutan array setelah rollback+hapus tetap benar (id 7 dikembalikan ke indeks semula sebelum dihapus lagi)", JSON.stringify(stored(w)) === JSON.stringify(SEED().filter(g => g.id !== 7)));
+  ok("15i. 0 error runtime sepanjang skenario gagal", r.errors.length === 0, r.errors.join(" | "));
+
+  /* ===================== 16. Escape / focus trap / restore / scroll lock ===================== */
+  r = await openWith(SEED()); ({ d, w } = r);
+  await clickBtn(editBtn(d, 3));
+  ok("16a. edit: fokus awal di dalam modal (tombol tutup, konvensi UX-2)", d.activeElement === editOv(d).querySelector(".modal-close"));
+  ok("16b. edit: scroll lock aktif", d.body.classList.contains("is-modal-open"));
+  let f = focusables(editOv(d)); f[f.length - 1].focus(); let ev = key(d, "Tab");
+  ok("16c. edit: Tab trap berputar ke elemen pertama", d.activeElement === f[0] && ev.defaultPrevented);
+  f[0].focus(); ev = key(d, "Tab", { shiftKey: true });
+  ok("16d. edit: Shift+Tab berputar ke elemen terakhir", d.activeElement === f[f.length - 1] && ev.defaultPrevented);
+  key(d, "Escape"); await wait(250);
+  ok("16e. edit: Escape menutup, scroll lock lepas, fokus kembali ke tombol Edit", !editOpen(d) && !d.body.classList.contains("is-modal-open") && d.activeElement === editBtn(d, 3));
+  await clickBtn(delBtn(d, 3));
+  ok("16f. konfirmasi: scroll lock aktif", d.body.classList.contains("is-modal-open"));
+  f = focusables(confOv(d)); f[f.length - 1].focus(); ev = key(d, "Tab");
+  ok("16g. konfirmasi: Tab trap berputar", d.activeElement === f[0] && ev.defaultPrevented);
+  $(d, "btn-add-goal").focus(); ev = key(d, "Tab");
+  ok("16h. konfirmasi: fokus yang lolos ditarik kembali", confOv(d).contains(d.activeElement) && ev.defaultPrevented);
+  key(d, "Escape"); await wait(250);
+  ok("16i. konfirmasi: Escape menutup, lock lepas, fokus kembali ke Hapus", !confOpen(d) && !d.body.classList.contains("is-modal-open") && d.activeElement === delBtn(d, 3));
+  ok("16j. Escape pada halaman tanpa modal tidak error", (() => { key(d, "Escape"); return r.errors.length === 0; })());
+
+  /* ===================== 17. XSS ===================== */
+  const XSS = '<img src=x onerror="top.__x=1">A&"k"';
+  r = await openWith([G({ id: 1, name: XSS, saved: 100 })]); ({ d, w } = r);
+  ok("17a. tombol Edit/Hapus: aria-label di-escape, tidak ada <img> di card", editBtn(d, 1).getAttribute("aria-label").includes('A&"k"') && cardOf(d, 1).querySelector("img") === null && w.top.__x === undefined);
+  await clickBtn(editBtn(d, 1));
+  ok("17b. prefill nama menampilkan teks mentah di input (value, bukan HTML)", $(d, "field-goal-name").value === XSS);
+  type(d, "field-goal-name", '<b onmouseover="top.__y=1">B</b>&"q"'); await submit(d); await wait(250);
+  ok("17c. nama hasil edit berisi markup dirender sebagai teks", cardOf(d, 1).querySelector("b") === null && txt(cardOf(d, 1)).includes("<b onmouseover") && w.top.__y === undefined);
+  ok("17d. feedback edit via textContent (tanpa markup)", $(d, "goals-feedback").querySelector("b") === null);
+  await clickBtn(delBtn(d, 1));
+  ok("17e. judul/teks konfirmasi via textContent (tanpa <b>/<img>)", $(d, "goal-confirm-title").querySelector("b, img") === null && txt($(d, "goal-confirm-title")).includes("<b onmouseover"));
+  $(d, "btn-goal-confirm-delete").click(); await wait(250);
+  ok("17f. feedback hapus via textContent", $(d, "goals-feedback").querySelector("b") === null && /dihapus/.test(txt($(d, "goals-feedback"))));
+
+  /* ===================== 18. Responsif 320 & 390 (+768, 1280) ===================== */
+  const longSet = [G({ id: 1, name: "x".repeat(40), target: 1234567890, saved: 1234567889, deadline: rel(400) }), G({ id: 2, name: "Liburan Keluarga ke Jepang Musim Semi", target: 99999999, saved: 12345678, deadline: rel(-40) }), G({ id: 3, name: "Tercapai", target: 5000000, saved: 7500000 })];
+  for (const wd of [320, 390, 768, 1280]) {
+    r = await openWith(longSet, wd); ({ d, w } = r);
+    const cw = d.documentElement.clientWidth;
+    ok(`18. @${wd}: dokumen tanpa overflow horizontal`, d.documentElement.scrollWidth <= cw, `scrollW=${d.documentElement.scrollWidth} cw=${cw}`);
+    ok(`18. @${wd}: card tanpa overflow internal & baris aksi muat`, cards(d).every(c => c.scrollWidth <= c.clientWidth + 1 && c.querySelector(".goal-card-actions").getBoundingClientRect().right <= c.getBoundingClientRect().right + 0.5));
+    ok(`18. @${wd}: Edit & Hapus bersebelahan, tidak saling tumpang tindih`, cards(d).every(c => { const a = editBtn(d, c.dataset.goalId).getBoundingClientRect(), b = delBtn(d, c.dataset.goalId).getBoundingClientRect(); return a.right <= b.left && a.height >= 36 && b.height >= 36; }));
+    await clickBtn(editBtn(d, 1));
+    const box = editOv(d).querySelector(".modal").getBoundingClientRect();
+    ok(`18. @${wd}: modal edit muat di viewport`, box.right <= cw + 0.5 && box.left >= -0.5 && d.documentElement.scrollWidth <= cw);
+    key(d, "Escape"); await wait(200);
+    await clickBtn(delBtn(d, 2));
+    const cbox = confOv(d).querySelector(".modal").getBoundingClientRect();
+    ok(`18. @${wd}: konfirmasi muat di viewport, tombol Hapus Target >= 40px`, cbox.right <= cw + 0.5 && cbox.left >= -0.5 && $(d, "btn-goal-confirm-delete").getBoundingClientRect().height >= 40);
+    key(d, "Escape"); await wait(200);
+    ok(`18. @${wd}: 0 error`, r.errors.length === 0, r.errors.join(" | "));
+  }
+
+  /* ===================== 19. Halaman Goals lama tetap berjalan ===================== */
+  r = await openWith(null); ({ d, w } = r);
+  ok("19a. kosong: empty state, tombol Tambah ada, 0 error", d.querySelector(".goal-empty") !== null && $(d, "btn-add-goal") !== null && r.errors.length === 0);
+  await clickBtn($(d, "btn-add-goal")); type(d, "field-goal-name", "Baru"); type(d, "field-goal-target", "100000"); await submit(d); await wait(250);
+  ok("19b. alur tambah G-3A masih bekerja setelah G-3B", stored(w).length === 1 && stored(w)[0].name === "Baru" && stored(w)[0].id === 1 && cards(d).length === 1);
+  r = await openWith("{rusak"); ({ d, w } = r);
+  ok("19c. storage korup: halaman tetap jalan, empty state", d.querySelector(".goal-empty") !== null && r.errors.length === 0);
+  r = await openWith([G({ id: 1 }), null, G({ id: 2, target: 0 }), G({ id: 5, name: "Valid Lama" })]); ({ d, w } = r);
+  ok("19d. data lama valid tetap dirender + punya tombol aksi", cards(d).length === 2 && editBtn(d, 5) !== null && delBtn(d, 5) !== null);
+  // Tombol aksi untuk id yang sudah tidak ada (mis. dihapus di tab lain)
+  w.localStorage.setItem(GOALS_KEY, JSON.stringify([G({ id: 1 })])); w.loadGoals();
+  await clickBtn(editBtn(d, 5));
+  ok("19e. edit target yang sudah hilang: modal tidak dibuka, feedback error, daftar disegarkan", !editOpen(d) && $(d, "goals-feedback").dataset.type === "error" && cards(d).length === 1);
+  const PAGES = [["index.html", "balance-value"], ["transactions.html", "all-transaction-list"], ["analytics.html", "analytics-period-title"], ["budget.html", "budget-card"], ["settings.html", "settings-app-version"]];
+  for (const [page, id] of PAGES) {
+    const rr = await load(page); await wait(120);
+    ok(`19. ${page}: elemen kunci ada, 0 error, tanpa modal target`, rr.d.getElementById(id) !== null && rr.errors.length === 0 && rr.d.getElementById("goal-confirm-overlay") === null, rr.errors.join(" | "));
+  }
+  ok("19x. index.html menautkan goals.html (G-4 ada); settings belum (G-5 belum)", /href="goals\.html"/.test(await (await fetch(BASE + "index.html")).text()) && !/goals\.html/.test(await (await fetch(BASE + "settings.html")).text()));
+  ok("19y. GOAL_LIMIT hanya dicek saat menambah (bukan edit) — sumber", /if \(!previous && financeData\.goals\.length >= GOAL_LIMIT\)/.test(appCode));
+  r = await openWith(Array.from({ length: 50 }, (_, i) => G({ id: i + 1, name: `T${i + 1}` }))); ({ d, w } = r);
+  await clickBtn(editBtn(d, 50)); type(d, "field-goal-name", "Edit ke-50"); await submit(d); await wait(250);
+  ok("19z. edit tetap bisa saat sudah 50 target", !editOpen(d) && stored(w).find(g => g.id === 50).name === "Edit ke-50" && stored(w).length === 50);
+
+  try { w.localStorage.removeItem(GOALS_KEY); } catch (e) {}
+  const pass = out.filter(l => l.startsWith("PASS")).length, fail = out.filter(l => l.startsWith("FAIL")).length;
+  document.getElementById("r").textContent = out.join("\n") + `\n\n== ${pass} PASS / ${fail} FAIL ==`;
+})().catch(e => { document.getElementById("r").textContent = out.join("\n") + "\nEXCEPTION " + e.message + "\n" + e.stack; });
+</script>

@@ -1,0 +1,143 @@
+<!doctype html>
+<meta charset="utf-8">
+<pre id="r">running…</pre>
+<script>
+const out = []; const ok = (n, c, x = "") => out.push(`${c ? "PASS" : "FAIL"} ${n}${x ? "  (" + x + ")" : ""}`);
+const wait = (ms) => new Promise(r => setTimeout(r, ms));
+const BASE = new URL("../../frontend/", location.href).href;
+// JS-6: app.js sudah dihapus. Sumber kode HIDUP untuk pemeriksaan regex = gabungan 8 file split (urutan muat).
+const APP_SPLIT_FILES = ["core.js", "transactions-shared.js", "dashboard.js", "goals.js", "analytics.js", "budget.js", "transactions.js", "settings.js"];
+async function fetchAppJs(base) { const parts = []; for (const f of APP_SPLIT_FILES) parts.push(`/* ==== ${f} ==== */\n` + await (await fetch(base + "js/" + f)).text()); return parts.join("\n"); }
+
+const pad = (n) => String(n).padStart(2, "0");
+const iso = (dt) => `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`;
+const today = new Date(); today.setHours(0, 0, 0, 0);
+const MONTHS = ["Januari","Februari","Maret","April","Mei","Juni","Juli","Agustus","September","Oktober","November","Desember"];
+const monthLabel = (offset) => { const d = new Date(today.getFullYear(), today.getMonth() + offset, 1); return `${MONTHS[d.getMonth()]} ${d.getFullYear()}`; };
+// Batas bulan (lokal): hari pertama & terakhir bulan lalu, hari pertama bulan ini.
+const firstPrev = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+const lastPrev = new Date(today.getFullYear(), today.getMonth(), 0);
+const firstThis = new Date(today.getFullYear(), today.getMonth(), 1);
+const SEED = [
+  // bulan berjalan: 25.000 + 75.000 = 100.000 pengeluaran (+1 pemasukan yang tidak dihitung)
+  { id: 6, title: "Makan Hari Ini", category: "makanan", type: "expense", amount: 25000, isoDate: iso(today), time: "" },
+  { id: 5, title: "Belanja Tgl 1", category: "belanja", type: "expense", amount: 75000, isoDate: iso(firstThis), time: "" },
+  { id: 4, title: "Gaji", category: "lainnya", type: "income", amount: 5000000, isoDate: iso(today), time: "" },
+  // bulan lalu: 40.000 + 60.000 = 100.000? -> dibuat beda: 40.000 + 10.000 = 50.000
+  { id: 3, title: "Bensin Awal Bulan Lalu", category: "bensin", type: "expense", amount: 40000, isoDate: iso(firstPrev), time: "" },
+  { id: 2, title: "Tagihan Akhir Bulan Lalu", category: "tagihan", type: "expense", amount: 10000, isoDate: iso(lastPrev), time: "" },
+];
+const EXPECT_THIS = 100000, EXPECT_PREV = 50000;
+
+let frame = null;
+async function load(page = "analytics.html", width = 390) {
+  if (frame) frame.remove();
+  frame = document.createElement("iframe"); frame.width = width; frame.height = 1800; frame.src = BASE + page;
+  document.body.appendChild(frame);
+  await new Promise(r => frame.onload = r); await wait(450);
+  const d = frame.contentDocument, w = frame.contentWindow;
+  const cc = d.getElementById("checkin-close"); if (cc && !d.getElementById("checkin-overlay").hidden) { cc.click(); await wait(300); }
+  return { d, w };
+}
+const txt = (el) => (el ? el.textContent.replace(/\s+/g, " ").trim() : "");
+const seed = (w) => { try { w.localStorage.clear(); w.sessionStorage.clear(); w.localStorage.setItem("financeData.transactions", JSON.stringify(SEED)); } catch (e) {} };
+const snapLS = (w) => JSON.stringify(["financeData.transactions", "financeData.budget", "financeData.settings"].map(k => w.localStorage.getItem(k)));
+const rupiah = (n) => "Rp" + n.toLocaleString("id-ID");
+
+(async () => {
+  let { d, w } = await load();
+  seed(w);
+  ({ d, w } = await load());
+  const errors = []; w.addEventListener("error", e => errors.push(e.message));
+  const title = () => txt(d.getElementById("analytics-period-title"));
+  const prevBtn = () => d.getElementById("analytics-prev-month");
+  const nextBtn = () => d.getElementById("analytics-next-month");
+  const nowBtn = () => d.getElementById("analytics-this-month");
+  const summary = () => txt(d.getElementById("analytics-summary"));
+  const chart = () => txt(d.getElementById("time-chart"));
+  const chartSub = () => txt(d.getElementById("time-chart-sub"));
+  const catChart = () => txt(d.getElementById("category-chart"));
+  const detail = () => txt(d.getElementById("chart-detail"));
+  const insight = () => txt(d.getElementById("insight-list"));
+  const allText = () => [summary(), chart(), catChart(), detail(), insight()].join(" | ");
+  const click = async (btn) => { btn.click(); await wait(200); };
+  const before = snapLS(w);
+
+  // ================= Skenario A — bulan sekarang =================
+  ok("A1. navigator ada & memakai pola Budget (.budget-period-nav, .calendar-nav, tombol Bulan Ini)", !!d.querySelector(".budget-period .budget-period-nav") && prevBtn().classList.contains("calendar-nav") && nextBtn().classList.contains("calendar-nav") && nowBtn().classList.contains("btn--ghost"));
+  ok("A2. label bulan = bulan berjalan; › dan 'Bulan Ini' disabled", title() === monthLabel(0) && nextBtn().disabled && nowBtn().disabled && !prevBtn().disabled, `title=${title()}`);
+  ok("A3. tombol punya aria-label & aria-live pada label", prevBtn().getAttribute("aria-label") === "Bulan sebelumnya" && nextBtn().getAttribute("aria-label") === "Bulan berikutnya" && d.getElementById("analytics-period-title").getAttribute("aria-live") === "polite");
+  ok("A4. angka bulan berjalan benar (total pengeluaran Rp100.000, pemasukan tidak ikut)", summary().includes(rupiah(EXPECT_THIS)) && !summary().includes("5.000.000") && summary().includes(monthLabel(0)), summary().slice(0, 120));
+  ok("A5. chart & detail memakai bulan berjalan (judul chart + total + detail)", chartSub() === monthLabel(0) && chart().includes(`Total ${monthLabel(0)}`) && detail().includes(monthLabel(0)));
+  ok("A6. kategori bulan berjalan: Makanan & Belanja (bukan kategori bulan lalu)", catChart().includes("Makanan") && catChart().includes("Belanja") && !catChart().includes("Bensin") && !catChart().includes("Tagihan"));
+  ok("A7. insight bulan berjalan tampil normal (bukan catatan periode)", insight().length > 0 && !/dihitung untuk bulan berjalan/.test(insight()) && txt(d.getElementById("insight-period-sub")) === "bulan ini");
+
+  // ================= Skenario B — bulan sebelumnya =================
+  await click(prevBtn());
+  ok("B1. label berubah ke bulan sebelumnya; › & 'Bulan Ini' aktif", title() === monthLabel(-1) && !nextBtn().disabled && !nowBtn().disabled);
+  ok("B2. total pengeluaran ikut berubah (Rp50.000) & label periode di ringkasan ikut", summary().includes(rupiah(EXPECT_PREV)) && summary().includes(monthLabel(-1)) && !summary().includes(rupiah(EXPECT_THIS)), summary().slice(0, 140));
+  ok("B3. kategori ikut berubah: Bensin & Tagihan, tanpa kategori bulan berjalan", catChart().includes("Bensin") && catChart().includes("Tagihan") && !catChart().includes("Makanan") && !catChart().includes("Belanja"));
+  ok("B4. chart & detail memakai bulan sebelumnya; transaksi bulan berjalan tidak ikut", chartSub() === monthLabel(-1) && chart().includes(`Total ${monthLabel(-1)}`) && !chart().includes("bulan ini") && detail().includes(monthLabel(-1)) && !detail().includes("Makan Hari Ini") && !detail().includes("Belanja Tgl 1"));
+  ok("B5. detail menampilkan transaksi bulan lalu (dua-duanya)", detail().includes("Bensin Awal Bulan Lalu") && detail().includes("Tagihan Akhir Bulan Lalu"));
+  ok("B6. insight menjelaskan bahwa perhitungannya untuk bulan berjalan (tidak diam-diam)", /dihitung untuk bulan berjalan/.test(insight()) && insight().includes(monthLabel(0)) && txt(d.getElementById("insight-period-sub")) === monthLabel(0));
+  ok("B7. localStorage tidak berubah sama sekali saat pindah bulan", snapLS(w) === before);
+
+  // ================= Skenario C — kembali ke bulan sekarang =================
+  await click(nextBtn());
+  ok("C1. › mengembalikan ke bulan berjalan & tombolnya disabled lagi", title() === monthLabel(0) && nextBtn().disabled && nowBtn().disabled);
+  ok("C2. data kembali seperti kondisi awal", summary().includes(rupiah(EXPECT_THIS)) && catChart().includes("Makanan") && !catChart().includes("Bensin"));
+  nextBtn().dispatchEvent(new w.MouseEvent("click", { bubbles: true })); await wait(150);
+  ok("C3. › saat disabled tidak melompat ke bulan depan", title() === monthLabel(0));
+  await click(prevBtn()); await click(prevBtn());
+  ok("C4. dua kali ‹ = mundur dua bulan (listener tidak dobel)", title() === monthLabel(-2), `title=${title()}`);
+  await click(nowBtn());
+  ok("C5. tombol 'Bulan Ini' kembali ke bulan berjalan", title() === monthLabel(0) && nowBtn().disabled);
+
+  // ================= Skenario D — bulan tanpa transaksi =================
+  await click(prevBtn()); await click(prevBtn()); // dua bulan lalu: tidak ada transaksi
+  ok("D1. bulan tanpa transaksi: total Rp0 & label periodenya benar", title() === monthLabel(-2) && summary().includes("Rp0") && summary().includes(monthLabel(-2)), summary().slice(0, 140));
+  ok("D2. empty state chart & kategori menyebut bulan yang dilihat, bukan \"bulan ini\"", new RegExp(`Belum ada pengeluaran pada ${monthLabel(-2)}`).test(catChart()) && new RegExp(`Belum ada pengeluaran pada ${monthLabel(-2)}`).test(chart()) && !catChart().includes("bulan ini"));
+  ok("D3. detail menampilkan empty state, bukan daftar kosong tanpa penjelasan", /Tidak ada pengeluaran/.test(detail()));
+  ok("D4. tidak ada NaN / undefined / null / Infinity di seluruh teks Analisis", !/NaN|undefined|null|Infinity/.test(allText()), allText().slice(0, 160));
+  ok("D5. tidak ada error JavaScript saat bulan kosong", errors.length === 0, errors.join(" | "));
+  await click(nowBtn());
+
+  // ================= Skenario E — batas tanggal =================
+  await click(prevBtn());
+  ok("E1. transaksi hari PERTAMA bulan lalu masuk ke bulan lalu", detail().includes("Bensin Awal Bulan Lalu"));
+  ok("E2. transaksi hari TERAKHIR bulan lalu masuk ke bulan lalu (bukan bulan ini)", detail().includes("Tagihan Akhir Bulan Lalu") && summary().includes(rupiah(EXPECT_PREV)));
+  await click(nowBtn());
+  ok("E3. transaksi hari PERTAMA bulan berjalan masuk ke bulan berjalan", detail().includes("Belanja Tgl 1") && summary().includes(rupiah(EXPECT_THIS)));
+  ok("E4. tidak ada transaksi yang terhitung dua kali (total dua bulan = 150.000)", EXPECT_THIS + EXPECT_PREV === 150000 && summary().includes(rupiah(EXPECT_THIS)));
+
+  // ================= state hanya selama halaman terbuka =================
+  await click(prevBtn());
+  ({ d, w } = await load());
+  ok("F1. muat ulang halaman -> kembali ke bulan berjalan (state tidak dipersist)", txt(d.getElementById("analytics-period-title")) === monthLabel(0));
+  ok("F2. tidak ada key localStorage/sessionStorage baru", Object.keys(w.localStorage).sort().join() === "financeData.transactions" && w.sessionStorage.length === 0 && snapLS(w) === before);
+  const appJs = await fetchAppJs(BASE);
+  const clean = appJs.replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, "");
+  ok("F3. tidak ada penyimpanan baru untuk periode analisis", !/analyticsViewDate[^;]*localStorage|localStorage[^;]*analytics/i.test(clean));
+  ok("F4. render Analisis tidak lagi memakai bulan berjalan secara hardcoded", !/getMonthRange\(new Date\(\)\)/.test(clean) && (clean.match(/getMonthRange\(analyticsViewDate\)/g) || []).length === 2);
+  ok("F5. checkinDismissed & struktur transaksi tidak disentuh", !/checkinDismissed/.test(String(w.renderAnalytics) + String(w.setupAnalyticsPeriodNav) + String(w.renderAnalyticsPeriod)) && JSON.parse(w.localStorage.getItem("financeData.transactions")).length === 5);
+
+  // ================= Skenario F — responsive =================
+  for (const wd of [320, 375, 768, 1280]) {
+    const r = await load("analytics.html", wd);
+    r.d.getElementById("analytics-prev-month").click(); await wait(200); // navigator dipakai di lebar ini
+    const de = r.d.documentElement;
+    const nav = r.d.querySelector(".budget-period-nav");
+    const btns = ["analytics-prev-month", "analytics-next-month", "analytics-this-month"].map(id => r.d.getElementById(id));
+    const halo = (el) => { const b = r.w.getComputedStyle(el, "::before"); const ins = parseFloat(b.insetBlockStart || b.top); return b.content !== "none" && Number.isFinite(ins) && ins < 0 ? -ins * 2 : 0; };
+    const tapOk = btns.every(b => { const x = b.getBoundingClientRect(); return x.height + halo(b) >= 36 && x.width + halo(b) >= 36; });
+    const inside = btns.every(b => { const x = b.getBoundingClientRect(); return x.right <= de.clientWidth + 0.5 && x.left >= -0.5; });
+    const label = r.d.getElementById("analytics-period-title");
+    const labelOk = label.scrollWidth <= label.clientWidth + 1 && txt(label) === monthLabel(-1);
+    const rowsOk = nav.scrollWidth <= nav.clientWidth + 5; // +4px halo tombol
+    ok(`G-${wd}. tanpa overflow; navigator utuh, label terbaca, tombol bisa ditap`, de.scrollWidth === de.clientWidth && tapOk && inside && labelOk && rowsOk, `sw=${de.scrollWidth} cw=${de.clientWidth} label=${txt(label)}`);
+  }
+  ok("H. console 0 error di seluruh skenario", errors.length === 0, errors.join(" | "));
+  try { w.localStorage.clear(); } catch (e) {}
+  document.getElementById("r").textContent = out.join("\n");
+})().catch(e => { out.push("EXCEPTION " + e.stack); document.getElementById("r").textContent = out.join("\n"); });
+</script>

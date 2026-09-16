@@ -1,0 +1,320 @@
+<!doctype html>
+<meta charset="utf-8">
+<pre id="r">running…</pre>
+<script>
+const out = []; const ok = (n, c, x = "") => out.push(`${c ? "PASS" : "FAIL"} ${n}${x ? "  (" + x + ")" : ""}`);
+const wait = (ms) => new Promise(r => setTimeout(r, ms));
+const BASE = new URL("../../frontend/", location.href).href;
+// JS-6: style.css sudah dihapus. Sumber CSS HIDUP untuk pemeriksaan selector = gabungan 7 file split.
+const CSS_SPLIT_FILES = ["base.css", "dashboard.css", "goals.css", "analytics.css", "budget.css", "transactions.css", "settings.css"];
+async function fetchStyleCss(base) { const parts = []; for (const f of CSS_SPLIT_FILES) parts.push(`/* ==== ${f} ==== */\n` + await (await fetch(base + "css/" + f)).text()); return parts.join("\n"); }
+// JS-6: app.js sudah dihapus. Sumber kode HIDUP untuk pemeriksaan regex = gabungan 8 file split (urutan muat).
+const APP_SPLIT_FILES = ["core.js", "transactions-shared.js", "dashboard.js", "goals.js", "analytics.js", "budget.js", "transactions.js", "settings.js"];
+async function fetchAppJs(base) { const parts = []; for (const f of APP_SPLIT_FILES) parts.push(`/* ==== ${f} ==== */\n` + await (await fetch(base + "js/" + f)).text()); return parts.join("\n"); }
+
+const pad = (n) => String(n).padStart(2, "0");
+const iso = (dt) => `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`;
+const today = new Date(); today.setHours(0, 0, 0, 0);
+const TODAY_ISO = iso(today);
+// Tanggal relatif terhadap HARI INI, dihitung dengan komponen lokal.
+const rel = (n) => iso(new Date(today.getFullYear(), today.getMonth(), today.getDate() + n));
+
+const KEYS_OLD = ["financeData.transactions", "financeData.budget", "financeData.settings"];
+const GOALS_KEY = "financeData.goals";
+
+let frame = null;
+async function load(page = "index.html", width = 390) {
+  if (frame) frame.remove();
+  frame = document.createElement("iframe"); frame.width = width; frame.height = 1800; frame.src = BASE + page;
+  document.body.appendChild(frame);
+  await new Promise(r => frame.onload = r); await wait(400);
+  const d = frame.contentDocument, w = frame.contentWindow;
+  const cc = d.getElementById("checkin-close");
+  const ov = d.getElementById("checkin-overlay");
+  if (cc && ov && !ov.hidden) { cc.click(); await wait(250); }
+  return { d, w };
+}
+const txt = (el) => (el ? el.textContent.replace(/\s+/g, " ").trim() : "");
+const snapOld = (w) => JSON.stringify(KEYS_OLD.map(k => w.localStorage.getItem(k)));
+const G = (o) => Object.assign({ id: 1, name: "Dana Darurat", target: 10000000, saved: 3200000, deadline: "", createdAt: TODAY_ISO }, o);
+// Muat ulang goals dari sebuah array mentah -> hasil normalisasi (lewat loadGoals).
+function loadRaw(w, raw) {
+  w.localStorage.setItem(GOALS_KEY, typeof raw === "string" ? raw : JSON.stringify(raw));
+  w.loadGoals();
+  return w.sortGoals(); // salinan financeData.goals (satu-satunya jendela ke sana)
+}
+
+(async () => {
+  const appJs = await fetchAppJs(BASE);
+  const styleCss = await fetchStyleCss(BASE);
+  // Versi app.js TANPA komentar: beberapa pemeriksaan di bawah menanyakan
+  // "apakah ini dipanggil di KODE", dan komentar yang menyebut nama fungsi
+  // yang sama tidak boleh ikut terhitung.
+  const appCode = appJs.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|\s)\/\/.*$/gm, "$1");
+  const goalsBlock = appCode.split("const GOAL_NAME_MAX")[1].split("loadTransactions();")[0];
+
+  /* ===================== A. Muat & sintaks ===================== */
+  let { d, w } = await load("index.html");
+  const errors = [];
+  w.addEventListener("error", e => errors.push(e.message));
+  try { w.localStorage.clear(); w.sessionStorage.clear(); } catch (e) {}
+  ({ d, w } = await load("index.html"));
+  const errs2 = []; w.addEventListener("error", e => errs2.push(e.message));
+
+  ok("A1. app.js dimuat & dieksekusi tanpa error sintaks", typeof w.formatRupiah === "function" && typeof w.loadGoals === "function");
+  ok("A2. tidak ada error saat memuat dashboard", errors.length === 0 && errs2.length === 0, errors.concat(errs2).join(" | "));
+  const HELPERS = ["normalizeGoal", "loadGoals", "saveGoals", "getGoalProgress", "getGoalStatus", "describeDeadline", "sortGoals", "nextGoalId", "getDaysUntil"];
+  HELPERS.forEach((fn, i) => ok(`A3${String.fromCharCode(97 + i)}. ${fn}() tersedia`, typeof w[fn] === "function"));
+
+  /* ========== B. Pengguna lama: tanpa key financeData.goals ========== */
+  ok("B1. tanpa key goals -> daftar kosong", Array.isArray(w.sortGoals()) && w.sortGoals().length === 0);
+  ok("B2. tanpa key goals -> nextGoalId() = 1", w.nextGoalId() === 1);
+  ok("B3. load TIDAK menulis key goals ke storage", w.localStorage.getItem(GOALS_KEY) === null);
+  ok("B4. dashboard tetap merender saldo", /Rp/.test(txt(d.getElementById("balance-value"))) || txt(d.getElementById("balance-value")).includes("•"));
+  ok("B5. dashboard tetap merender card budget", txt(d.getElementById("budget-card")).includes("Rp"));
+  ok("B6. daftar transaksi tetap dirender", d.getElementById("transaction-list") !== null);
+  ok("B7. checkinDismissed tidak disentuh oleh kode goals", !/checkinDismissed/.test(appJs.split("const GOAL_NAME_MAX")[1].split("loadTransactions();")[0])); // JS-6: jangkar = deklarasi pertama blok G-1 (komentar header seksi tidak ikut tersalin ke core.js sejak JS-1)
+
+  /* ===================== C. normalizeGoal — valid ===================== */
+  const nz = (o, fb) => w.normalizeGoal(o, fb);
+  const c1 = nz(G({}));
+  ok("C1. objek lengkap diterima", !!c1 && c1.id === 1 && c1.name === "Dana Darurat" && c1.target === 10000000 && c1.saved === 3200000);
+  ok("C2. hanya 6 field yang disimpan (turunan dibuang)", Object.keys(c1).sort().join(",") === "createdAt,deadline,id,name,saved,target", Object.keys(c1).join(","));
+  ok("C3. nama di-trim", nz(G({ name: "  Beli Laptop  " })).name === "Beli Laptop");
+  ok("C4. nama 40 karakter diterima", nz(G({ name: "x".repeat(40) })) !== null);
+  ok("C5. deadline kosong diterima", nz(G({ deadline: "" })).deadline === "");
+  ok("C6. deadline lampau tetap valid", nz(G({ deadline: rel(-400) })).deadline === rel(-400));
+  ok("C7. deadline masa depan diterima", nz(G({ deadline: rel(120) })).deadline === rel(120));
+  ok("C8. saved 0 diterima", nz(G({ saved: 0 })).saved === 0);
+  ok("C9. saved > target diterima (menabung lebih)", nz(G({ saved: 12000000 })).saved === 12000000);
+  ok("C10. deadline tidak valid -> \"\" (target tidak dibuang)", nz(G({ deadline: "2026-02-30" })).deadline === "" && nz(G({ deadline: "besok" })).deadline === "");
+  ok("C11. createdAt rusak -> tanggal LOKAL hari ini", nz(G({ createdAt: "abc" })).createdAt === TODAY_ISO);
+  ok("C12. createdAt valid dipertahankan", nz(G({ createdAt: "2025-01-05" })).createdAt === "2025-01-05");
+  ok("C13. field asing dibuang", !("pinned" in nz(G({ pinned: true, status: "done", percent: 80 }))) && !("status" in nz(G({ status: "done" }))) && !("percent" in nz(G({ percent: 80 }))));
+  ok("C14. id dari fallback saat id hilang", nz({ name: "A", target: 100, saved: 0 }, 7).id === 7);
+  ok("C15. id asli menang atas fallback", nz(G({ id: 3 }), 9).id === 3);
+
+  /* ===================== D. normalizeGoal — invalid -> null ===================== */
+  const bad = [
+    ["null", null], ["undefined", undefined], ["string", "target"], ["angka", 5], ["array", [1, 2]],
+    ["nama kosong", G({ name: "" })], ["nama spasi", G({ name: "   " })], ["nama bukan string", G({ name: 12 })],
+    ["nama 41 karakter", G({ name: "x".repeat(41) })],
+    ["target 0", G({ target: 0 })], ["target negatif", G({ target: -5 })], ["target string", G({ target: "10000" })],
+    ["target NaN", G({ target: NaN })], ["target Infinity", G({ target: Infinity })],
+    ["saved negatif", G({ saved: -1 })], ["saved string", G({ saved: "0" })], ["saved NaN", G({ saved: NaN })],
+    ["id 0 tanpa fallback", G({ id: 0 })], ["id negatif tanpa fallback", G({ id: -3 })],
+    ["id pecahan tanpa fallback", G({ id: 1.5 })], ["id string tanpa fallback", G({ id: "1" })],
+  ];
+  bad.forEach(([label, value], i) => ok(`D${i + 1}. ditolak: ${label}`, nz(value) === null, JSON.stringify(nz(value))));
+
+  /* ===================== E. loadGoals — resiliensi ===================== */
+  ok("E1. JSON korup -> daftar kosong", loadRaw(w, "{bukan json").length === 0);
+  ok("E2. root objek (bukan array) -> daftar kosong", loadRaw(w, { a: 1 }).length === 0);
+  ok("E3. root string -> daftar kosong", loadRaw(w, '"halo"').length === 0);
+  ok("E4. array kosong -> daftar kosong", loadRaw(w, []).length === 0);
+  const mixed = loadRaw(w, [G({ id: 1, name: "Valid A" }), null, G({ id: 2, target: -1 }), "rusak", G({ id: 3, name: "Valid B" })]);
+  ok("E5. baris rusak dilewati, baris valid bertahan", mixed.length === 2 && mixed.map(g => g.name).sort().join(",") === "Valid A,Valid B", JSON.stringify(mixed.map(g => g.name)));
+  const dup = loadRaw(w, [G({ id: 5, name: "A" }), G({ id: 5, name: "B" }), G({ id: 5, name: "C" })]);
+  ok("E6. id duplikat: semua baris dipertahankan", dup.length === 3);
+  ok("E7. id duplikat: id jadi unik", new Set(dup.map(g => g.id)).size === 3, JSON.stringify(dup.map(g => g.id)));
+  const noId = loadRaw(w, [{ name: "Tanpa Id A", target: 100, saved: 0 }, { name: "Tanpa Id B", target: 200, saved: 0 }]);
+  ok("E8. id hilang -> dinomori dari indeks", noId.length === 2 && new Set(noId.map(g => g.id)).size === 2, JSON.stringify(noId.map(g => g.id)));
+  ok("E9. loadGoals tidak melempar pada data aneh", (() => { try { loadRaw(w, [[[]]]); loadRaw(w, "null"); return true; } catch (e) { return false; } })());
+  const oldBefore = snapOld(w);
+  loadRaw(w, [G({})]);
+  ok("E10. loadGoals tidak menyentuh 3 key lama", snapOld(w) === oldBefore);
+
+  /* ===================== F. saveGoals ===================== */
+  loadRaw(w, [G({ id: 4, name: "Simpan Saya" })]);
+  w.localStorage.removeItem(GOALS_KEY);
+  w.saveGoals();
+  const stored = JSON.parse(w.localStorage.getItem(GOALS_KEY) || "null");
+  ok("F1. saveGoals menulis ke key financeData.goals", Array.isArray(stored) && stored.length === 1 && stored[0].name === "Simpan Saya");
+  ok("F2. yang disimpan hanya 6 field", Object.keys(stored[0]).sort().join(",") === "createdAt,deadline,id,name,saved,target");
+  const oldSnap = snapOld(w);
+  try { w.sessionStorage.setItem("checkinDismissed", "true"); } catch (e) {}
+  w.saveGoals();
+  ok("F3. saveGoals tidak menyentuh 3 key lama", snapOld(w) === oldSnap);
+  ok("F4. saveGoals tidak menyentuh checkinDismissed", w.sessionStorage.getItem("checkinDismissed") === "true");
+  ok("F5. round-trip save -> load stabil", (() => { const a = JSON.stringify(w.sortGoals()); w.saveGoals(); w.loadGoals(); return JSON.stringify(w.sortGoals()) === a; })());
+
+  /* ===================== G. getGoalProgress ===================== */
+  const gp = w.getGoalProgress;
+  ok("G1. 3.200.000 / 10.000.000 = 32", gp(G({ saved: 3200000, target: 10000000 })) === 32);
+  ok("G2. 12.000.000 / 10.000.000 dipotong ke 100", gp(G({ saved: 12000000, target: 10000000 })) === 100);
+  ok("G3. tepat 100%", gp(G({ saved: 10000000, target: 10000000 })) === 100);
+  ok("G4. saved 0 -> 0", gp(G({ saved: 0 })) === 0);
+  ok("G5. target 0 -> 0 (tanpa NaN)", gp(G({ target: 0, saved: 100 })) === 0);
+  ok("G6. target negatif -> 0", gp(G({ target: -10, saved: 100 })) === 0);
+  ok("G7. goal null/undefined -> 0", gp(null) === 0 && gp(undefined) === 0);
+  ok("G8. target NaN/Infinity -> 0", gp(G({ target: NaN })) === 0 && gp(G({ target: Infinity })) === 0);
+  ok("G9. saved NaN -> 0", gp(G({ saved: NaN })) === 0);
+  const samples = [G({}), G({ saved: 0 }), G({ target: 0 }), G({ saved: NaN }), G({ target: Infinity }), G({ saved: 1e12 })];
+  ok("G10. hasil SELALU finite 0-100", samples.every(g => { const p = gp(g); return Number.isFinite(p) && p >= 0 && p <= 100; }));
+
+  /* ===================== H. getGoalStatus ===================== */
+  const gs = (o, t) => w.getGoalStatus(G(o), t);
+  ok("H1. saved >= target -> done", gs({ saved: 10000000 }).key === "done");
+  ok("H2. done: label & percent & remaining", (() => { const s = gs({ saved: 12000000 }); return s.label === "Tercapai" && s.percent === 100 && s.remaining === 0; })());
+  ok("H3. deadline lewat & belum selesai -> overdue", gs({ deadline: rel(-1) }).key === "overdue");
+  ok("H4. deadline hari ini & belum selesai -> urgent", gs({ deadline: rel(0) }).key === "urgent");
+  ok("H5. deadline 1 hari lagi -> urgent", gs({ deadline: rel(1) }).key === "urgent");
+  ok("H6. deadline tepat 30 hari -> urgent", gs({ deadline: rel(30) }).key === "urgent");
+  ok("H7. deadline 31 hari -> active", gs({ deadline: rel(31) }).key === "active");
+  ok("H8. tanpa deadline -> active", gs({ deadline: "" }).key === "active");
+  ok("H9. done menang atas deadline lewat", gs({ saved: 10000000, deadline: rel(-30) }).key === "done");
+  ok("H10. done menang atas deadline mendesak", gs({ saved: 10000000, deadline: rel(2) }).key === "done");
+  ok("H11. remaining tidak pernah negatif", [gs({ saved: 12000000 }), gs({ saved: 9999999 })].every(s => s.remaining >= 0));
+  ok("H12. remaining benar", gs({ saved: 3200000 }).remaining === 6800000);
+  ok("H13. percent dipotong ke 100", gs({ saved: 99999999 }).percent === 100);
+  ok("H14. label sesuai key", ["done", "overdue", "urgent", "active"].every(k => {
+    const map = { done: gs({ saved: 10000000 }), overdue: gs({ deadline: rel(-2) }), urgent: gs({ deadline: rel(3) }), active: gs({}) };
+    return map[k].key === k && typeof map[k].label === "string" && map[k].label.length > 0;
+  }));
+  ok("H15. keterangan deadline ikut disertakan", gs({ deadline: rel(5) }).deadline.key === "soon");
+  ok("H16. status target rusak tidak melempar & tidak NaN", (() => {
+    const s = w.getGoalStatus({ id: 1, name: "x", target: 0, saved: 0, deadline: "", createdAt: "" });
+    return s.key === "active" && Number.isFinite(s.percent) && Number.isFinite(s.remaining);
+  })());
+  ok("H17. status TIDAK disimpan ke storage", !(w.localStorage.getItem(GOALS_KEY) || "").includes('"status"'));
+
+  /* ===================== I. describeDeadline & getDaysUntil ===================== */
+  const dd = w.describeDeadline, du = w.getDaysUntil;
+  ok("I1. tanpa deadline -> none", dd("").key === "none" && dd("").days === null);
+  ok("I2. deadline tidak valid -> none", dd("2026-13-01").key === "none" && dd(null).key === "none");
+  ok("I3. hari ini -> today", dd(rel(0)).key === "today" && dd(rel(0)).days === 0);
+  ok("I4. besok -> soon, \"Tinggal 1 hari\"", dd(rel(1)).key === "soon" && dd(rel(1)).label === "Tinggal 1 hari");
+  ok("I5. 30 hari -> soon", dd(rel(30)).key === "soon" && dd(rel(30)).days === 30);
+  ok("I6. 31 hari -> future", dd(rel(31)).key === "future" && dd(rel(31)).label === "31 hari lagi");
+  ok("I7. kemarin -> overdue, \"Terlewat 1 hari\"", dd(rel(-1)).key === "overdue" && dd(rel(-1)).label === "Terlewat 1 hari");
+  ok("I8. 3 hari lalu -> \"Terlewat 3 hari\"", dd(rel(-3)).label === "Terlewat 3 hari");
+  ok("I9. days negatif saat lewat", dd(rel(-5)).days === -5);
+  ok("I10. lima state bisa dibedakan", new Set([dd("").key, dd(rel(0)).key, dd(rel(10)).key, dd(rel(90)).key, dd(rel(-10)).key]).size === 5, [dd("").key, dd(rel(0)).key, dd(rel(10)).key, dd(rel(90)).key, dd(rel(-10)).key].join(","));
+  // Tanggal LOKAL: jam 23:59 hari ini tetap "hari ini", bukan bergeser ke besok (yang terjadi kalau memakai UTC di WIB).
+  const lateToday = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 30);
+  const earlyToday = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 0, 0, 30);
+  ok("I11. 23:59 waktu lokal: hari ini tetap 0 hari", du(rel(0), lateToday) === 0 && dd(rel(0), lateToday).key === "today");
+  ok("I12. 00:00 waktu lokal: hari ini tetap 0 hari", du(rel(0), earlyToday) === 0);
+  ok("I13. 23:59: besok tetap 1 hari", du(rel(1), lateToday) === 1);
+  ok("I14. 00:00: kemarin tetap -1 hari", du(rel(-1), earlyToday) === -1);
+  ok("I15. batas akhir bulan tidak bergeser", (() => {
+    const endOfMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+    return du(iso(endOfMonth), today) === Math.round((endOfMonth - today) / 86400000);
+  })());
+  ok("I16. lintas tahun benar", (() => {
+    const t = new Date(2026, 11, 31); const target = "2027-01-02"; return du(target, t) === 2;
+  })());
+  ok("I17. getDaysUntil null untuk input tidak valid", du("") === null && du("abc") === null && du(undefined) === null);
+
+  /* ===================== J. sortGoals ===================== */
+  const A = G({ id: 1, name: "Aktif jauh", deadline: rel(200), saved: 0 });
+  const B = G({ id: 2, name: "Aktif dekat", deadline: rel(3), saved: 0 });
+  const C = G({ id: 3, name: "Tanpa deadline", deadline: "", saved: 0 });
+  const DONE = G({ id: 4, name: "Sudah tercapai", deadline: rel(1), saved: 10000000 });
+  const E = G({ id: 5, name: "Terlewat", deadline: rel(-5), saved: 0 });
+  const list = [A, B, C, DONE, E];
+  const sorted = w.sortGoals(list);
+  const names = sorted.map(g => g.name);
+  ok("J1. mengembalikan array BARU", sorted !== list);
+  ok("J2. array asli tidak dimutasi", list.map(g => g.name).join(",") === "Aktif jauh,Aktif dekat,Tanpa deadline,Sudah tercapai,Terlewat");
+  ok("J3. jumlah tetap", sorted.length === 5);
+  ok("J4. target selesai paling akhir", names[names.length - 1] === "Sudah tercapai", names.join(" > "));
+  ok("J5. terlewat (deadline paling dekat/lampau) paling atas", names[0] === "Terlewat", names.join(" > "));
+  ok("J6. deadline lebih dekat mendahului yang jauh", names.indexOf("Aktif dekat") < names.indexOf("Aktif jauh"));
+  ok("J7. tanpa deadline di bawah semua yang berdeadline (di antara yang aktif)", names.indexOf("Tanpa deadline") === 3, names.join(" > "));
+  ok("J8. urutan penuh sesuai aturan", names.join(" > ") === "Terlewat > Aktif dekat > Aktif jauh > Tanpa deadline > Sudah tercapai", names.join(" > "));
+  const ties = w.sortGoals([G({ id: 1, name: "Lama", deadline: "", saved: 0 }), G({ id: 9, name: "Baru", deadline: "", saved: 0 })]);
+  ok("J9. seri tanpa deadline: id terbesar (terbaru) di atas", ties[0].name === "Baru");
+  const tiesDate = w.sortGoals([G({ id: 1, name: "Lama", deadline: rel(5), saved: 0 }), G({ id: 9, name: "Baru", deadline: rel(5), saved: 0 })]);
+  ok("J10. seri deadline sama: id terbesar di atas", tiesDate[0].name === "Baru");
+  ok("J11. daftar kosong aman", w.sortGoals([]).length === 0);
+  ok("J12. tanpa argumen memakai financeData.goals", (() => { const g = loadRaw(w, [G({ id: 8, name: "Dari storage" })]); return g.length === 1 && g[0].name === "Dari storage"; })());
+  ok("J13. dua kali sort menghasilkan urutan sama (stabil)", w.sortGoals(list).map(g => g.id).join() === w.sortGoals(list).map(g => g.id).join());
+
+  /* ===================== K. nextGoalId ===================== */
+  loadRaw(w, [G({ id: 3 }), G({ id: 7 }), G({ id: 5 })]);
+  ok("K1. max(id)+1", w.nextGoalId() === 8);
+  loadRaw(w, []);
+  ok("K2. daftar kosong -> 1", w.nextGoalId() === 1);
+  loadRaw(w, [G({ id: 1 })]);
+  ok("K3. satu target -> 2", w.nextGoalId() === 2);
+  ok("K4. integer, bukan UUID", Number.isInteger(w.nextGoalId()) && w.nextGoalId() >= 1);
+  ok("K5. tidak memakai crypto.randomUUID di app.js", !/crypto\.randomUUID|randomUUID/.test(appJs));
+
+  /* ===================== L. Aturan & pagar G-1 ===================== */
+  ok("L1. TEPAT 2 listener keydown global", appJs.split('addEventListener("keydown"').length - 1 === 2, String(appJs.split('addEventListener("keydown"').length - 1));
+  ok("L2. tidak ada localStorage.clear() sebagai kode (hanya di komentar)", !appJs.split(/\r?\n/).some(l => l.includes("localStorage.clear()") && !/^\s*(\/\/|\*|\/\*)/.test(l)));
+  ok("L3. hanya 1 pemanggilan toISOString di KODE (metadata exportedAt)", (appCode.match(/toISOString/g) || []).length === 1 && /exportedAt: now\.toISOString\(\)/.test(appCode), String((appCode.match(/toISOString/g) || []).length));
+  ok("L4. blok goals tidak memanggil toISOString (tanggal selalu lokal)", !goalsBlock.includes("toISOString") && goalsBlock.includes("toIsoDate(new Date())"));
+  ok("L5. GOALS_STORAGE_KEY = financeData.goals", /const GOALS_STORAGE_KEY = "financeData\.goals";/.test(appJs));
+  ok("L6. tiga key lama tidak berubah", /TRANSACTIONS_STORAGE_KEY = "financeData\.transactions"/.test(appJs) && /BUDGET_STORAGE_KEY = "financeData\.budget"/.test(appJs) && /SETTINGS_STORAGE_KEY = "financeData\.settings"/.test(appJs));
+  ok("L7. financeData.goals ada sebagai array kosong (seed)", /goals: \[\],/.test(appJs));
+  ok("L8. tidak ada field pinned di mana pun", !/pinned/.test(appJs));
+  ok("L8b. appCode terbaca wajar (penyaring komentar tidak merusak sumber)", appCode.length > appJs.length * 0.5 && appCode.includes("function normalizeGoal"));
+  ok("L9. tidak menyimpan status/percent/remaining di objek target", /return \{ id, name, target: raw\.target, saved: raw\.saved, deadline, createdAt \};/.test(appJs));
+  ok("L10. loadGoals dipanggil bersama loader lain", /loadTransactions\(\);\s*\n\s*loadBudget\(\);\s*\n\s*loadSettings\(\);\s*\n\s*loadGoals\(\);/.test(appJs));
+
+  // Pagar tahap: G-2..G-8 BELUM boleh tersentuh.
+  // G-2 sudah dikerjakan: goals.html & CSS .goal-* ada. Pagar bergeser ke G-3+.
+  ok("L11. G-2 ada: goals.html dapat dimuat", await (async () => { try { const r = await fetch(BASE + "goals.html"); return (await r.text()).includes('data-page="goals"'); } catch (e) { return false; } })());
+  ok("L12. G-2 ada: CSS goals terpisah di goals.css saja (JS-6; dulu: blok terakhir style.css)", (() => { const i = styleCss.indexOf("TARGET KEUANGAN (goals.html)"); const g = styleCss.indexOf("/* ==== goals.css ==== */"), a = styleCss.indexOf("/* ==== analytics.css ==== */"); return i > g && i < a && styleCss.split("TARGET KEUANGAN (goals.html)").length === 2; })());
+  // G-3A (tambah) sudah ada; yang belum boleh ada: edit/hapus (G-3B).
+  ok("L13. G-3 lengkap: editor tambah/edit + konfirmasi hapus hanya di setupGoalEditor", /function setupGoalEditor\(/.test(appCode) && (appCode.match(/goal-confirm-overlay/g) || []).length === 1 && (appCode.match(/data-action="delete-goal"/g) || []).length === 1);
+  // G-4 ada: initDashboard memanggil renderGoalsDashboard() (hanya membaca);
+  // refreshDashboard (jalur CRUD transaksi) tetap tidak menyentuh goals.
+  ok("L14. G-4 ada: initDashboard memanggil renderGoalsDashboard; refreshDashboard tidak menyentuh goals", (() => {
+    const initDash = (appCode.match(/function initDashboard\(\)[\s\S]*?\n\}/) || [""])[0];
+    const refresh = (appCode.match(/function refreshDashboard\(\)[\s\S]*?\n\}/) || [""])[0];
+    return /renderGoalsDashboard\(\)/.test(initDash) && !/Goal/.test(refresh);
+  })());
+  ok("L15. G-6 belum: buildBackup belum menyebut goals", !/data:\s*\{[^}]*goals/.test(appCode));
+  ok("L16. G-6 belum: IMPORT_STORAGE_KEYS masih 3 key", /const IMPORT_STORAGE_KEYS = \[TRANSACTIONS_STORAGE_KEY, BUDGET_STORAGE_KEY, SETTINGS_STORAGE_KEY\];/.test(appJs));
+  ok("L17. G-7 belum: DATA_RESET_TARGETS masih 3 target", (appJs.match(/const DATA_RESET_TARGETS = \{[\s\S]*?\};/) || [""])[0].split("\n").filter(l => /STORAGE_KEY\]/.test(l)).length === 3);
+  ok("L18. G-8 belum: mock financeData.goal masih ada", /goal: \{\s*\n\s*name: "Dana Darurat"/.test(appJs));
+  ok("L19. G-8 belum: renderCheckin belum membaca financeData.goals", !/financeData\.goals/.test((appJs.match(/function renderCheckin\(\)[\s\S]*?\n\}/) || [""])[0]));
+  // Fondasi murni: di KODE, getGoalStatus hanya 1 definisi + 2 panggilan di
+  // dalam sortGoals; sortGoals & getGoalProgress baru definisinya saja
+  // (getGoalProgress dipanggil sekali oleh getGoalStatus).
+  const codeCount = (re) => (appCode.match(re) || []).length;
+  // Sejak G-2, helper dipakai oleh render halaman goals.html — tapi HANYA di
+  // sana: initDashboard/renderCheckin/refreshDashboard tidak menyentuhnya.
+  // Buang satu deklarasi fungsi top-level (dari "function nama(" sampai "}" di kolom 0).
+  const stripFn = (src, name) => {
+    const i = src.indexOf("function " + name + "(");
+    if (i < 0) return src;
+    const j = src.indexOf("\n}\n", i);
+    return j < 0 ? src.slice(0, i) : src.slice(0, i) + src.slice(j + 3);
+  };
+  let outsideGoals = appCode;
+  ["renderGoalCard", "renderGoalList", "renderGoalsSummary", "renderGoalsPage", "initGoalsPage", "sortGoals", "getGoalStatus"].forEach((n) => { outsideGoals = stripFn(outsideGoals, n); });
+  const leftovers = outsideGoals.match(/getGoalStatus\(|sortGoals\(|renderGoalList\(|renderGoalsPage\(/g) || [];
+  ok("L20. helper goals hanya dipakai helper G-1 sendiri & halaman goals (bukan dashboard/check-in)",
+    codeCount(/getGoalStatus\(/g) >= 3 && leftovers.length === 0,
+    `sisa di luar blok goals: ${leftovers.join(",") || "-"}`);
+
+  /* ===================== M. Halaman lama tetap sehat ===================== */
+  const PAGES = [
+    ["index.html", "balance-value"],
+    ["transactions.html", "all-transaction-list"],
+    ["analytics.html", "analytics-period-title"],
+    ["budget.html", "budget-card"],
+    ["settings.html", "settings-app-version"],
+  ];
+  for (const [page, id] of PAGES) {
+    const pageErrors = [];
+    const r = await load(page);
+    r.w.addEventListener("error", e => pageErrors.push(e.message));
+    await wait(200);
+    ok(`M. ${page}: elemen kunci dirender & tanpa error`, r.d.getElementById(id) !== null && pageErrors.length === 0, pageErrors.join(" | "));
+    ok(`M. ${page}: helper goals ikut tersedia`, typeof r.w.getGoalStatus === "function" && r.w.sortGoals().length === 0 || typeof r.w.getGoalStatus === "function");
+    ok(`M. ${page}: tidak menulis key goals tanpa diminta`, r.w.localStorage.getItem(GOALS_KEY) === null || Array.isArray(JSON.parse(r.w.localStorage.getItem(GOALS_KEY))));
+  }
+
+  // Bersihkan jejak test supaya harness lain tidak terpengaruh.
+  try { frame.contentWindow.localStorage.removeItem(GOALS_KEY); } catch (e) {}
+
+  const pass = out.filter(l => l.startsWith("PASS")).length;
+  const fail = out.filter(l => l.startsWith("FAIL")).length;
+  document.getElementById("r").textContent = out.join("\n") + `\n\n== ${pass} PASS / ${fail} FAIL ==`;
+})().catch(e => { document.getElementById("r").textContent = out.join("\n") + "\nEXCEPTION " + e.message + "\n" + e.stack; });
+</script>

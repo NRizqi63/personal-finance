@@ -1,0 +1,184 @@
+<!doctype html>
+<meta charset="utf-8">
+<pre id="r">running…</pre>
+<script>
+const out = []; const ok = (n, c, x = "") => out.push(`${c ? "PASS" : "FAIL"} ${n}${x ? "  (" + x + ")" : ""}`);
+const wait = (ms) => new Promise(r => setTimeout(r, ms));
+const FRONT = new URL("../../frontend/", location.href).href;
+const HERE = location.href.replace(/[^/]*$/, "");
+const pad = (n) => String(n).padStart(2, "0");
+const iso = (dt) => `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`;
+const today = new Date(); today.setHours(0, 0, 0, 0); const T = iso(today);
+const rel = (n) => iso(new Date(today.getFullYear(), today.getMonth(), today.getDate() + n));
+const TX = [
+  { id: 6, title: "Makan Siang", category: "makanan", type: "expense", amount: 25000, isoDate: T, time: "" },
+  { id: 5, title: "Belanja", category: "belanja", type: "expense", amount: 175000, isoDate: rel(-1), time: "" },
+  { id: 4, title: "Gaji", category: "lainnya", type: "income", amount: 5000000, isoDate: T, time: "" },
+  { id: 3, title: "Bensin", category: "bensin", type: "expense", amount: 40000, isoDate: rel(-3), time: "" },
+];
+const GOALS = [{ id: 1, name: "Dana Darurat", target: 10000000, saved: 3200000, deadline: rel(30), createdAt: "2026-01-15" }, { id: 2, name: "Laptop", target: 8000000, saved: 8000000, deadline: "", createdAt: "2026-02-01" }];
+const KEYS = ["financeData.transactions", "financeData.budget", "financeData.settings", "financeData.goals"];
+const txt = (el) => (el ? el.textContent.replace(/\s+/g, " ").trim() : "");
+const $ = (d, id) => d.getElementById(id);
+
+let frame = null;
+async function seed(w, { checkin = true } = {}) {
+  try { w.localStorage.clear(); w.sessionStorage.clear(); w.localStorage.setItem("financeData.transactions", JSON.stringify(TX)); w.localStorage.setItem("financeData.goals", JSON.stringify(GOALS)); w.localStorage.setItem("financeData.settings", JSON.stringify({ name: "Tester", hideBalanceOnOpen: false, showCheckin: true })); if (!checkin) w.sessionStorage.setItem("checkinDismissed", "true"); } catch (e) {}
+}
+async function load(url, width = 390) {
+  if (frame) frame.remove();
+  frame = document.createElement("iframe"); frame.width = width; frame.height = 1600; frame.src = url; document.body.appendChild(frame);
+  const r = { errors: [] };
+  await new Promise(res => frame.onload = res);
+  r.d = frame.contentDocument; r.w = frame.contentWindow;
+  r.w.addEventListener("error", e => r.errors.push(e.message));
+  await wait(350);
+  return r;
+}
+// Seed lewat frame sementara (storage harus ada SEBELUM script halaman jalan).
+async function open(url, opts = {}) { if (!frame) await load(new URL("../fixtures/pages/jsf_page.html", location.href).href); await seed(frame.contentWindow, opts); return load(url, opts.width || 390); }
+const snapLS = (w) => JSON.stringify(KEYS.map(k => w.localStorage.getItem(k)));
+const bodyHtml = (d) => d.body.innerHTML.replace(/\s+/g, " ");
+const key = (d, k, extra = {}) => { const ev = new KeyboardEvent("keydown", Object.assign({ key: k, bubbles: true, cancelable: true }, extra)); d.dispatchEvent(ev); return ev; };
+const G = (w, expr) => { try { return w.eval(expr); } catch (e) { return "__ERR__:" + e.message; } };
+
+(async () => {
+  const coreSrc = await (await fetch(FRONT + "js/core.js")).text();
+  const sharedSrc = await (await fetch(FRONT + "js/transactions-shared.js")).text();
+  const dashSrc = await (await fetch(FRONT + "js/dashboard.js")).text();
+  const appSrc = await (await fetch(new URL("../fixtures/legacy/app.js", location.href).href)).text() /* referensi legacy beku (app.js dihapus pada JS-6) */;
+  const html = await (await fetch(FRONT + "index.html")).text();
+  const legacyHtml = await (await fetch(new URL("../fixtures/pages/index_legacy.html", location.href).href)).text();
+
+  /* ===================== 1. Parse ===================== */
+  let r = await open(FRONT + "index.html", { checkin: false }); let { d, w } = r;
+  ok("1a. index.html memuat core.js, transactions-shared.js, dashboard.js (urutan itu), tanpa app.js", (() => { const s = [...d.querySelectorAll("script[src]")].map(x => x.getAttribute("src")); return s.join(",") === "js/core.js,js/transactions-shared.js,js/dashboard.js"; })(), [...d.querySelectorAll("script[src]")].map(x => x.getAttribute("src")).join(","));
+  ok("1b. ketiga file terparse & dieksekusi tanpa error (0 error window)", r.errors.length === 0, r.errors.join(" | "));
+  ok("1c. fungsi dari tiap file tersedia: core (formatRupiah, createModalController), shared (setupTransactionModal, refreshDashboard), dashboard (initDashboard, renderSummary)", ["formatRupiah", "createModalController", "setupTransactionModal", "refreshDashboard", "initDashboard", "renderSummary", "setBalanceVisible", "renderGoalsDashboard", "renderCheckin"].every(n => typeof w[n] === "function"));
+  ok("1d. tidak ada deklarasi global ganda antar 3 file (statis)", (() => { const names = (s) => s.split("\n").map(l => (l.match(/^(?:function|const|let)\s+([A-Za-z_$][\w$]*)/) || [])[1]).filter(Boolean); const a = names(coreSrc), b = names(sharedSrc), c = names(dashSrc); const all = [...a, ...b, ...c]; return new Set(all).size === all.length; })());
+  ok("1e. dashboard.js tidak menyalin fungsi core/shared", !/^function (renderGreeting|renderBudgetSummary|renderTransactionItem|renderTransactionListItems|refreshDashboard|setupTransactionModal|handleTransactionListClick|escapeHtml|formatRupiah|createModalController)\b/m.test(dashSrc) && !/^(let|const) (openTransactionModal|confirmDeleteTransaction|transactionsPage|financeData|openModals)\b/m.test(dashSrc));
+  ok("1f. dashboard.js berisi 18 deklarasi khusus dashboard", (dashSrc.match(/^(?:function|const|let)\s+/gm) || []).length === 18 && ["MASKED_VALUE", "isBalanceVisible", "renderSummary", "formatMaskable", "setBalanceVisible", "TRANSACTION_LIST_LIMIT", "renderRecentTransactions", "getFinancialStatus", "getSpendingInsight", "renderCheckin", "renderNotifications", "setupHeaderActions", "setupBalanceToggle", "shouldShowCheckin", "setupCheckin", "DASHBOARD_GOAL_LIMIT", "renderGoalsDashboard", "initDashboard"].every(n => new RegExp(`^(?:function|const|let)\\s+${n}\\b`, "m").test(dashSrc)));
+
+  /* ===================== 2. Dashboard ===================== */
+  ok("2a. greeting tampil dengan nama dari settings", /Tester/.test(txt($(d, "greeting-text"))));
+  ok("2b. summary saldo/pemasukan/pengeluaran tampil (Rp4.760.000 / Rp5.000.000 / Rp240.000)", txt($(d, "balance-value")) === "Rp4.760.000" && txt($(d, "income-value")) === "Rp5.000.000" && txt($(d, "expense-value")) === "Rp240.000", [txt($(d, "balance-value")), txt($(d, "income-value")), txt($(d, "expense-value"))].join("|"));
+  ok("2c. card Budget Bulan Ini tampil (renderBudgetSummary dari core)", txt($(d, "budget-card")).includes("Rp240.000") && txt($(d, "budget-card")).includes("Sisa budget"));
+  ok("2d. transaksi terbaru tampil (maks 3, terbaru dulu)", $(d, "transaction-list").querySelectorAll(".transaction-item").length === 3 && txt($(d, "transaction-list")).includes("Makan Siang"));
+  ok("2e. card Target Keuangan tampil (2 target, 1 aktif, 1 tercapai)", /2 target/.test(txt($(d, "goals-card"))) && /1 aktif/.test(txt($(d, "goals-card"))) && /1 tercapai/.test(txt($(d, "goals-card"))));
+  ok("2f. dashboard TIDAK punya filter periode/kategori maupun kategori list (fitur halaman lain — tidak dimigrasi)", !$(d, "tx-search") && !d.querySelector(".filter-chip") && !$(d, "category-list") && !html.includes('id="category-list"'));
+  ok("2g. section grafik dashboard tetap hidden tanpa JS (tidak ada kode yang dipindah)", d.querySelector(".spending-chart").hidden === true && !/spending-chart/.test(dashSrc));
+  // toggle saldo
+  $(d, "btn-toggle-balance").click(); await wait(50);
+  ok("2h. toggle sembunyikan saldo bekerja (••••••••)", txt($(d, "balance-value")) === "••••••••" && txt($(d, "income-value")) === "••••••••");
+  $(d, "btn-toggle-balance").click(); await wait(50);
+  ok("2i. toggle tampilkan lagi", txt($(d, "balance-value")) === "Rp4.760.000");
+  // dropdown notifikasi
+  $(d, "btn-notification").click(); await wait(80);
+  ok("2j. dropdown notifikasi terbuka", !$(d, "notification-panel").hidden && $(d, "btn-notification").getAttribute("aria-expanded") === "true");
+  key(d, "Escape"); await wait(300);
+  ok("2k. Escape menutup dropdown", $(d, "notification-panel").hidden);
+  $(d, "btn-notification").click(); await wait(80); d.body.click(); await wait(300);
+  ok("2l. klik di luar menutup dropdown", $(d, "notification-panel").hidden);
+  // modal transaksi
+  const addBtn = d.querySelector('[data-action="add-transaction"]'); addBtn.focus(); addBtn.click(); await wait(80);
+  const ov = $(d, "transaction-modal-overlay");
+  ok("2m. modal transaksi terbuka, body terkunci, fokus di dalam (tombol tutup)", !ov.hidden && d.body.classList.contains("is-modal-open") && d.activeElement === $(d, "modal-close"));
+  const f = [...ov.querySelectorAll("button:not([disabled]), input:not([disabled]):not([type=hidden]), select")].filter(el => el.getClientRects().length);
+  f[f.length - 1].focus(); let ev = key(d, "Tab");
+  ok("2n. focus trap: Tab dari terakhir berputar ke pertama", ev.defaultPrevented && d.activeElement === f[0]);
+  key(d, "Escape"); await wait(250);
+  ok("2o. Escape menutup modal, body dilepas, fokus kembali ke tombol Tambah", ov.hidden && !d.body.classList.contains("is-modal-open") && d.activeElement === addBtn);
+  addBtn.focus(); addBtn.click(); await wait(80); ov.dispatchEvent(new MouseEvent("click", { bubbles: true })); await wait(250);
+  ok("2p. klik overlay menutup + restore focus", ov.hidden && d.activeElement === addBtn);
+  // tambah transaksi
+  const before = snapLS(w);
+  addBtn.focus(); addBtn.click(); await wait(80);
+  $(d, "field-title").value = "Kopi"; $(d, "field-category").value = "makanan"; $(d, "field-amount").value = "15000"; $(d, "field-amount").dispatchEvent(new Event("input", { bubbles: true })); $(d, "field-date").value = T;
+  $(d, "transaction-form").requestSubmit(); await wait(250);
+  const stored = JSON.parse(w.localStorage.getItem("financeData.transactions"));
+  ok("2q. tambah transaksi: tersimpan (id 7), modal tertutup", stored.length === 5 && stored[0].title === "Kopi" && stored[0].id === 7 && ov.hidden, JSON.stringify(stored[0]));
+  ok("2r. refreshDashboard: summary & daftar & budget diperbarui tanpa error", txt($(d, "balance-value")) === "Rp4.745.000" && txt($(d, "transaction-list")).includes("Kopi") && txt($(d, "budget-card")).includes("Rp255.000") && r.errors.length === 0, r.errors.join("|"));
+  ok("2s. feedback transaksi tampil", !$(d, "transaction-feedback").hidden && /tersimpan/.test(txt($(d, "transaction-feedback"))));
+  // edit lewat openTransactionModal (jalur yang sama dengan tombol Edit di halaman transaksi)
+  G(w, 'openTransactionModal("edit", financeData.transactions[0])'); await wait(80);
+  ok("2t. modal edit terisi", txt($(d, "modal-title")) === "Edit Transaksi" && $(d, "field-title").value === "Kopi" && $(d, "field-id").value === "7");
+  $(d, "field-amount").value = "20000"; $(d, "field-amount").dispatchEvent(new Event("input", { bubbles: true })); $(d, "transaction-form").requestSubmit(); await wait(250);
+  ok("2u. edit tersimpan (Rp20.000), id tetap, summary ikut", JSON.parse(w.localStorage.getItem("financeData.transactions"))[0].amount === 20000 && txt($(d, "balance-value")) === "Rp4.740.000");
+  ok("2v. hapus di dashboard: tanpa markup konfirmasi -> confirmDeleteTransaction null & pesan error (perilaku lama, tidak berubah)", G(w, "confirmDeleteTransaction") === null && /Konfirmasi hapus tidak tersedia/.test(sharedSrc) && !$(d, "confirm-modal-overlay"));
+  ok("2w. key selain transaksi tidak berubah", (() => { const a = JSON.parse(before), b = JSON.parse(snapLS(w)); return a[1] === b[1] && a[2] === b[2] && a[3] === b[3]; })());
+  // check-in
+  r = await open(FRONT + "index.html", { checkin: true }); ({ d, w } = r);
+  ok("2x. Financial Check-in tampil saat sesi baru, berisi data (Tester, saldo, goal contoh)", !$(d, "checkin-overlay").hidden && /Tester/.test(txt($(d, "checkin-body"))) && /Rp4\.760\.000/.test(txt($(d, "checkin-body"))) && /contoh/.test(txt($(d, "checkin-body"))));
+  key(d, "Escape"); await wait(300);
+  ok("2y. satu Escape menutup check-in & melepas kunci body (bukti initDashboard/pushModal tidak dijalankan dua kali)", $(d, "checkin-overlay").hidden && !d.body.classList.contains("is-modal-open") && w.sessionStorage.getItem("checkinDismissed") === "true");
+  {
+    const t = await load(new URL("../fixtures/pages/jsf_page.html", location.href).href); t.w.localStorage.setItem("financeData.settings", JSON.stringify({ name: "Tester", hideBalanceOnOpen: true, showCheckin: false })); t.w.sessionStorage.setItem("checkinDismissed", "true");
+    const z = await load(FRONT + "index.html");
+    ok("2z. preferensi hideBalanceOnOpen & showCheckin=false dihormati", txt($(z.d, "balance-value")) === "••••••••" && $(z.d, "checkin-overlay").hidden && z.errors.length === 0);
+  }
+  r = await open(FRONT + "index.html", { checkin: false }); ({ d, w } = r);
+
+  /* ===================== 3. Dependency ===================== */
+  ok("3a. fungsi yang dipanggil refreshDashboard tersedia di dashboard: renderSummary, renderRecentTransactions, renderBudgetSummary", ["renderSummary", "renderRecentTransactions", "renderBudgetSummary"].every(n => typeof w[n] === "function"));
+  ok("3b. fungsi halaman lain memang tidak ada (guard aktif): renderCategoryList, renderAllTransactionsList", typeof w.renderCategoryList === "undefined" && typeof w.renderAllTransactionsList === "undefined");
+  ok("3c. refreshDashboard() dipanggil langsung: tidak melempar", (() => { try { w.refreshDashboard(); return r.errors.length === 0; } catch (e) { return false; } })());
+  ok("3d. tepat 1 listener DOMContentLoaded (core) — dashboard.js & shared 0", coreSrc.split('addEventListener("DOMContentLoaded"').length - 1 === 1 && !dashSrc.includes('addEventListener("DOMContentLoaded"') && !sharedSrc.includes('addEventListener("DOMContentLoaded"'));
+  ok("3e. listener keydown global: core 1 + dashboard 1 (dropdown) + shared 0 = 2 (sama dengan app.js)", coreSrc.split('addEventListener("keydown"').length - 1 === 1 && dashSrc.split('addEventListener("keydown"').length - 1 === 1 && sharedSrc.split('addEventListener("keydown"').length - 1 === 0 && appSrc.split('addEventListener("keydown"').length - 1 === 2);
+  const countL = (s) => (s.match(/(document|window)\.addEventListener\(/g) || []).length;
+  ok(`3f. total document/window.addEventListener di 3 file (${countL(coreSrc) + countL(sharedSrc) + countL(dashSrc)}) = jumlah di app.js (${countL(appSrc)}) — tidak bertambah`, countL(coreSrc) + countL(sharedSrc) + countL(dashSrc) === countL(appSrc));
+  ok("3g. tidak ada ReferenceError sepanjang skenario", r.errors.length === 0, r.errors.join("|"));
+  // --- Perbandingan fungsi yang SENGAJA diubah (Modal Stabilization) ---
+  // Fence tetap ketat: selain tiga fungsi di bawah semuanya wajib identik
+  // byte-per-byte dengan app.js lama, dan ketiganya wajib berbeda PERSIS
+  // sebanyak baris perbaikan race (pembatalan timer hide & frame .is-open).
+  const MODAL_FIX_DELTA = {"createModalController": {"added": ["cancelAnimationFrame(openFrame);", "cancelPending();", "cancelPending();", "clearTimeout(hideTimer);", "function cancelPending() {", "hideTimer = null;", "hideTimer = null;", "hideTimer = setTimeout(() => {", "if (!showing) lastTrigger = document.activeElement;", "if (!showing) return; // termasuk saat close() dipanggil dua kali", "if (hideTimer !== null) {", "if (openFrame !== null) {", "let hideTimer = null;", "let openFrame = null;", "let showing = false;", "openFrame = null;", "openFrame = null;", "openFrame = requestAnimationFrame(() => {", "openFrame = requestAnimationFrame(() => {", "overlay.classList.add(\"is-open\");", "showing = false;", "showing = true;", "}", "}", "}", "});"], "removed": ["if (overlay.hidden) lastTrigger = document.activeElement;", "if (overlay.hidden) return;", "requestAnimationFrame(() => overlay.classList.add(\"is-open\"));", "requestAnimationFrame(() => {", "setTimeout(() => {"]}, "setupTransactionModal": {"added": ["cancelAnimationFrame(modalOpenFrame);", "cancelModalPending();", "cancelModalPending();", "clearTimeout(modalHideTimer);", "function cancelModalPending() {", "if (!modalShowing) modalTrigger = document.activeElement;", "if (!modalShowing) return; // close ganda: jangan jadwalkan timer kedua", "if (modalHideTimer !== null) {", "if (modalOpenFrame !== null) {", "let modalHideTimer = null;", "let modalOpenFrame = null;", "let modalShowing = false;", "modalHideTimer = null;", "modalHideTimer = null;", "modalHideTimer = setTimeout(() => {", "modalOpenFrame = null;", "modalOpenFrame = null;", "modalOpenFrame = requestAnimationFrame(() => {", "modalOpenFrame = requestAnimationFrame(() => {", "modalShowing = false;", "modalShowing = true;", "}", "}", "}"], "removed": ["if (overlay.hidden) modalTrigger = document.activeElement;", "requestAnimationFrame(() => {", "requestAnimationFrame(() => {", "setTimeout(() => {"]}, "setupCheckin": {"added": ["cancelAnimationFrame(checkinOpenFrame);", "cancelCheckinPending();", "cancelCheckinPending();", "checkinHideTimer = null;", "checkinHideTimer = null;", "checkinHideTimer = setTimeout(() => {", "checkinOpenFrame = null;", "checkinOpenFrame = null;", "checkinOpenFrame = requestAnimationFrame(() => {", "checkinOpenFrame = requestAnimationFrame(() => {", "checkinShowing = false;", "checkinShowing = true;", "clearTimeout(checkinHideTimer);", "function cancelCheckinPending() {", "if (!checkinShowing) checkinTrigger = document.activeElement;", "if (!checkinShowing) return; // close ganda: jangan jadwalkan timer kedua", "if (checkinHideTimer !== null) {", "if (checkinOpenFrame !== null) {", "let checkinHideTimer = null;", "let checkinOpenFrame = null;", "let checkinShowing = false;", "overlay.classList.add(\"is-open\");", "}", "}", "}", "});"], "removed": ["if (overlay.hidden) checkinTrigger = document.activeElement;", "requestAnimationFrame(() => overlay.classList.add(\"is-open\"));", "requestAnimationFrame(() => {", "setTimeout(() => {"]}};
+  const fixLines = (s) => s.replace(/\/\*[\s\S]*?\*\//g, "").split("\n").map(l => l.trim()).filter(l => l && !l.startsWith("//"));
+  const fixDelta = (oldS, newS) => {
+    const count = (arr) => arr.reduce((m, l) => (m[l] = (m[l] || 0) + 1, m), {});
+    const a = count(fixLines(oldS)), b = count(fixLines(newS));
+    const added = [], removed = [];
+    Object.keys(b).forEach(l => { for (let i = 0; i < b[l] - (a[l] || 0); i++) added.push(l); });
+    Object.keys(a).forEach(l => { for (let i = 0; i < a[l] - (b[l] || 0); i++) removed.push(l); });
+    return { added: added.sort(), removed: removed.sort() };
+  };
+  const fixMatches = (name, oldS, newS) => {
+    const exp = MODAL_FIX_DELTA[name], got = fixDelta(oldS, newS);
+    return JSON.stringify(got.added) === JSON.stringify(exp.added) && JSON.stringify(got.removed) === JSON.stringify(exp.removed);
+  };
+  ok("3h. fungsi dashboard identik byte-per-byte dengan app.js (toString); setupCheckin dikecualikan & diperiksa terpisah di 3h2", (() => { const names = ["renderSummary", "formatMaskable", "setBalanceVisible", "renderRecentTransactions", "getFinancialStatus", "getSpendingInsight", "renderCheckin", "renderNotifications", "setupHeaderActions", "setupBalanceToggle", "shouldShowCheckin", "renderGoalsDashboard", "initDashboard"]; return names.every(n => { const m = new RegExp(`^function ${n}\\([\\s\\S]*?\\n\\}`, "m"); const a = m.exec(appSrc), b = m.exec(dashSrc); return a && b && a[0] === b[0]; }); })());
+  ok("3h2. setupCheckin berbeda PERSIS sebatas perbaikan race modal check-in (timer hide 220ms & frame is-open dibatalkan), tidak ada perubahan lain", (() => { const re2 = /^function setupCheckin\([\s\S]*?\n\}/m; const a = re2.exec(appSrc), b = re2.exec(dashSrc); return a && b && a[0] !== b[0] && fixMatches("setupCheckin", a[0], b[0]); })());
+
+  /* ===================== 4. Kesetaraan DOM & storage vs app.js ===================== */
+  const scenarios = [
+    ["awal (check-in ditutup)", async () => {}],
+    ["saldo disembunyikan", async (d) => { $(d, "btn-toggle-balance").click(); await wait(60); }],
+    ["dropdown terbuka", async (d) => { $(d, "btn-notification").click(); await wait(100); }],
+    ["modal transaksi terbuka", async (d) => { const b = d.querySelector('[data-action="add-transaction"]'); b.focus(); b.click(); await wait(600); }],
+    ["setelah tambah transaksi", async (d) => { const b = d.querySelector('[data-action="add-transaction"]'); b.focus(); b.click(); await wait(80); $(d, "field-title").value = "Kopi"; $(d, "field-category").value = "makanan"; $(d, "field-amount").value = "15000"; $(d, "field-amount").dispatchEvent(new Event("input", { bubbles: true })); $(d, "field-date").value = T; $(d, "transaction-form").requestSubmit(); await wait(300); }],
+  ];
+  for (const width of [390, 1280]) {
+    for (const [label, act] of scenarios) {
+      const a = await open(FRONT + "index.html", { checkin: false, width }); await act(a.d); const A = { html: bodyHtml(a.d), ls: snapLS(a.w), err: a.errors.slice(), active: a.d.activeElement && (a.d.activeElement.id || a.d.activeElement.className) };
+      const b = await open(new URL("../fixtures/pages/index_legacy.html", location.href).href, { checkin: false, width }); await act(b.d); const B = { html: bodyHtml(b.d), ls: snapLS(b.w), err: b.errors.slice(), active: b.d.activeElement && (b.d.activeElement.id || b.d.activeElement.className) };
+      // Normalisasi: hanya tag <script src> yang memang berbeda antara kedua halaman.
+      const norm = (h) => h.replace(/<script src="[^"]*"><\/script>/g, "").replace(/<!--[\s\S]*?-->/g, "").replace(/style="left: [\d.]+px; width: [\d.]+px;"/g, "").replace(/ no-transition"/g, '"').replace(/ is-open"/g, '"').trim(); // .is-open dipasang rAF bersarang di open() — di headless kadang baru jalan setelah close(), artefak timing // inline style & kelas .no-transition = transien dari rAF positionIndicator() (tidak deterministik di headless), bukan output CSS/JS yang berbeda
+      const na = norm(A.html), nb = norm(B.html); let di = 0; while (di < na.length && na[di] === nb[di]) di++;
+      ok(`4. @${width} ${label}: DOM body identik dengan versi app.js`, na === nb && A.err.length === 0 && B.err.length === 0, na === nb ? A.err.concat(B.err).join("|") : `pos ${di} SPLIT[${na.substr(Math.max(0, di - 30), 90)}] LEGACY[${nb.substr(Math.max(0, di - 30), 90)}]`);
+      ok(`4. @${width} ${label}: storage & elemen aktif identik`, A.ls === B.ls && A.active === B.active, `${A.active} vs ${B.active}`);
+    }
+  }
+
+  /* ===================== 5. Halaman lain tetap app.js ===================== */
+  // Peta script per halaman pada tahap sekarang (JS-3): goals sudah dimigrasi; sisanya masih app.js.
+  for (const [page, id, expect] of [["goals.html", "goal-list", "js/core.js,js/goals.js"], ["analytics.html", "analytics-period-title", "js/core.js,js/analytics.js"], ["budget.html", "budget-card", "js/core.js,js/budget.js"], ["transactions.html", "all-transaction-list", "js/core.js,js/transactions-shared.js,js/transactions.js"], ["settings.html", "settings-app-version", "js/core.js,js/settings.js"]]) {
+    const rr = await open(FRONT + page, { checkin: false }); await wait(100);
+    const scripts = [...rr.d.querySelectorAll("script[src]")].map(x => x.getAttribute("src"));
+    ok(`5. ${page}: script sesuai tahap (${expect}), elemen kunci ada, 0 error`, scripts.join(",") === expect && rr.d.getElementById(id) !== null && rr.errors.length === 0, scripts.join(",") + " " + rr.errors.join("|"));
+  }
+  ok("5x. index.html vs index_legacy.html: identik selain tag <script src> dan href CSS absolut", (() => { const legacy = legacyHtml; const strip = (h) => h.replace(/<!--[\s\S]*?-->/g, "").replace(/\s*<script src="[^"]*"><\/script>/g, "").replace(/href="[^"]*css\//g, 'href="css/'); return strip(html) === strip(legacy) && strip(html).length > 5000; })());
+
+  try { frame.contentWindow.localStorage.clear(); frame.contentWindow.sessionStorage.clear(); } catch (e) {}
+  const pass = out.filter(l => l.startsWith("PASS")).length, fail = out.filter(l => l.startsWith("FAIL")).length;
+  document.getElementById("r").textContent = out.join("\n") + `\n\n== ${pass} PASS / ${fail} FAIL ==`;
+})().catch(e => { document.getElementById("r").textContent = out.join("\n") + "\nEXCEPTION " + e.message + "\n" + e.stack; });
+</script>

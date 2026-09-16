@@ -1,0 +1,192 @@
+<!doctype html>
+<meta charset="utf-8">
+<pre id="r">running…</pre>
+<script>
+const out = []; const ok = (n, c, x = "") => out.push(`${c ? "PASS" : "FAIL"} ${n}${x ? "  (" + x + ")" : ""}`);
+const wait = (ms) => new Promise(r => setTimeout(r, ms));
+const confirmDelete = async (d, w) => { const btn = d.getElementById("confirm-delete"); if (btn && !d.getElementById("confirm-modal-overlay").hidden) { btn.click(); await new Promise(r => setTimeout(r, 260)); } };
+
+const BASE = new URL("../../frontend/", location.href).href;
+// JS-6: app.js sudah dihapus. Sumber kode HIDUP untuk pemeriksaan regex = gabungan 8 file split (urutan muat).
+const APP_SPLIT_FILES = ["core.js", "transactions-shared.js", "dashboard.js", "goals.js", "analytics.js", "budget.js", "transactions.js", "settings.js"];
+async function fetchAppJs(base) { const parts = []; for (const f of APP_SPLIT_FILES) parts.push(`/* ==== ${f} ==== */\n` + await (await fetch(base + "js/" + f)).text()); return parts.join("\n"); }
+
+let frame = null;
+async function load(page, width = 390) {
+  if (frame) frame.remove();
+  frame = document.createElement("iframe"); frame.width = width; frame.height = 1600; frame.src = BASE + page;
+  document.body.appendChild(frame);
+  await new Promise(r => frame.onload = r); await wait(350);
+  return { d: frame.contentDocument, w: frame.contentWindow };
+}
+const pad = (n) => String(n).padStart(2, "0");
+const iso = (dt) => `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`;
+const addD = (dt, n) => new Date(dt.getFullYear(), dt.getMonth(), dt.getDate() + n);
+const txt = (el) => el.textContent.replace(/\s+/g, " ").trim();
+const MONTHS = ["Januari","Februari","Maret","April","Mei","Juni","Juli","Agustus","September","Oktober","November","Desember"];
+
+(async () => {
+  let { d, w } = await load("analytics.html");
+  try { w.localStorage.clear(); } catch (e) {}
+
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+  const daysInMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
+  const other = today.getDate() > 1 ? monthStart : addD(monthStart, 1); // another day this month
+  const prevMonthMid = new Date(today.getFullYear(), today.getMonth() - 1, 15);
+  const seed = [
+    { id: 1, title: "Makan Siang", category: "makanan", type: "expense", amount: 25000, isoDate: iso(today), time: "" },
+    { id: 2, title: "Bensin", category: "bensin", type: "expense", amount: 30000, isoDate: iso(today), time: "" },
+    { id: 3, title: "Gaji", category: "lainnya", type: "income", amount: 5000000, isoDate: iso(today), time: "" },
+    { id: 4, title: "Tagihan Awal Bulan", category: "tagihan", type: "expense", amount: 200000, isoDate: iso(other), time: "" },
+    { id: 5, title: "Belanja Bulan Lalu", category: "belanja", type: "expense", amount: 100000, isoDate: iso(prevMonthMid), time: "" },
+    { id: 6, title: "Tanpa Tanggal", category: "makanan", type: "expense", amount: 7000, isoDate: "", time: "" },
+    { id: 7, title: "Tanggal Rusak", category: "makanan", type: "expense", amount: 8000, isoDate: "2026-02-30", time: "" },
+    { id: 8, title: "Tanggal Aneh", category: "makanan", type: "expense", amount: 9000, isoDate: null, time: "" },
+  ];
+  const expMonth = 25000 + 30000 + 200000;
+  w.localStorage.setItem("financeData.transactions", JSON.stringify(seed));
+  ({ d, w } = await load("analytics.html"));
+
+  const bars = () => [...d.querySelectorAll("#time-chart .bar-col")];
+  const sumBars = () => bars().reduce((s, b) => s + Number(b.getAttribute("aria-label").match(/Rp([\d.]+)$/)[1].replace(/\./g, "")), 0);
+  const tileTotal = () => Number(d.querySelector("#analytics-summary .stat--wide .stat-value").textContent.replace(/\D/g, ""));
+  const catTotal = () => [...d.querySelectorAll("#category-chart .cat-row-amount")].reduce((s, el) => s + Number(el.textContent.replace(/\D/g, "")), 0);
+  const detailTotal = () => Number(d.querySelector("#chart-detail .detail-total").textContent.replace(/\D/g, ""));
+  const detailItems = () => [...d.querySelectorAll("#chart-detail .transaction-item")];
+  const clickBar = async (key) => { d.querySelector(`#time-chart .bar-col[data-key="${key}"]`).click(); await wait(80); };
+
+  // ---- 8. no leftovers of old filter UI ----
+  ok("no period tabs / custom inputs left", !d.querySelector("#period-filter, .seg, .seg-btn, #custom-range, #custom-from, #custom-to, #period-label") && !/Hari Ini|Minggu Ini|Bulan Ini|Custom/.test(txt(d.querySelector(".analytics-time")) + txt(d.querySelector(".analytics-summary"))));
+  ok("no filter code left in app.js; no toISOString().slice", (() => { return true; })());
+  const src = await fetchAppJs(BASE);
+  ok("app.js: no getPeriodRange/renderPeriodControls/customFrom/toISOString().slice", !/getPeriodRange|renderPeriodControls|customFrom|toISOString\(\)\.slice|getWeekBuckets|getMonthBuckets|chart-scroll|scrollLeft/.test(src));
+
+  // ---- chart structure ----
+  ok(`chart: one <button> bar per date of this month (${daysInMonth}), keys local yyyy-mm-dd, labels = day numbers`, bars().length === daysInMonth && bars().every((b, i) => b.tagName === "BUTTON" && b.dataset.key === iso(addD(monthStart, i)) && txt(b.querySelector(".bar-label")) === String(i + 1)));
+  ok("chart: today's bar is-current; title/aria include month+year", bars().find(b => b.classList.contains("is-current")).dataset.key === iso(today) && bars().every(b => new RegExp(`${MONTHS[today.getMonth()]} ${today.getFullYear()}`).test(b.getAttribute("aria-label"))));
+  ok("section subtitle shows the month", txt(d.getElementById("time-chart-sub")) === `${MONTHS[today.getMonth()]} ${today.getFullYear()}`);
+
+  // ---- 4. totals consistent; income + last month + invalid dates excluded ----
+  ok("Σ bars = tile Total = Σ categories = chart note (Rp255.000)", sumBars() === expMonth && tileTotal() === expMonth && catTotal() === expMonth && /Rp255\.000/.test(txt(d.querySelector("#time-chart .chart-note"))), `bars=${sumBars()} tile=${tileTotal()} cat=${catTotal()}`);
+  ok("income, last-month and invalid-date expenses excluded; no console crash", !bars().some(b => /Gaji/.test(b.getAttribute("aria-label"))) && sumBars() === expMonth);
+  ok("invalid-date expenses handled safely: note '3 pengeluaran tanpa tanggal valid tidak ditampilkan'", /3 pengeluaran tanpa tanggal valid/.test(txt(d.querySelector("#time-chart .chart-note"))));
+
+  // ---- 1-2. small bars, no scroll, body no overflow ----
+  const chartEl = d.getElementById("bar-chart");
+  ok("chart fills the card: no scrollbar (overflow visible), card & body have no horizontal overflow; label overhang stays inside card padding", w.getComputedStyle(chartEl).overflowX === "visible" && chartEl.scrollWidth - chartEl.clientWidth <= 12 && d.getElementById("time-chart").scrollWidth <= d.getElementById("time-chart").clientWidth + 1 && d.documentElement.scrollWidth === d.documentElement.clientWidth, `chart sw=${chartEl.scrollWidth} cw=${chartEl.clientWidth} card sw=${d.getElementById("time-chart").scrollWidth} cw=${d.getElementById("time-chart").clientWidth} html sw=${d.documentElement.scrollWidth}`);
+  ok("bars stay small (old design): flex columns < 14px wide at 390px, track 120px", bars().every(b => b.getBoundingClientRect().width < 14) && Math.round(bars()[0].querySelector(".bar-track").getBoundingClientRect().height) === 120, `w=${bars()[0].getBoundingClientRect().width.toFixed(1)}`);
+  ok("no scroll container / hint left", !d.querySelector(".chart-scroll, #chart-hint"));
+  ok("chart area uses touch-action: pan-y (vertical page scroll preserved)", w.getComputedStyle(chartEl).touchAction === "pan-y");
+  ok("sparse date labels (1,5,10,…,last,today) visible, others hidden", bars().filter(b => !b.querySelector(".bar-label").classList.contains("is-hidden")).length <= 9 && !bars()[0].querySelector(".bar-label").classList.contains("is-hidden") && !bars()[4].querySelector(".bar-label").classList.contains("is-hidden"));
+
+  // ---- 3-7. scrubbing via Pointer Events ----
+  const centerX = (b) => { const r = b.getBoundingClientRect(); return r.left + r.width / 2; };
+  const midY = () => { const r = chartEl.getBoundingClientRect(); return r.top + r.height / 2; };
+  const pe = (type, x, extra = {}) => chartEl.dispatchEvent(new w.PointerEvent(type, { bubbles: true, cancelable: true, pointerId: 7, pointerType: "touch", isPrimary: true, clientX: x, clientY: midY(), button: 0, ...extra }));
+  const selectedKey = () => (d.querySelector("#time-chart .bar-col.is-selected") || {}).dataset && d.querySelector("#time-chart .bar-col.is-selected").dataset.key;
+  const hoverKey = () => { const b = d.querySelector("#time-chart .bar-col.is-hover"); return b && b.dataset.key; };
+  const detailTitle = () => txt(d.getElementById("chart-detail-title"));
+  const monthTitle = `${MONTHS[today.getMonth()]} ${today.getFullYear()}`;
+  const todayIdx = today.getDate() - 1;
+
+  // default: belum ada pilihan, detail = seluruh periode aktif
+  ok("default: tidak ada batang terpilih, detail = seluruh transaksi periode aktif", !selectedKey() && /Semua periode/.test(txt(d.querySelector("#chart-detail .detail-kicker"))) && detailTitle() === monthTitle && detailTotal() === expMonth && !d.getElementById("btn-reset-selection"));
+
+  // --- geseran (> 8px): hanya preview visual ---
+  pe("pointerdown", centerX(bars()[5])); await wait(30);
+  ok("geser: batang di bawah jari dapat hover preview, belum terpilih", hoverKey() === iso(addD(monthStart, 5)) && !selectedKey() && bars()[5].getAttribute("aria-pressed") === "false");
+  ok("geser: detail tetap seluruh periode", detailTitle() === monthTitle && detailTotal() === expMonth);
+  pe("pointermove", centerX(bars()[10])); await wait(30);
+  ok("geser: hover mengikuti jari", hoverKey() === iso(addD(monthStart, 10)) && !selectedKey());
+  ok("geser: detail TIDAK berubah", detailTitle() === monthTitle && detailTotal() === expMonth);
+  ok("chart DOM tidak dirender ulang saat geser (tanpa layout shift)", d.getElementById("bar-chart") === chartEl);
+  pe("pointermove", centerX(bars()[todayIdx])); await wait(30);
+  ok("geser ke hari ini: tetap hover saja", hoverKey() === iso(today) && !selectedKey());
+  pe("pointerup", centerX(bars()[todayIdx])); await wait(40);
+  ok("setelah jari dilepas: tidak ada batang terkunci, hover hilang", !selectedKey() && !hoverKey() && !d.querySelector(".bar-chart.has-selection"));
+  ok("setelah geseran: detail tetap menampilkan semua transaksi periode", detailTitle() === monthTitle && detailTotal() === expMonth && !d.getElementById("btn-reset-selection"));
+
+  // --- tap tanpa geseran: memilih permanen ---
+  pe("pointerdown", centerX(bars()[todayIdx])); pe("pointerup", centerX(bars()[todayIdx])); await wait(40);
+  ok("tap tanpa geseran -> batang terpilih permanen + aria-pressed", selectedKey() === iso(today) && d.querySelector(".bar-col.is-selected").getAttribute("aria-pressed") === "true" && d.querySelector("#time-chart .bar-chart").classList.contains("has-selection"));
+  ok("tap -> detail pindah ke tanggal itu (judul, total Rp55.000, 2 item)", detailTitle() === `${today.getDate()} ${MONTHS[today.getMonth()]} ${today.getFullYear()}` && detailTotal() === 55000 && detailItems().length === 2);
+  ok("tap -> tombol 'Semua periode' muncul", !!d.getElementById("btn-reset-selection"));
+
+  // --- geseran saat sudah ada pilihan: pilihan tidak berubah ---
+  pe("pointerdown", centerX(bars()[2])); pe("pointermove", centerX(bars()[12])); await wait(30);
+  ok("geser saat ada pilihan: hover pindah, pilihan tetap", hoverKey() === iso(addD(monthStart, 12)) && selectedKey() === iso(today) && detailTotal() === 55000);
+  pe("pointerup", centerX(bars()[12])); await wait(40);
+  ok("lepas setelah geser tidak mencuri pilihan", selectedKey() === iso(today) && detailTitle() === `${today.getDate()} ${MONTHS[today.getMonth()]} ${today.getFullYear()}`);
+
+  // --- getaran kecil (<= 8px) tetap dianggap tap ---
+  pe("pointerdown", centerX(bars()[3])); pe("pointermove", centerX(bars()[3]) + 4); pe("pointerup", centerX(bars()[3]) + 4); await wait(40);
+  ok("getaran <= 8px tetap dianggap tap", selectedKey() === iso(addD(monthStart, 3)));
+
+  // --- clamp & pointercancel ---
+  pe("pointerdown", chartEl.getBoundingClientRect().left - 50); pe("pointerup", chartEl.getBoundingClientRect().left - 50); await wait(30);
+  ok("tap di kiri chart -> clamp ke tanggal 1", selectedKey() === iso(monthStart));
+  pe("pointerdown", chartEl.getBoundingClientRect().right + 50); pe("pointerup", chartEl.getBoundingClientRect().right + 50); await wait(30);
+  ok("tap di kanan chart -> clamp ke tanggal terakhir", selectedKey() === iso(addD(monthStart, daysInMonth - 1)));
+  pe("pointerdown", centerX(bars()[7])); pe("pointercancel", centerX(bars()[7])); await wait(30);
+  ok("pointercancel (scroll vertikal halaman): pilihan dipertahankan, hover bersih", selectedKey() === iso(addD(monthStart, daysInMonth - 1)) && !hoverKey());
+  pe("pointermove", centerX(bars()[20])); await wait(30);
+  ok("setelah cancel, gerakan diabaikan sampai pointerdown berikutnya", !hoverKey() && selectedKey() === iso(addD(monthStart, daysInMonth - 1)));
+
+  // --- mouse & keyboard ---
+  const mpe = (type, x) => chartEl.dispatchEvent(new w.PointerEvent(type, { bubbles: true, cancelable: true, pointerId: 1, pointerType: "mouse", isPrimary: true, clientX: x, clientY: midY(), button: 0 }));
+  mpe("pointerdown", centerX(bars()[todayIdx])); mpe("pointerup", centerX(bars()[todayIdx])); await wait(40);
+  ok("klik mouse memilih batang", selectedKey() === iso(today) && detailTotal() === 55000);
+  bars()[0].click(); await wait(40);
+  ok("klik via keyboard (Enter/Space) juga memilih", selectedKey() === iso(monthStart));
+
+  await clickBar(iso(today));
+  // ---- 1. click/tap bar -> detail of that date ----
+  ok("batang terpilih: is-selected + aria-pressed + batang lain meredup", selectedKey() === iso(today) && d.querySelector(".bar-col.is-selected").getAttribute("aria-pressed") === "true" && d.querySelector("#time-chart .bar-chart").classList.contains("has-selection"));
+  ok("detail: title = selected date (long), total Rp55.000, 2 expense items, income not listed, no Edit/Delete", txt(d.getElementById("chart-detail-title")) === `${today.getDate()} ${MONTHS[today.getMonth()]} ${today.getFullYear()}` && detailTotal() === 55000 && detailItems().length === 2 && !/Gaji/.test(txt(d.getElementById("chart-detail"))) && !d.querySelector("#chart-detail [data-action]"));
+  ok("detail items show name, category, amount, date", detailItems().every(li => li.querySelector(".transaction-title") && li.querySelector(".transaction-date") && li.querySelector(".transaction-amount")));
+  await clickBar(iso(other));
+  ok("click another bar -> only that date's transaction (Tagihan Awal Bulan)", detailItems().length === 1 && /Tagihan Awal Bulan/.test(txt(d.getElementById("chart-detail"))) && detailTotal() === 200000);
+
+  // ---- 5. empty state ----
+  const emptyKey = bars().find(b => /Rp0$/.test(b.getAttribute("aria-label"))).dataset.key;
+  await clickBar(emptyKey);
+  ok("empty date -> '📭 Tidak ada pengeluaran pada tanggal ini.', total Rp0", /📭 Tidak ada pengeluaran pada tanggal ini\./.test(txt(d.getElementById("chart-detail"))) && detailTotal() === 0);
+
+  // ---- 6. back to whole period ----
+  ok("'← Semua periode' button shown while a bar is selected", !!d.getElementById("btn-reset-selection"));
+  d.getElementById("btn-reset-selection").click(); await wait(80);
+  ok("reset -> 'Semua periode · <bulan>' with month total and no selection", !d.querySelector("#time-chart .is-selected") && /Semua periode/.test(txt(d.querySelector("#chart-detail .detail-kicker"))) && txt(d.getElementById("chart-detail-title")) === `${MONTHS[today.getMonth()]} ${today.getFullYear()}` && detailTotal() === expMonth && !d.getElementById("btn-reset-selection"));
+  await clickBar(iso(today)); await clickBar(iso(today));
+  ok("tap batang yang sama tetap terpilih (kembali lewat '← Semua periode')", selectedKey() === iso(today) && detailTotal() === 55000);
+  d.getElementById("btn-reset-selection").click(); await wait(60);
+  ok("'Semua periode' menghapus pilihan & mengembalikan detail seluruh periode", !selectedKey() && detailTitle() === monthTitle && detailTotal() === expMonth && !d.querySelector(".bar-chart.has-selection"));
+
+  // ---- detail list limit ----
+  const many = seed.concat([1,2,3,4,5,6].map(i => ({ id: 100 + i, title: `Jajan ${i}`, category: "makanan", type: "expense", amount: 1000, isoDate: iso(today), time: "" })));
+  w.localStorage.setItem("financeData.transactions", JSON.stringify(many));
+  ({ d, w } = await load("analytics.html"));
+  await clickBar(iso(today));
+  ok("more than 5 on a date -> 5 shown + 'Lihat semua (8)'", detailItems().length === 5 && /Lihat semua \(8\)/.test(txt(d.getElementById("btn-detail-toggle"))));
+  d.getElementById("btn-detail-toggle").click(); await wait(80);
+  ok("Lihat semua -> 8 items, 'Ringkas kembali'", detailItems().length === 8 && /Ringkas kembali/.test(txt(d.getElementById("btn-detail-toggle"))));
+
+  // ---- 7. CRUD still works and analytics follows ----
+  ({ d, w } = await load("transactions.html"));
+  w.confirm = () => true;
+  d.getElementById("btn-toggle-all").click(); await wait(80); // Bensin (id 2) ada di luar 3 teratas
+  [...d.querySelectorAll('[data-action="delete"]')].find(b => /Bensin/.test(b.getAttribute("aria-label"))).click(); await wait(260); await confirmDelete(d, w);
+  ({ d, w } = await load("analytics.html"));
+  ok("after delete on transactions page: chart total updates (Rp231.000)", tileTotal() === expMonth - 30000 + 6000 && sumBars() === tileTotal());
+
+  // ---- 320px: body still no overflow, chart scrolls ----
+  ({ d, w } = await load("analytics.html", 320));
+  ok("320px: body no horizontal overflow; chart card fits without scroll", d.documentElement.scrollWidth === d.documentElement.clientWidth && d.getElementById("time-chart").scrollWidth <= d.getElementById("time-chart").clientWidth + 1, `card sw=${d.getElementById("time-chart").scrollWidth} cw=${d.getElementById("time-chart").clientWidth}`);
+  ({ d, w } = await load("analytics.html", 1280));
+  ok("1280px: body no horizontal overflow", d.documentElement.scrollWidth === d.documentElement.clientWidth);
+
+  out.push(`INFO local clock ${new Date().toString()} | localDate=${iso(new Date())} utcDate=${new Date().toISOString().slice(0, 10)}`);
+  try { w.localStorage.clear(); } catch (e) {}
+  document.getElementById("r").textContent = out.join("\n");
+})().catch(e => { out.push("EXCEPTION " + e.stack); document.getElementById("r").textContent = out.join("\n"); });
+</script>

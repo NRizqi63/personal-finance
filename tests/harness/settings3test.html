@@ -1,0 +1,203 @@
+<!doctype html>
+<meta charset="utf-8">
+<pre id="r">running…</pre>
+<script>
+const out = []; const ok = (n, c, x = "") => out.push(`${c ? "PASS" : "FAIL"} ${n}${x ? "  (" + x + ")" : ""}`);
+const wait = (ms) => new Promise(r => setTimeout(r, ms));
+const BASE = new URL("../../frontend/", location.href).href;
+// JS-6: app.js sudah dihapus. Sumber kode HIDUP untuk pemeriksaan regex = gabungan 8 file split (urutan muat).
+const APP_SPLIT_FILES = ["core.js", "transactions-shared.js", "dashboard.js", "goals.js", "analytics.js", "budget.js", "transactions.js", "settings.js"];
+async function fetchAppJs(base) { const parts = []; for (const f of APP_SPLIT_FILES) parts.push(`/* ==== ${f} ==== */\n` + await (await fetch(base + "js/" + f)).text()); return parts.join("\n"); }
+
+const pad = (n) => String(n).padStart(2, "0");
+const today = new Date();
+const isoToday = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`;
+const yesterday = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1);
+const isoY = `${yesterday.getFullYear()}-${pad(yesterday.getMonth() + 1)}-${pad(yesterday.getDate())}`;
+
+// Judul sengaja "nakal": koma, kutip ganda, newline, emoji, dan satu yang
+// diawali "=" (uji perlindungan CSV injection).
+const SEED_TX = [
+  { id: 1, title: 'Makan, minum "enak" 🍜', category: "makanan", type: "expense", amount: 25000, isoDate: isoToday, time: "Hari ini, 12:30" },
+  { id: 2, title: "Baris satu\nbaris dua", category: "bensin", type: "expense", amount: 30000, isoDate: isoToday, time: "" },
+  { id: 3, title: "=CMD()|'/c calc'!A1", category: "lainnya", type: "expense", amount: 1000, isoDate: isoY, time: "" },
+  { id: 4, title: "Gaji Bulanan", category: "gaji-lama", type: "income", amount: 5000000, isoDate: isoY, time: "1 Sep, 08:00" },
+];
+const SEED_BUDGET = {
+  monthly: 2400000,
+  categories: {
+    makanan: { name: "Makanan", emoji: "🍜", budget: 800000 },
+    bensin: { name: "Bensin", emoji: "⛽", budget: 300000 },
+  },
+};
+
+let frame = null;
+async function load(page, width = 390) {
+  if (frame) frame.remove();
+  frame = document.createElement("iframe"); frame.width = width; frame.height = 1400; frame.src = BASE + page;
+  document.body.appendChild(frame);
+  await new Promise(r => frame.onload = r); await wait(350);
+  const d = frame.contentDocument, w = frame.contentWindow;
+  const cc = d.getElementById("checkin-close"); if (cc && !d.getElementById("checkin-overlay").hidden) { cc.click(); await wait(300); }
+  return { d, w };
+}
+const txt = (el) => (el ? el.textContent.replace(/\s+/g, " ").trim() : "");
+
+/** Tangkap file yang "diunduh" tanpa benar-benar mengunduh: createObjectURL
+ * dicatat, anchor.click() di-nonaktifkan sementara. */
+function captureDownloads(w) {
+  const files = [];
+  const realCreate = w.URL.createObjectURL.bind(w.URL);
+  const realRevoke = w.URL.revokeObjectURL.bind(w.URL);
+  const realClick = w.HTMLAnchorElement.prototype.click;
+  let lastBlob = null;
+  w.URL.createObjectURL = (blob) => { lastBlob = blob; return "blob:stub"; };
+  w.URL.revokeObjectURL = () => {};
+  w.HTMLAnchorElement.prototype.click = function () {
+    if (this.download) files.push({ name: this.download, blob: lastBlob, href: this.href });
+    else realClick.call(this);
+  };
+  return {
+    files,
+    restore() { w.URL.createObjectURL = realCreate; w.URL.revokeObjectURL = realRevoke; w.HTMLAnchorElement.prototype.click = realClick; },
+  };
+}
+const readBlob = (blob) => new Promise((res) => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.readAsText(blob); });
+// FileReader/TextDecoder MEMBUANG BOM saat decode, jadi keberadaan BOM diperiksa dari byte mentah.
+const readBytes = (blob) => new Promise((res) => { const fr = new FileReader(); fr.onload = () => res(new Uint8Array(fr.result)); fr.readAsArrayBuffer(blob); });
+// Pembaca CSV kecil: menangani sel berkutip, koma & newline di dalam sel.
+function parseCsv(text) {
+  const rows = []; let row = [], cell = "", q = false;
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i];
+    if (q) {
+      if (ch === '"' && text[i + 1] === '"') { cell += '"'; i += 1; }
+      else if (ch === '"') q = false;
+      else cell += ch;
+    } else if (ch === '"') q = true;
+    else if (ch === ",") { row.push(cell); cell = ""; }
+    else if (ch === "\r") { /* abaikan */ }
+    else if (ch === "\n") { row.push(cell); rows.push(row); row = []; cell = ""; }
+    else cell += ch;
+  }
+  if (cell || row.length) { row.push(cell); rows.push(row); }
+  return rows;
+}
+
+(async () => {
+  let { d, w } = await load("settings.html");
+  try {
+    w.localStorage.clear();
+    w.localStorage.setItem("financeData.transactions", JSON.stringify(SEED_TX));
+    w.localStorage.setItem("financeData.budget", JSON.stringify(SEED_BUDGET));
+    w.sessionStorage.setItem("checkinDismissed", "true");
+  } catch (e) {}
+  ({ d, w } = await load("settings.html"));
+  const errors = []; w.addEventListener("error", e => errors.push(e.message));
+
+  // ---------- 1. UI ----------
+  const sec = d.getElementById("data");
+  const jsonBtn = () => d.getElementById("btn-export-json"), csvBtn = () => d.getElementById("btn-export-csv");
+  const fb = () => d.getElementById("settings-data-status");
+  ok("1a. section Data & Backup punya tombol Export JSON & Export CSV; judul section tanpa badge 'Segera hadir'", !!jsonBtn() && !!csvBtn() && txt(jsonBtn()) === "Export JSON" && txt(csvBtn()) === "Export CSV" && txt(d.getElementById("settings-data-title")) === "Data & Backup");
+  ok("1b. import = pilih file; reset = tiga aksi parsial (tanpa reset seluruh data)", !!sec.querySelector('input[type="file"]#import-file') && !!sec.querySelector("#btn-import-pick") && sec.querySelectorAll("#reset-actions [data-reset-target]").length === 3 && !sec.querySelector('[data-reset-target="all"]'));
+  ok("1c. peringatan privasi file backup tampil", /data keuangan pribadi/.test(txt(sec.querySelector(".settings-info"))));
+  ok("1d. feedback tersembunyi sebelum aksi; urutan section tetap (data di antara keuangan & keamanan)", fb().hidden && [...d.querySelectorAll(".settings-section")].map(s => s.id).join(",") === "profil,preferensi,keuangan,data,keamanan,tentang");
+  ok("1e. tombol memakai pola .btn yang ada (cursor pointer, tinggi >= 36px)", [jsonBtn(), csvBtn()].every(b => b.classList.contains("btn") && w.getComputedStyle(b).cursor === "pointer" && b.getBoundingClientRect().height >= 36));
+
+  // ---------- 2. Export JSON ----------
+  let cap = captureDownloads(w);
+  jsonBtn().click(); await wait(120);
+  ok("2a. klik Export JSON menghasilkan satu file", cap.files.length === 1, JSON.stringify(cap.files.map(f => f.name)));
+  const jsonFile = cap.files[0];
+  ok("2b. nama file = personal-finance-backup-<tanggal lokal>.json", jsonFile.name === `personal-finance-backup-${isoToday}.json`, jsonFile.name);
+  ok("2c. MIME application/json", jsonFile.blob.type === "application/json");
+  const jsonText = await readBlob(jsonFile.blob);
+  let backup = null; let parseOk = true;
+  try { backup = JSON.parse(jsonText); } catch (e) { parseOk = false; }
+  ok("2d. isi file JSON valid & rapi (indentasi 2 spasi, multi-baris)", parseOk && /\n  "app"/.test(jsonText));
+  ok("2e. metadata: app='personal-finance', appName, schema=1, appVersion='V2.2', exportedAt ISO", backup.app === "personal-finance" && backup.appName === "Personal Finance" && backup.schema === 1 && backup.appVersion === "V2.2" && /^\d{4}-\d{2}-\d{2}T.*Z$/.test(backup.exportedAt) && !isNaN(Date.parse(backup.exportedAt)));
+  ok("2f. counts: 4 transaksi, 2 kategori (sesuai isi sebenarnya)", backup.counts.transactions === 4 && backup.counts.categories === 2 && backup.counts.transactions === backup.data.transactions.length && backup.counts.categories === Object.keys(backup.data.budget.categories).length);
+  ok("2g. data.transactions = seluruh transaksi apa adanya (struktur & urutan tidak diubah)", JSON.stringify(backup.data.transactions) === JSON.stringify(SEED_TX));
+  ok("2h. data.budget = { monthly, categories } apa adanya", backup.data.budget.monthly === 2400000 && Object.keys(backup.data.budget.categories).sort().join() === "bensin,makanan" && backup.data.budget.categories.makanan.emoji === "🍜");
+  ok("2i. data.settings ikut walau belum pernah disimpan -> default {Rizqi,false,true}", JSON.stringify(backup.data.settings) === JSON.stringify({ name: "Rizqi", hideBalanceOnOpen: false, showCheckin: true }) && w.localStorage.getItem("financeData.settings") === null);
+  const keys = Object.keys(backup).sort().join();
+  ok("2j. tidak ada data mock/sesi: notifications, goal, summary, checkinDismissed, isBalanceVisible, budgetViewDate, nextTransactionId, filter/sort", keys === "app,appName,appVersion,counts,data,exportedAt,schema" && Object.keys(backup.data).sort().join() === "budget,settings,transactions" && !/notification|goal|summary|checkinDismissed|isBalanceVisible|budgetViewDate|nextTransactionId|filterOpen|selectedKey/i.test(jsonText));
+  ok("2k. feedback sukses menyebut nama file & jumlah", !fb().hidden && fb().dataset.type === "success" && /personal-finance-backup-/.test(txt(fb())) && /4 transaksi/.test(txt(fb())));
+  ok("2l. export tidak mengubah localStorage (transaksi, budget, settings)", JSON.parse(w.localStorage.getItem("financeData.transactions")).length === 4 && JSON.parse(w.localStorage.getItem("financeData.budget")).monthly === 2400000 && w.localStorage.getItem("financeData.settings") === null);
+
+  // ---------- 3. Export CSV ----------
+  cap.files.length = 0;
+  csvBtn().click(); await wait(120);
+  ok("3a. klik Export CSV menghasilkan satu file bernama personal-finance-transaksi-<tanggal lokal>.csv, MIME text/csv", cap.files.length === 1 && cap.files[0].name === `personal-finance-transaksi-${isoToday}.csv` && /^text\/csv/.test(cap.files[0].blob.type), cap.files[0] && cap.files[0].name);
+  const csvBytes = await readBytes(cap.files[0].blob);
+  const csvText = await readBlob(cap.files[0].blob); // BOM sudah dibuang decoder
+  ok("3b. file diawali BOM UTF-8 (EF BB BF) dan memakai CRLF", csvBytes[0] === 0xEF && csvBytes[1] === 0xBB && csvBytes[2] === 0xBF && csvText.includes("\r\n"));
+  const rows = parseCsv(csvText);
+  ok("3c. header benar: tanggal,jenis,judul,kategori,kategori_nama,jumlah,waktu", rows[0].join(",") === "tanggal,jenis,judul,kategori,kategori_nama,jumlah,waktu");
+  ok("3d. berisi seluruh transaksi (4 baris data), setiap baris 7 kolom", rows.length === 5 && rows.slice(1).every(r => r.length === 7));
+  const byTitle = (t) => rows.slice(1).find(r => r[2].includes(t));
+  const r1 = byTitle("Makan");
+  ok("3e. judul dengan koma, kutip ganda & emoji tetap utuh setelah di-parse", r1 && r1[2] === 'Makan, minum "enak" 🍜');
+  const r2 = byTitle("Baris satu");
+  ok("3f. judul dengan newline tetap utuh dalam satu sel", r2 && r2[2] === "Baris satu\nbaris dua");
+  ok("3g. kolom lain benar: tanggal isoDate, jenis type, kategori key, kategori_nama dari getCategory(), waktu apa adanya", r1[0] === isoToday && r1[1] === "expense" && r1[3] === "makanan" && r1[4] === "Makanan" && r1[6] === "Hari ini, 12:30");
+  ok("3h. kategori yang tidak ada di budget -> nama 'Lainnya' (fallback), key aslinya tetap", (() => { const r = byTitle("Gaji Bulanan"); return r[3] === "gaji-lama" && r[4] === "Lainnya" && r[1] === "income"; })());
+  ok("3i. jumlah = angka mentah (tanpa Rp/titik/koma ribuan)", r1[5] === "25000" && byTitle("Gaji Bulanan")[5] === "5000000" && !/Rp|\./.test(rows.slice(1).map(r => r[5]).join()));
+  ok("3j. perlindungan CSV injection: judul diawali '=' diberi awalan apostrof", byTitle("CMD")[2] === "'=CMD()|'/c calc'!A1");
+  ok("3k. setiap sel dikutip di file mentah (tidak ada sel telanjang)", csvText.split("\r\n").filter(Boolean).every(line => line.startsWith('"')) && /^"tanggal","jenis"/.test(csvText));
+  ok("3l. urut terbaru dulu (hari ini sebelum kemarin)", rows[1][0] === isoToday && rows[4][0] === isoY);
+  ok("3m. feedback CSV sukses", fb().dataset.type === "success" && /4 transaksi/.test(txt(fb())) && /personal-finance-transaksi-/.test(txt(fb())));
+  cap.restore();
+
+  // ---------- 4. Tanpa transaksi ----------
+  try { w.localStorage.setItem("financeData.transactions", JSON.stringify([])); } catch (e) {}
+  ({ d, w } = await load("settings.html"));
+  cap = captureDownloads(w);
+  d.getElementById("btn-export-csv").click(); await wait(120);
+  ok("4a. CSV tanpa transaksi: tidak membuat file, feedback error yang jelas", cap.files.length === 0 && !d.getElementById("settings-data-status").hidden && d.getElementById("settings-data-status").dataset.type === "error" && /Belum ada transaksi/.test(txt(d.getElementById("settings-data-status"))));
+  d.getElementById("btn-export-json").click(); await wait(120);
+  const emptyBackup = JSON.parse(await readBlob(cap.files[0].blob));
+  ok("4b. backup JSON tetap bisa dibuat walau 0 transaksi (counts.transactions = 0, budget & settings tetap ikut)", cap.files.length === 1 && emptyBackup.counts.transactions === 0 && emptyBackup.data.transactions.length === 0 && emptyBackup.data.budget.monthly === 2400000 && !!emptyBackup.data.settings);
+  cap.restore();
+
+  // ---------- 5. Settings tersimpan ikut export ----------
+  try { w.localStorage.setItem("financeData.transactions", JSON.stringify(SEED_TX)); w.localStorage.setItem("financeData.settings", JSON.stringify({ name: "Dina", hideBalanceOnOpen: true, showCheckin: false })); } catch (e) {}
+  ({ d, w } = await load("settings.html"));
+  cap = captureDownloads(w);
+  d.getElementById("btn-export-json").click(); await wait(120);
+  const b2 = JSON.parse(await readBlob(cap.files[0].blob));
+  ok("5. settings yang sudah disimpan ikut apa adanya", JSON.stringify(b2.data.settings) === JSON.stringify({ name: "Dina", hideBalanceOnOpen: true, showCheckin: false }));
+  cap.restore();
+
+  // ---------- 6. Keamanan & guard ----------
+  const appJs = await fetchAppJs(BASE);
+  const exportSrc = [w.buildBackup, w.downloadFile, w.exportBackupJson, w.exportTransactionsCsv, w.buildTransactionsCsv, w.toCsvCell, w.setupSettingsData].map(String).join("\n");
+  ok("6a. tidak ada eval/new Function/fetch/XHR/WebSocket di jalur export", !/\beval\s*\(|new Function|fetch\s*\(|XMLHttpRequest|WebSocket|navigator\.sendBeacon/.test(exportSrc));
+  ok("6b. downloadFile memakai Blob + <a download> lokal (bukan innerHTML)", /new Blob\(/.test(String(w.downloadFile)) && /createObjectURL/.test(String(w.downloadFile)) && !/innerHTML/.test(exportSrc));
+  ok("6c. nama file memakai toIsoDate (tanggal lokal), bukan toISOString", /toIsoDate/.test(String(w.backupFileName)) && !/toISOString/.test(String(w.backupFileName)));
+  ok("6d. key localStorage lama tidak berubah & tidak ada key baru dari export", Object.keys(w.localStorage).filter(k => k.startsWith("financeData.")).sort().join() === "financeData.budget,financeData.settings,financeData.transactions" && !/BACKUP_STORAGE_KEY|localStorage\.setItem\("financeData\.backup/.test(appJs));
+  for (const p of ["index.html", "transactions.html", "analytics.html", "budget.html"]) {
+    const r = await load(p);
+    // Refactor JS: halaman yang sudah memuat core.js tidak memuat kode export/backup sama sekali.
+    const migrated = [...r.d.querySelectorAll("script[src]")].some((s) => /js\/core\.js/.test(s.getAttribute("src")));
+    let okCall = true; try { if (migrated) { okCall = typeof r.w.setupSettingsData === "undefined" && typeof r.w.buildBackup === "undefined"; } else { r.w.setupSettingsData(); r.w.showDataFeedback("x", "success"); } } catch (e) { okCall = false; }
+    ok(`6e. ${p}: ${migrated ? "kode export/backup tidak dimuat (absen)" : "setupSettingsData()/showDataFeedback() = no-op tanpa error; buildBackup() tetap menghasilkan objek"}`, okCall && (migrated || r.w.buildBackup().app === "personal-finance"));
+  }
+
+  // ---------- 7. Responsif ----------
+  for (const wd of [320, 375, 430, 768, 1024, 1280]) {
+    const r = await load("settings.html", wd);
+    const de = r.d.documentElement;
+    const card = r.d.getElementById("btn-export-json").closest(".settings-card").getBoundingClientRect();
+    const btns = [r.d.getElementById("btn-export-json"), r.d.getElementById("btn-export-csv")];
+    const inside = btns.every(b => { const x = b.getBoundingClientRect(); return x.right <= card.right + 0.5 && x.left >= card.left - 0.5 && x.height >= 36 && x.width > 40; });
+    const rowsOk = [...r.d.querySelectorAll("#data .settings-row, #data .settings-info, #data .section-title")].every(el => el.scrollWidth <= el.clientWidth + 1);
+    const noOverlapText = btns.every(b => { const bb = b.getBoundingClientRect(); const body = b.previousElementSibling.getBoundingClientRect(); return bb.left >= body.right - 0.5 || bb.top >= body.bottom - 0.5; });
+    ok(`7-${wd}. tanpa overflow; tombol di dalam card, >= 36px, tidak menimpa teks`, de.scrollWidth === de.clientWidth && inside && rowsOk && noOverlapText, `sw=${de.scrollWidth} cw=${de.clientWidth}`);
+  }
+  ok("8. console 0 error", errors.length === 0, errors.join(" | "));
+  try { w.localStorage.clear(); w.sessionStorage.clear(); } catch (e) {}
+  document.getElementById("r").textContent = out.join("\n");
+})().catch(e => { out.push("EXCEPTION " + e.stack); document.getElementById("r").textContent = out.join("\n"); });
+</script>

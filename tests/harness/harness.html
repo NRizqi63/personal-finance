@@ -1,0 +1,66 @@
+<!doctype html>
+<meta charset="utf-8">
+<style>body{margin:0;background:#888;font:12px monospace}iframe{border:0;display:block;background:#fff}#r{white-space:pre;padding:8px;background:#fff}</style>
+<pre id="r">measuring…</pre>
+<script>
+const q = new URLSearchParams(location.search);
+const W = +q.get("w") || 320, page = q.get("p") || "index.html";
+const f = document.createElement("iframe");
+f.width = W; f.height = 2200;
+f.src = new URL("../../frontend/", location.href).href + page;
+document.body.appendChild(f);
+f.onload = () => setTimeout(() => {
+  const d = f.contentDocument, w = f.contentWindow;
+  const cw = d.documentElement.clientWidth;
+  const lines = [`viewport=${cw} scrollWidth(html)=${d.documentElement.scrollWidth} scrollWidth(body)=${d.body.scrollWidth}`];
+  // dismiss the notice modal so the page underneath is measured
+  const n = d.getElementById("checkin-close"); if (n) n.click();
+  const bad = [];
+  for (const el of d.querySelectorAll("body *")) {
+    const cs = w.getComputedStyle(el);
+    if (cs.display === "none" || cs.position === "fixed") continue;
+    if (el.closest("[hidden]")) continue;
+    if (el.closest(".category-carousel, .chart-scroll")) continue; // scroller horizontal yang memang disengaja (chart per tanggal)
+    const r = el.getBoundingClientRect();
+    if (r.width === 0) continue;
+    if (r.right > cw + 0.5 || r.left < -0.5) {
+      const id = el.id ? "#" + el.id : "";
+      const cls = el.className && typeof el.className === "string" ? "." + el.className.trim().split(/\s+/).join(".") : "";
+      bad.push(`  OVERFLOW ${el.tagName.toLowerCase()}${id}${cls} left=${r.left.toFixed(1)} right=${r.right.toFixed(1)} w=${r.width.toFixed(1)}`);
+    }
+    // text clipped by nowrap+hidden (visible truncation) — report only for non-ellipsis elements
+    if (!el.classList.contains("category-analysis") && el.scrollWidth > el.clientWidth + 4 /* ::before tap halo = +4px, invisible */ && cs.overflow !== "hidden" && cs.overflowX !== "auto" && cs.overflowX !== "hidden") {
+      const id = el.id ? "#" + el.id : "";
+      const cls = el.className && typeof el.className === "string" ? "." + el.className.trim().split(/\s+/).join(".") : "";
+      bad.push(`  TEXT-SPILL ${el.tagName.toLowerCase()}${id}${cls} scrollW=${el.scrollWidth} clientW=${el.clientWidth}`);
+    }
+  }
+  lines.push(bad.length ? bad.join("\n") : "  no overflow, no text spill");
+  // tap targets < 36px on interactive controls
+  const small = [];
+  // Area tap efektif = kotak elemen + halo ::before (pola "inset: -Npx" yang
+  // dipakai .icon-btn/.modal-close/.btn--xs/.calendar-nav) — halo itu memang
+  // menerima tap, jadi harus ikut dihitung. Nilai rect juga dibulatkan naik:
+  // modal yang animasinya belum selesai (headless) berskala 0.98 sehingga
+  // tombol 36px terbaca 35.28px.
+  const haloOf = (el) => {
+    const before = w.getComputedStyle(el, "::before");
+    if (before.content === "none") return 0;
+    const inset = parseFloat(before.insetBlockStart || before.top);
+    return Number.isFinite(inset) && inset < 0 ? -inset : 0;
+  };
+  for (const el of d.querySelectorAll("button, a, input, select")) {
+    if (el.closest("[hidden]") || el.hidden) continue;
+    const rect = el.getBoundingClientRect(); if (rect.width === 0) continue;
+    const halo = haloOf(el) * 2;
+    const scale = el.closest(".modal") ? 1 / 0.98 : 1; // animasi masuk belum selesai di headless
+    const r = { width: rect.width * scale + halo, height: rect.height * scale + halo };
+    if (r.height < 36 || r.width < 36) {
+      const id = el.id ? "#" + el.id : ""; const cls = el.className && typeof el.className === "string" ? "." + el.className.trim().split(/\s+/)[0] : "";
+      small.push(`  SMALL-TAP ${el.tagName.toLowerCase()}${id}${cls} ${r.width.toFixed(0)}x${r.height.toFixed(0)}`);
+    }
+  }
+  lines.push(small.length ? small.join("\n") : "  all tap targets >= 36px");
+  document.getElementById("r").textContent = lines.join("\n");
+}, 400);
+</script>

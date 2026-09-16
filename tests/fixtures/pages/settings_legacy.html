@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Pengaturan</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="../legacy/style.css" />
+</head>
+<!-- data-page="settings" -> js/app.js menjalankan initSettingsPage().
+     Settings V1: Profil Akun (nama panggilan) & Preferensi Aplikasi disimpan
+     ke localStorage["financeData.settings"] (key terpisah; transaksi &
+     budget tidak disentuh). Pengaturan Keuangan = tautan ke budget.html.
+     Data & Backup masih "Segera hadir"; Keamanan hanya informasi (tidak ada
+     PIN/login palsu); Tentang Aplikasi statis. Dibuka dari dropdown
+     Pengaturan di dashboard (index.html). -->
+<body data-page="settings">
+  <div class="app app--page">
+
+    <!-- HEADER: tombol kembali + judul halaman -->
+    <header class="app-header page-header">
+      <a class="icon-btn" href="index.html" aria-label="Kembali ke dashboard">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M19 12H5" />
+          <path d="m12 19-7-7 7-7" />
+        </svg>
+      </a>
+      <h1 class="greeting-text">Pengaturan</h1>
+    </header>
+
+    <!-- 1. PROFIL AKUN — nama panggilan untuk sapaan dashboard & check-in.
+         Disimpan ke localStorage["financeData.settings"] hanya saat tombol
+         Simpan ditekan (setupSettingsProfile()); preview ikut ketikan. -->
+    <section class="settings-section" id="profil" aria-labelledby="settings-profil-title">
+      <h2 class="section-title" id="settings-profil-title">Profil Akun</h2>
+      <div class="settings-card">
+        <form class="settings-form" id="settings-profile-form" novalidate>
+          <div class="form-field settings-field">
+            <label for="settings-name">Nama Pengguna</label>
+            <input type="text" id="settings-name" name="name" maxlength="40" autocomplete="nickname" placeholder="Nama panggilan kamu" required />
+            <p class="settings-preview">Contoh sapaan: <strong id="settings-name-preview"></strong></p>
+          </div>
+          <p class="settings-feedback" id="settings-name-feedback" role="status" aria-live="polite" hidden></p>
+          <div class="settings-form-actions">
+            <button type="submit" class="btn btn--primary" id="settings-name-save">Simpan Perubahan</button>
+          </div>
+        </form>
+      </div>
+    </section>
+
+    <!-- 2. PREFERENSI APLIKASI — switch disimpan langsung saat diubah
+         (setupSettingsPreferences()). -->
+    <section class="settings-section" id="preferensi" aria-labelledby="settings-preferensi-title">
+      <h2 class="section-title" id="settings-preferensi-title">Fitur Aplikasi</h2>
+      <div class="settings-card">
+        <label class="settings-row settings-row-switch" for="pref-hide-balance">
+          <span class="settings-row-icon" aria-hidden="true">👁️</span>
+          <span class="settings-row-body">
+            <span class="settings-row-title">Sembunyikan saldo</span>
+            <span class="settings-row-desc">Saldo, pemasukan, dan pengeluaran ditutup dulu saat dashboard dibuka.</span>
+          </span>
+          <span class="switch">
+            <input type="checkbox" class="switch-input" id="pref-hide-balance" role="switch" />
+            <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
+          </span>
+        </label>
+        <label class="settings-row settings-row-switch" for="pref-show-checkin">
+          <span class="settings-row-icon" aria-hidden="true">👋</span>
+          <span class="settings-row-body">
+            <span class="settings-row-title">Tampilkan check-in harian</span>
+            <span class="settings-row-desc">Popup Financial Check-in muncul sekali saat membuka dashboard.</span>
+          </span>
+          <span class="switch">
+            <input type="checkbox" class="switch-input" id="pref-show-checkin" role="switch" />
+            <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
+          </span>
+        </label>
+        <p class="settings-feedback settings-feedback--inset" id="settings-pref-feedback" role="status" aria-live="polite" data-type="success" hidden></p>
+      </div>
+    </section>
+
+    <!-- 3. PENGATURAN KEUANGAN — tautan ke pengaturan yang sudah ada di budget.html.
+         Sengaja tidak ada form budget/kategori di sini supaya hanya ada satu
+         tempat untuk mengelolanya. -->
+    <section class="settings-section" id="keuangan" aria-labelledby="settings-keuangan-title">
+      <h2 class="section-title" id="settings-keuangan-title">Pengaturan Keuangan</h2>
+      <div class="settings-card">
+        <a class="settings-row settings-row-link" href="budget.html" id="settings-link-budget">
+          <span class="settings-row-icon" aria-hidden="true">💰</span>
+          <span class="settings-row-body">
+            <span class="settings-row-title">Budget Bulanan</span>
+            <span class="settings-row-desc">Kelola budget dan batas pengeluaran</span>
+          </span>
+          <svg class="settings-row-chevron" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6" /></svg>
+        </a>
+        <a class="settings-row settings-row-link" href="budget.html" id="settings-link-category">
+          <span class="settings-row-icon" aria-hidden="true">🏷️</span>
+          <span class="settings-row-body">
+            <span class="settings-row-title">Kategori</span>
+            <span class="settings-row-desc">Tambah, edit, atau hapus kategori</span>
+          </span>
+          <svg class="settings-row-chevron" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6" /></svg>
+        </a>
+      </div>
+    </section>
+
+    <!-- 4. DATA & BACKUP (Tahap 3A: export saja) — file dibuat sepenuhnya di
+         browser (Blob + <a download>), tidak ada jaringan/server. Import &
+         reset data menyusul di tahap berikutnya. -->
+    <section class="settings-section" id="data" aria-labelledby="settings-data-title">
+      <h2 class="section-title" id="settings-data-title">Data &amp; Backup</h2>
+      <div class="settings-card">
+        <div class="settings-row settings-row--action">
+          <span class="settings-row-icon" aria-hidden="true">💾</span>
+          <span class="settings-row-body">
+            <span class="settings-row-title">Export Backup (JSON)</span>
+            <span class="settings-row-desc">Simpan seluruh transaksi, budget, kategori, dan pengaturan ke satu file untuk cadangan.</span>
+          </span>
+          <button type="button" class="btn btn--ghost btn--xs settings-row-action" id="btn-export-json">Export JSON</button>
+        </div>
+        <div class="settings-row settings-row--action">
+          <span class="settings-row-icon" aria-hidden="true">📄</span>
+          <span class="settings-row-body">
+            <span class="settings-row-title">Export Transaksi (CSV)</span>
+            <span class="settings-row-desc">File CSV tidak bisa dipakai memulihkan data — gunakan backup JSON.</span>
+          </span>
+          <button type="button" class="btn btn--ghost btn--xs settings-row-action" id="btn-export-csv">Export CSV</button>
+        </div>
+        <!-- Import: file dibaca & diperiksa di browser (FileReader). Tahap ini
+             BARU sampai pemeriksaan file — tidak ada data yang ditimpa. -->
+        <div class="settings-row settings-row--action">
+          <span class="settings-row-icon" aria-hidden="true">📥</span>
+          <span class="settings-row-body">
+            <span class="settings-row-title">Import Backup (JSON)</span>
+            <span class="settings-row-desc">Hanya menerima file backup JSON dari aplikasi ini, maksimal 5 MB.</span>
+          </span>
+          <input type="file" id="import-file" accept=".json,application/json" hidden />
+          <button type="button" class="btn btn--ghost btn--xs settings-row-action" id="btn-import-pick">Pilih File…</button>
+        </div>
+        <!-- Ringkasan isi file hasil pemeriksaan (diisi app.js lewat textContent). -->
+        <dl class="settings-meta" id="import-summary" hidden></dl>
+        <!-- SATU area status untuk seluruh aksi data (export, import, reset):
+             pesan terbaru selalu menggantikan yang lama, tidak menumpuk. -->
+        <p class="settings-feedback settings-feedback--inset" id="settings-data-status" role="status" aria-live="polite" hidden></p>
+        <p class="settings-info">⚠️ File backup berisi data keuangan pribadi kamu. Simpan di tempat yang aman dan jangan dibagikan ke orang lain.</p>
+      </div>
+
+      <!-- ZONA BERBAHAYA — tiga reset terpisah, masing-masing lewat modal
+           konfirmasi. Menghapus seluruh data sekaligus belum tersedia. -->
+      <h3 class="section-title settings-subtitle" id="settings-danger-title">Reset & Hapus Data</h3>
+      <div class="settings-card" id="reset-actions">
+        <div class="settings-row settings-row--action">
+          <span class="settings-row-icon" aria-hidden="true">🧹</span>
+          <span class="settings-row-body">
+            <span class="settings-row-title">Hapus Semua Transaksi</span>
+            <span class="settings-row-desc">Menghapus seluruh catatan pemasukan &amp; pengeluaran.</span>
+          </span>
+          <button type="button" class="btn btn--danger-ghost btn--xs settings-row-action" data-reset-target="transactions">Hapus</button>
+        </div>
+        <div class="settings-row settings-row--action">
+          <span class="settings-row-icon" aria-hidden="true">🏷️</span>
+          <span class="settings-row-body">
+            <span class="settings-row-title">Reset Budget &amp; Kategori</span>
+            <span class="settings-row-desc">Budget bulanan dan kategori kembali ke bawaan aplikasi.</span>
+          </span>
+          <button type="button" class="btn btn--danger-ghost btn--xs settings-row-action" data-reset-target="budget">Reset</button>
+        </div>
+        <div class="settings-row settings-row--action">
+          <span class="settings-row-icon" aria-hidden="true">👤</span>
+          <span class="settings-row-body">
+            <span class="settings-row-title">Reset Profil &amp; Preferensi</span>
+            <span class="settings-row-desc">Nama panggilan dan preferensi tampilan kembali ke default.</span>
+          </span>
+          <button type="button" class="btn btn--danger-ghost btn--xs settings-row-action" data-reset-target="settings">Reset</button>
+        </div>
+        <p class="settings-info">⚠️ Reset tidak bisa dibatalkan. Export backup dulu kalau kamu masih ingin menyimpan datanya.</p>
+      </div>
+    </section>
+
+    <!-- 5. KEAMANAN — informasi saja. Belum ada backend/autentikasi, jadi
+         tidak ada login, password, PIN, atau sinkronisasi di sini (PIN yang
+         cuma disimpan di localStorage hanya memberi rasa aman palsu). -->
+    <section class="settings-section" id="keamanan" aria-labelledby="settings-keamanan-title">
+      <h2 class="section-title" id="settings-keamanan-title">Keamanan <span class="badge-soon">Segera hadir</span></h2>
+      <div class="settings-card">
+        <div class="settings-row">
+          <span class="settings-row-icon" aria-hidden="true">🔒</span>
+          <span class="settings-row-body">
+            <span class="settings-row-title">Data tersimpan di browser ini</span>
+            <span class="settings-row-desc">Transaksi dan budget disimpan secara lokal di perangkat ini (local storage), tidak dikirim ke server mana pun.</span>
+          </span>
+        </div>
+        <div class="settings-row">
+          <span class="settings-row-icon" aria-hidden="true">🛡️</span>
+          <span class="settings-row-body">
+            <span class="settings-row-title">Login, password &amp; sinkronisasi cloud</span>
+            <span class="settings-row-desc">Belum tersedia. Akun, autentikasi, dan backup ke cloud akan hadir setelah ada server.</span>
+          </span>
+          <span class="badge-soon">Segera hadir</span>
+        </div>
+        <p class="settings-info">Karena data hanya ada di browser ini, menghapus data situs di browser akan menghapus transaksi dan budget kamu.</p>
+      </div>
+    </section>
+
+    <!-- 6. TENTANG APLIKASI — statis. Versi diperbarui manual tiap rilis. -->
+    <section class="settings-section" id="tentang" aria-labelledby="settings-tentang-title">
+      <h2 class="section-title" id="settings-tentang-title">Tentang Aplikasi</h2>
+      <div class="settings-card">
+        <div class="settings-row">
+          <span class="settings-row-icon" aria-hidden="true">📒</span>
+          <span class="settings-row-body">
+            <span class="settings-row-title">Personal Finance</span>
+            <span class="settings-row-desc">Catat pemasukan &amp; pengeluaran, atur budget per kategori, dan pahami pola keuanganmu lewat analisis sederhana.</span>
+          </span>
+        </div>
+        <dl class="settings-meta">
+          <div class="settings-meta-row">
+            <dt>Versi</dt>
+            <dd id="settings-app-version">V2.2</dd>
+          </div>
+          <div class="settings-meta-row">
+            <dt>Penyimpanan</dt>
+            <dd>Local browser storage</dd>
+          </div>
+          <div class="settings-meta-row">
+            <dt>Repository</dt>
+            <dd><a class="settings-inline-link" href="https://github.com/NRizqi63/personal-finance" target="_blank" rel="noopener noreferrer">github.com/NRizqi63/personal-finance</a></dd>
+          </div>
+        </dl>
+      </div>
+    </section>
+
+  </div>
+
+  <!-- MODAL: KONFIRMASI IMPORT BACKUP (setupSettingsImport() di app.js).
+       Muncul setelah file lolos pemeriksaan; sampai tombol "Timpa Data"
+       ditekan, tidak ada satu pun data yang ditulis. Semua angka di dalamnya
+       diisi lewat textContent, tidak pernah innerHTML. -->
+  <div class="modal-overlay" id="import-modal-overlay" hidden>
+    <div class="modal modal--form modal--confirm" role="dialog" aria-modal="true" aria-labelledby="import-modal-title">
+      <div class="modal-header">
+        <h2 id="import-modal-title">Import Backup JSON</h2>
+        <button type="button" class="modal-close" id="import-modal-close" aria-label="Tutup">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M18 6 6 18" />
+            <path d="m6 6 12 12" />
+          </svg>
+        </button>
+      </div>
+      <p class="modal-sub" id="import-modal-sub">Seluruh transaksi, budget, dan pengaturan yang ada sekarang akan diganti dengan isi file ini. Setelah diterapkan, data lama tidak bisa dikembalikan lagi kecuali kamu punya file backupnya.</p>
+      <dl class="settings-meta" id="import-modal-summary"></dl>
+      <p class="settings-feedback settings-feedback--inset" id="import-modal-status" role="status" aria-live="polite" hidden></p>
+      <div class="modal-actions">
+        <button type="button" class="btn btn--ghost" id="btn-import-cancel">Batal</button>
+        <button type="button" class="btn btn--danger" id="btn-import-apply">Timpa Data</button>
+      </div>
+      <button type="button" class="btn btn--ghost btn--block modal-secondary" id="btn-import-export-first">💾 Export data saat ini dulu</button>
+    </div>
+  </div>
+
+  <!-- MODAL: KONFIRMASI RESET (dipakai ketiga jenis reset, isinya diisi
+       setupSettingsReset() lewat textContent). Tidak ada data yang berubah
+       sampai tombol aksi di modal ini ditekan. -->
+  <div class="modal-overlay" id="reset-modal-overlay" hidden>
+    <div class="modal modal--form modal--confirm" role="dialog" aria-modal="true" aria-labelledby="reset-modal-title">
+      <div class="modal-header">
+        <h2 id="reset-modal-title">Reset Data</h2>
+        <button type="button" class="modal-close" id="reset-modal-close" aria-label="Tutup">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M18 6 6 18" />
+            <path d="m6 6 12 12" />
+          </svg>
+        </button>
+      </div>
+      <p class="modal-sub" id="reset-modal-sub"></p>
+      <dl class="settings-meta" id="reset-modal-summary"></dl>
+      <p class="settings-feedback settings-feedback--inset" id="reset-modal-status" role="status" aria-live="polite" hidden></p>
+      <div class="modal-actions">
+        <button type="button" class="btn btn--ghost" id="btn-reset-cancel">Batal</button>
+        <button type="button" class="btn btn--danger" id="btn-reset-confirm">Hapus</button>
+      </div>
+      <button type="button" class="btn btn--ghost btn--block modal-secondary" id="btn-reset-export-first">💾 Export data saat ini dulu</button>
+    </div>
+  </div>
+
+  <script src="../legacy/app.js"></script>
+</body>
+</html>

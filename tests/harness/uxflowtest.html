@@ -1,0 +1,161 @@
+<!doctype html>
+<meta charset="utf-8">
+<pre id="r">running…</pre>
+<script>
+const out = []; const ok = (n, c, x = "") => out.push(`${c ? "PASS" : "FAIL"} ${n}${x ? "  (" + x + ")" : ""}`);
+const wait = (ms) => new Promise(r => setTimeout(r, ms));
+const BASE = new URL("../../frontend/", location.href).href;
+const pad = (n) => String(n).padStart(2, "0");
+const today = new Date();
+const iso = (dt) => `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`;
+const isoToday = iso(today);
+const isoOther = iso(new Date(today.getFullYear(), today.getMonth() - 1, 5)); // bulan lalu
+const SEED = [
+  { id: 3, title: "Kopi Susu", category: "makanan", type: "expense", amount: 18000, isoDate: isoToday, time: "" },
+  { id: 2, title: "Gaji", category: "lainnya", type: "income", amount: 5000000, isoDate: isoToday, time: "" },
+];
+
+let frame = null;
+async function load(page, width = 390) {
+  if (frame) frame.remove();
+  frame = document.createElement("iframe"); frame.width = width; frame.height = 1500; frame.src = BASE + page;
+  document.body.appendChild(frame);
+  await new Promise(r => frame.onload = r); await wait(400);
+  const d = frame.contentDocument, w = frame.contentWindow;
+  const cc = d.getElementById("checkin-close"); if (cc && !d.getElementById("checkin-overlay").hidden) { cc.click(); await wait(300); }
+  return { d, w };
+}
+const txt = (el) => (el ? el.textContent.replace(/\s+/g, " ").trim() : "");
+const stored = (w) => JSON.parse(w.localStorage.getItem("financeData.transactions") || "[]");
+async function seed(w) {
+  try { w.localStorage.clear(); w.sessionStorage.clear(); w.localStorage.setItem("financeData.transactions", JSON.stringify(SEED)); } catch (e) {}
+}
+const setVal = (el, v, ev = "input") => { el.value = v; el.dispatchEvent(new el.ownerDocument.defaultView.Event(ev, { bubbles: true })); };
+
+(async () => {
+  let { d, w } = await load("transactions.html");
+  await seed(w);
+  ({ d, w } = await load("transactions.html"));
+  const errors = []; w.addEventListener("error", e => errors.push(e.message));
+  const fb = () => d.getElementById("transaction-feedback");
+  const overlay = () => d.getElementById("transaction-modal-overlay");
+  const form = () => d.getElementById("transaction-form");
+  const F = (id) => d.getElementById(id);
+  const submit = async () => { form().requestSubmit(); await wait(200); };
+  const openEdit = async (title) => {
+    const li = [...d.querySelectorAll("#all-transaction-list .transaction-item")].find(x => txt(x.querySelector(".transaction-title")) === title);
+    li.querySelector('[data-action="edit"]').click(); await wait(300);
+  };
+
+  // ---------- 0. elemen feedback ----------
+  ok("0a. elemen status ada di transactions.html: role=status + aria-live, tersembunyi di awal", !!fb() && fb().getAttribute("role") === "status" && fb().getAttribute("aria-live") === "polite" && fb().hidden);
+  ok("0b. elemen status berada di atas daftar transaksi", fb().compareDocumentPosition(d.getElementById("all-transaction-list")) & Node.DOCUMENT_POSITION_FOLLOWING);
+
+  // ---------- 1-4. validasi ----------
+  await openEdit("Kopi Susu");
+  const before = JSON.stringify(stored(w));
+  setVal(F("field-title"), "   ");
+  await submit();
+  ok("1. judul hanya spasi ditolak dengan pesan 'Isi nama transaksi.'", F("field-title").validationMessage === "Isi nama transaksi." && !overlay().hidden && JSON.stringify(stored(w)) === before && fb().hidden);
+  setVal(F("field-title"), "Kopi Susu");
+  setVal(F("field-amount"), "0");
+  await submit();
+  ok("2a. nominal 0 ditolak dengan pesan 'Nominal harus lebih dari 0.'", F("field-amount").validationMessage === "Nominal harus lebih dari 0." && !overlay().hidden && JSON.stringify(stored(w)) === before);
+  setVal(F("field-amount"), "");
+  await submit();
+  ok("2b. nominal kosong ditolak dengan pesan yang sama", F("field-amount").validationMessage === "Nominal harus lebih dari 0." && JSON.stringify(stored(w)) === before);
+  setVal(F("field-amount"), "abc");
+  await submit();
+  ok("2c. nominal bukan angka ditolak (huruf dibuang -> 0)", F("field-amount").validationMessage === "Nominal harus lebih dari 0." && JSON.stringify(stored(w)) === before);
+  setVal(F("field-amount"), "25.000");
+  setVal(F("field-category"), "", "change");
+  await submit();
+  ok("3. kategori kosong ditolak dengan pesan 'Pilih kategori dulu.'", F("field-category").validationMessage === "Pilih kategori dulu." && JSON.stringify(stored(w)) === before);
+  setVal(F("field-category"), "makanan", "change");
+  setVal(F("field-date"), "", "change");
+  await submit();
+  ok("4. tanggal kosong ditolak dengan pesan 'Pilih tanggal transaksi.'", F("field-date").validationMessage === "Pilih tanggal transaksi." && JSON.stringify(stored(w)) === before);
+  ok("9a. selama validasi gagal: modal tetap terbuka & TIDAK ada feedback sukses", !overlay().hidden && fb().hidden && !/tersimpan|dihapus/i.test(txt(fb())));
+
+  // pesan dibersihkan begitu field diperbaiki
+  setVal(F("field-date"), isoToday, "change");
+  ok("4b. pesan hilang begitu field diperbaiki (tanpa submit ulang)", F("field-date").validationMessage === "" && F("field-title").validationMessage === "");
+
+  // ---------- 6. edit sukses ----------
+  setVal(F("field-title"), "Kopi Susu Edit");
+  await submit();
+  ok("6. edit berhasil: modal tertutup, data berubah, feedback 'Perubahan tersimpan.'", overlay().hidden && stored(w).some(t => t.title === "Kopi Susu Edit") && stored(w).length === 2 && !fb().hidden && txt(fb()) === "Perubahan tersimpan." && fb().dataset.type === "success");
+
+  // ---------- 9b. batal tidak memunculkan feedback ----------
+  await wait(3200); // feedback auto-hide
+  ok("9b. feedback hilang sendiri setelah beberapa detik", fb().hidden);
+  await openEdit("Kopi Susu Edit");
+  setVal(F("field-title"), "Diubah Tapi Dibatalkan");
+  d.getElementById("modal-cancel").click(); await wait(300);
+  ok("9c. batal (tombol Batal) tidak menyimpan & tidak menampilkan feedback sukses", overlay().hidden && !stored(w).some(t => t.title === "Diubah Tapi Dibatalkan") && fb().hidden);
+  await openEdit("Kopi Susu Edit");
+  d.dispatchEvent(new w.KeyboardEvent("keydown", { key: "Escape", bubbles: true })); await wait(300);
+  ok("9d. Escape menutup modal tanpa menyimpan & tanpa feedback", overlay().hidden && fb().hidden && stored(w).length === 2);
+
+  // ---------- 5 + 8. tambah transaksi (tanggal berbeda) ----------
+  ({ d, w } = await load("index.html"));
+  d.querySelector('[data-action="add-transaction"]').click(); await wait(300);
+  setVal(d.getElementById("field-title"), "Belanja Bulan Lalu");
+  setVal(d.getElementById("field-category"), "belanja", "change");
+  setVal(d.getElementById("field-amount"), "150.000");
+  setVal(d.getElementById("field-date"), isoOther, "change");
+  d.getElementById("transaction-form").requestSubmit(); await wait(300);
+  ok("5. tambah berhasil di dashboard: tersimpan + feedback 'Transaksi tersimpan.'", stored(w).length === 3 && stored(w)[0].title === "Belanja Bulan Lalu" && stored(w)[0].isoDate === isoOther && txt(d.getElementById("transaction-feedback")) === "Transaksi tersimpan." && !d.getElementById("transaction-feedback").hidden);
+  ok("5b. struktur transaksi tidak berubah (7 field, id angka, amount angka)", Object.keys(stored(w)[0]).sort().join() === "amount,category,id,isoDate,time,title,type" && typeof stored(w)[0].id === "number" && stored(w)[0].amount === 150000);
+  ok("5c. dashboard tetap menampilkan transaksi terbaru (daftar tidak kosong)", d.querySelectorAll("#transaction-list .transaction-item").length >= 1);
+
+  // tanggal berbeda: halaman Semua Transaksi (jalur yang bisa dicapai user =
+  // mengubah tanggal lewat Edit; halaman ini tidak punya tombol Tambah)
+  ({ d, w } = await load("transactions.html"));
+  const selectedBefore = txt(d.getElementById("selected-date-title"));
+  const liEdit = [...d.querySelectorAll("#all-transaction-list .transaction-item")].find(x => txt(x.querySelector(".transaction-title")) === "Kopi Susu Edit");
+  liEdit.querySelector('[data-action="edit"]').click(); await wait(300);
+  setVal(F("field-date"), isoOther, "change");
+  await submit();
+  const titles = [...d.querySelectorAll("#all-transaction-list .transaction-item .transaction-title")].map(txt);
+  ok("8. transaksi yang tanggalnya pindah LANGSUNG terlihat: daftar & judul tanggal ikut pindah", titles.includes("Kopi Susu Edit") && txt(d.getElementById("selected-date-title")) !== selectedBefore && /^5 /.test(txt(d.getElementById("selected-date-title"))), `judul="${txt(d.getElementById("selected-date-title"))}" items=${JSON.stringify(titles)}`);
+  ok("8b. kalender ikut pindah ke bulan transaksi & tanggalnya tersorot", !!d.querySelector(`.calendar-day[data-date="${isoOther}"].is-selected`));
+  ok("8c. feedback sukses tampil di halaman Semua Transaksi", txt(d.getElementById("transaction-feedback")) === "Perubahan tersimpan.");
+  ok("8d. transaksi lain (tanggal hari ini) tetap tersimpan, hanya tampilannya yang pindah", stored(w).length === 3 && stored(w).some(t => t.isoDate === isoToday));
+
+  // ---------- 7. hapus ----------
+  const countBefore = stored(w).length;
+  d.querySelector('#all-transaction-list [data-action="delete"]').click(); await wait(300);
+  ok("7a. konfirmasi hapus muncul; belum ada perubahan data & belum ada feedback", !d.getElementById("confirm-modal-overlay").hidden && stored(w).length === countBefore);
+  d.querySelector("#confirm-modal-overlay [data-modal-close]").click(); await wait(300);
+  ok("9e. batal di konfirmasi hapus: data utuh, tanpa feedback 'dihapus'", stored(w).length === countBefore && txt(d.getElementById("transaction-feedback")) !== "Transaksi dihapus.");
+  d.querySelector('#all-transaction-list [data-action="delete"]').click(); await wait(300);
+  d.getElementById("confirm-delete").click(); await wait(300);
+  ok("7b. hapus berhasil: data berkurang + feedback 'Transaksi dihapus.'", stored(w).length === countBefore - 1 && txt(d.getElementById("transaction-feedback")) === "Transaksi dihapus." && !d.getElementById("transaction-feedback").hidden);
+
+  // ---------- 10. tidak error di halaman tanpa elemen feedback ----------
+  for (const p of ["analytics.html", "budget.html", "settings.html"]) {
+    const r = await load(p);
+    let okCall = true; try { r.w.showTransactionFeedback("x"); } catch (e) { okCall = false; }
+    ok(`10-${p}. showTransactionFeedback no-op tanpa error & halaman render normal`, okCall && !r.d.getElementById("transaction-feedback") && !!r.d.querySelector(".app"));
+  }
+
+  // ---------- responsif ----------
+  for (const wd of [320, 375, 430, 1280]) {
+    const r = await load("transactions.html", wd);
+    // Halaman ini tidak punya tombol Tambah; feedback dipicu lewat edit.
+    r.d.querySelector('#all-transaction-list [data-action="edit"]').click(); await wait(250);
+    const setV = (id, v, ev = "input") => { const el = r.d.getElementById(id); el.value = v; el.dispatchEvent(new r.w.Event(ev, { bubbles: true })); };
+    setV("field-title", "Uji Responsif"); setV("field-category", "makanan", "change"); setV("field-amount", "10.000"); setV("field-date", isoToday, "change");
+    r.d.getElementById("transaction-form").requestSubmit(); await wait(300);
+    const de = r.d.documentElement;
+    const el = r.d.getElementById("transaction-feedback");
+    const list = r.d.getElementById("all-transaction-list").getBoundingClientRect();
+    const box = el.getBoundingClientRect();
+    ok(`R-${wd}. feedback tampil rapi tanpa overflow (di dalam lebar daftar)`, de.scrollWidth === de.clientWidth && !el.hidden && box.width > 0 && box.right <= list.right + 0.5 && box.left >= list.left - 0.5 && el.scrollWidth <= el.clientWidth + 1, `sw=${de.scrollWidth} cw=${de.clientWidth}`);
+  }
+  ok("11. console 0 error", errors.length === 0, errors.join(" | "));
+  try { w.localStorage.clear(); } catch (e) {}
+  document.getElementById("r").textContent = out.join("\n");
+})().catch(e => { out.push("EXCEPTION " + e.stack); document.getElementById("r").textContent = out.join("\n"); });
+</script>

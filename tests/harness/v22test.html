@@ -1,0 +1,299 @@
+<!doctype html>
+<meta charset="utf-8">
+<pre id="r">running…</pre>
+<script>
+const out = []; const ok = (n, c, x = "") => out.push(`${c ? "PASS" : "FAIL"} ${n}${x ? "  (" + x + ")" : ""}`);
+const wait = (ms) => new Promise(r => setTimeout(r, ms));
+const BASE = new URL("../../frontend/", location.href).href;
+// JS-6: style.css sudah dihapus. Sumber CSS HIDUP untuk pemeriksaan selector = gabungan 7 file split.
+const CSS_SPLIT_FILES = ["base.css", "dashboard.css", "goals.css", "analytics.css", "budget.css", "transactions.css", "settings.css"];
+async function fetchStyleCss(base) { const parts = []; for (const f of CSS_SPLIT_FILES) parts.push(`/* ==== ${f} ==== */\n` + await (await fetch(base + "css/" + f)).text()); return parts.join("\n"); }
+const pad = (n) => String(n).padStart(2, "0");
+const iso = (dt) => `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`;
+const today = new Date(); today.setHours(0, 0, 0, 0);
+const thisMonth = (day) => iso(new Date(today.getFullYear(), today.getMonth(), Math.min(day, today.getDate())));
+const lastMonth = iso(new Date(today.getFullYear(), today.getMonth() - 1, 3));
+const rp = (n) => "Rp" + n.toLocaleString("id-ID");
+
+// Seed: makanan OVER (900k/800k), bensin NEAR (280k/300k = 93,3%), belanja WATCH (400k/500k = 80%),
+// tagihan SAFE (100k/600k), hiburan UNSET (budget 0, terpakai 50k), plus Lainnya 75k + kategori terhapus "kopi" 20k,
+// pemasukan 5jt (diabaikan), makanan bulan lalu 500k (diabaikan).
+const SEED_TX = [
+  { id: 1, title: "Makan A", category: "makanan", type: "expense", amount: 500000, isoDate: thisMonth(2), time: "" },
+  { id: 2, title: "Makan B", category: "makanan", type: "expense", amount: 400000, isoDate: thisMonth(5), time: "" },
+  { id: 3, title: "Bensin", category: "bensin", type: "expense", amount: 280000, isoDate: thisMonth(3), time: "" },
+  { id: 4, title: "Belanja", category: "belanja", type: "expense", amount: 400000, isoDate: thisMonth(4), time: "" },
+  { id: 5, title: "Listrik", category: "tagihan", type: "expense", amount: 100000, isoDate: thisMonth(6), time: "" },
+  { id: 6, title: "Bioskop", category: "hiburan", type: "expense", amount: 50000, isoDate: thisMonth(7), time: "" },
+  { id: 7, title: "Parkir", category: "lainnya", type: "expense", amount: 75000, isoDate: thisMonth(8), time: "" },
+  { id: 8, title: "Kopi lama", category: "kopi", type: "expense", amount: 20000, isoDate: thisMonth(9), time: "" },
+  { id: 9, title: "Gaji", category: "lainnya", type: "income", amount: 5000000, isoDate: thisMonth(1), time: "" },
+  { id: 10, title: "Makan bulan lalu", category: "makanan", type: "expense", amount: 500000, isoDate: lastMonth, time: "" },
+];
+const SEED_BUDGET = {
+  monthly: 2400000,
+  categories: {
+    makanan: { name: "Makanan", emoji: "🍜", budget: 800000 },
+    bensin: { name: "Bensin", emoji: "⛽", budget: 300000 },
+    belanja: { name: "Belanja", emoji: "🛍️", budget: 500000 },
+    tagihan: { name: "Tagihan", emoji: "🧾", budget: 600000 },
+    hiburan: { name: "Hiburan", emoji: "🎬", budget: 0 },
+  },
+};
+
+let frame = null;
+async function load(page, width = 390) {
+  if (frame) frame.remove();
+  frame = document.createElement("iframe"); frame.width = width; frame.height = 1400; frame.src = BASE + page;
+  document.body.appendChild(frame);
+  await new Promise(r => frame.onload = r); await wait(350);
+  const d = frame.contentDocument, w = frame.contentWindow;
+  const cc = d.getElementById("checkin-close"); if (cc) { cc.click(); await wait(300); }
+  return { d, w };
+}
+const card = (d, key) => d.querySelector(`#category-list .category-card[data-category="${key}"]`);
+const txt = (el) => (el ? el.textContent.replace(/\s+/g, " ").trim() : "");
+const statusOf = (d, key) => card(d, key).querySelector(".category-status");
+
+(async () => {
+  let { d, w } = await load("budget.html");
+  try { w.localStorage.clear(); w.localStorage.setItem("financeData.transactions", JSON.stringify(SEED_TX)); w.localStorage.setItem("financeData.budget", JSON.stringify(SEED_BUDGET)); } catch (e) {}
+  ({ d, w } = await load("budget.html"));
+  const errors = []; w.addEventListener("error", e => errors.push(e.message));
+
+  // ---------- 1. Unit: getCategoryBudgetStatus ----------
+  const st = w.getCategoryBudgetStatus;
+  ok("1a. fungsi baru getCategoryBudgetStatus ada; getBudgetStatus lama tidak berubah (3 level)", typeof st === "function" && w.getBudgetStatus(95).key === "danger" && w.getBudgetStatus(75).key === "warning" && w.getBudgetStatus(10).key === "safe" && w.getBudgetStatus(150).label === "Melebihi batas aman");
+  ok("1b. budget 0 -> unset 'Belum ada budget' (juga saat terpakai > 0)", st(0, 0).key === "unset" && st(50000, 0).key === "unset" && st(50000, 0).label === "Belum ada budget" && st(1, -5).key === "unset");
+  ok("1c. < 70% -> safe 'Aman' (0%, 69,9%)", st(0, 100).key === "safe" && st(69.9, 100).key === "safe" && st(0, 100).label === "Aman");
+  ok("1d. 70-89% -> watch 'Perlu diperhatikan' (70, 89,9)", st(70, 100).key === "watch" && st(89.9, 100).key === "watch" && st(70, 100).label === "Perlu diperhatikan");
+  ok("1e. 90-99% -> near 'Mendekati batas' (90, 99,9)", st(90, 100).key === "near" && st(99.9, 100).key === "near" && st(90, 100).label === "Mendekati batas");
+  ok("1f. >= 100% -> over 'Melebihi budget' (100, 150)", st(100, 100).key === "over" && st(150, 100).key === "over" && st(100, 100).label === "Melebihi budget");
+  ok("1g. percent tidak dipotong (150%), remaining boleh negatif (-50)", st(150, 100).percent === 150 && st(150, 100).remaining === -50 && st(30, 100).remaining === 70);
+
+  // ---------- 2. Unit: getUnbudgetedUsed ----------
+  const ub = w.getUnbudgetedUsed();
+  ok("2a. pengeluaran tanpa budget = Lainnya 75k + kategori terhapus 'kopi' 20k = 95k, 2 transaksi", ub.amount === 95000 && ub.count === 2, JSON.stringify(ub));
+  ok("2b. pemasukan & bulan lalu tidak dihitung; getCategoryUsed makanan = 900k (bulan lalu 500k diabaikan)", w.getCategoryUsed("makanan") === 900000);
+  const prev = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+  ok("2c. helper menerima parameter periode: makanan bulan lalu = 500k, tanpa-budget bulan lalu = 0", w.getCategoryUsed("makanan", prev) === 500000 && w.getUnbudgetedUsed(prev).count === 0);
+
+  // ---------- 3. Render card per status ----------
+  ok("3a. makanan OVER: chip 'Melebihi budget', data-status=over", txt(statusOf(d, "makanan")) === "Melebihi budget" && statusOf(d, "makanan").dataset.status === "over");
+  ok("3b. makanan: persen 112,5% (tidak dipotong), bar 100%, warna merah", /112,5%/.test(txt(card(d, "makanan"))) && card(d, "makanan").querySelector(".progress-bar-fill").style.width === "100%" && card(d, "makanan").querySelector(".progress-bar-fill").dataset.status === "over");
+  ok("3c. makanan: foot 'Lebih Rp100.000' (bukan 'Sisa Rp0' / '-Rp')", /Lebih Rp100\.000/.test(txt(card(d, "makanan"))) && !/Sisa/.test(txt(card(d, "makanan"))) && !/-Rp/.test(txt(card(d, "makanan"))) && card(d, "makanan").querySelector(".remaining-budget.is-over") !== null);
+  ok("3d. makanan: Terpakai Rp900.000 / Budget Rp800.000", /Terpakai: Rp900\.000/.test(txt(card(d, "makanan"))) && /Budget: Rp800\.000/.test(txt(card(d, "makanan"))));
+  ok("3e. bensin NEAR (93,3%): 'Mendekati batas', sisa Rp20.000", statusOf(d, "bensin").dataset.status === "near" && txt(statusOf(d, "bensin")) === "Mendekati batas" && /93,3%/.test(txt(card(d, "bensin"))) && /Sisa Rp20\.000/.test(txt(card(d, "bensin"))));
+  ok("3f. belanja WATCH (80%): 'Perlu diperhatikan', sisa Rp100.000", statusOf(d, "belanja").dataset.status === "watch" && txt(statusOf(d, "belanja")) === "Perlu diperhatikan" && /80%/.test(txt(card(d, "belanja"))) && /Sisa Rp100\.000/.test(txt(card(d, "belanja"))));
+  ok("3g. tagihan SAFE (16,7%): 'Aman', sisa Rp500.000", statusOf(d, "tagihan").dataset.status === "safe" && txt(statusOf(d, "tagihan")) === "Aman" && /Sisa Rp500\.000/.test(txt(card(d, "tagihan"))));
+  const hib = card(d, "hiburan");
+  ok("3h. hiburan UNSET: chip 'Belum ada budget', tanpa progress bar & tanpa persen", statusOf(d, "hiburan").dataset.status === "unset" && txt(statusOf(d, "hiburan")) === "Belum ada budget" && !hib.querySelector(".progress-bar") && !/%/.test(txt(hib)) && !/Budget:/.test(txt(hib)));
+  ok("3i. hiburan UNSET: tetap menampilkan Terpakai Rp50.000 + petunjuk atur budget + tombol Edit", /Terpakai: Rp50\.000/.test(txt(hib)) && /Atur Budget/.test(txt(hib)) && !!hib.querySelector('[data-action="edit-category"]') && hib.classList.contains("category-card--unset"));
+  ok("3j. semua card memakai warna status yang terdefinisi (chip & bar bukan default transparan)", ["over", "near", "watch", "unset"].every(k => { const el = d.querySelector(`.category-status[data-status="${k}"]`); return el && w.getComputedStyle(el).backgroundColor !== "rgba(0, 0, 0, 0)"; }) && ["over", "near", "watch"].every(k => { const el = d.querySelector(`.progress-bar-fill[data-status="${k}"]`); return el && w.getComputedStyle(el).backgroundColor !== "rgba(0, 0, 0, 0)"; }));
+  ok("3k. urutan card = urutan kategori (makanan, bensin, belanja, tagihan, hiburan)", [...d.querySelectorAll("#category-list .category-card:not(.category-card--other)")].map(c => c.dataset.category).join(",") === "makanan,bensin,belanja,tagihan,hiburan");
+
+  // ---------- 4. Warning jumlah kategori melebihi budget ----------
+  const note = d.getElementById("category-note");
+  ok("4a. #category-note tampil: '1 kategori sudah melebihi budget', di atas daftar", !!note && !note.hidden && /1 kategori sudah melebihi budget/.test(note.textContent) && note.getBoundingClientRect().bottom <= d.getElementById("category-list").getBoundingClientRect().top);
+  ok("4b. #budget-note lama (total kategori vs bulanan) tetap terpisah & tersembunyi (2,2jt <= 2,4jt)", d.getElementById("budget-note").hidden);
+
+  // ---------- 5. Baris pengeluaran tanpa budget ----------
+  const other = card(d, "__other");
+  ok("5a. baris 'Pengeluaran lain tanpa budget' tampil di akhir daftar: Rp95.000, 2 transaksi", !!other && /Pengeluaran lain tanpa budget/.test(txt(other)) && /Rp95\.000/.test(txt(other)) && /2 transaksi/.test(txt(other)) && d.querySelector("#category-list").lastElementChild === other);
+  ok("5b. baris ini tanpa progress/status/Edit (read-only)", !other.querySelector(".progress-bar") && !other.querySelector(".category-status") && !other.querySelector('[data-action]'));
+
+  // ---------- 6. Card Budget Bulan Ini di budget.html tetap memakai logika lama ----------
+  const bc = d.getElementById("budget-card");
+  ok("6a. summary: Rp1.825.000 / Rp2.400.000, 76%, status lama 'warning' (bukan watch)", /Rp1\.825\.000/.test(txt(bc)) && /Rp2\.400\.000/.test(txt(bc)) && bc.querySelector(".progress-bar-fill").dataset.status === "warning");
+
+  // ---------- 7. Edit kategori -> status ikut berubah, localStorage tetap { monthly, categories } ----------
+  card(d, "makanan").querySelector('[data-action="edit-category"]').click(); await wait(300);
+  const fb = d.getElementById("field-category-budget"); fb.value = "1000000"; fb.dispatchEvent(new Event("input", { bubbles: true }));
+  d.getElementById("category-form").requestSubmit(); await wait(350);
+  ok("7a. budget makanan -> 1jt: status jadi NEAR (90%), 'Sisa Rp100.000', note hilang (0 over)", statusOf(d, "makanan").dataset.status === "near" && /90%/.test(txt(card(d, "makanan"))) && /Sisa Rp100\.000/.test(txt(card(d, "makanan"))) && d.getElementById("category-note").hidden);
+  const saved = JSON.parse(w.localStorage.getItem("financeData.budget"));
+  ok("7b. localStorage financeData.budget masih { monthly, categories:{key:{name,emoji,budget}} }, hiburan budget 0 tersimpan", saved.monthly === 2400000 && saved.categories.makanan.budget === 1000000 && saved.categories.hiburan.budget === 0 && Object.keys(saved).sort().join() === "categories,monthly" && Object.keys(saved.categories.makanan).sort().join() === "budget,emoji,name");
+  // hapus kategori tagihan -> pengeluarannya pindah ke baris tanpa budget
+  card(d, "tagihan").querySelector('[data-action="edit-category"]').click(); await wait(300);
+  d.getElementById("btn-delete-category").click(); await wait(300);
+  d.getElementById("confirm-delete").click(); await wait(350);
+  ok("7c. hapus kategori tagihan -> baris tanpa budget jadi Rp195.000, 3 transaksi; card tagihan hilang", !card(d, "tagihan") && /Rp195\.000/.test(txt(card(d, "__other"))) && /3 transaksi/.test(txt(card(d, "__other"))));
+
+  // ---------- 8. Tanpa kategori & tanpa pengeluaran lain ----------
+  try { w.localStorage.setItem("financeData.budget", JSON.stringify({ monthly: 1000000, categories: {} })); w.localStorage.setItem("financeData.transactions", JSON.stringify([{ id: 1, title: "Gaji", category: "lainnya", type: "income", amount: 100000, isoDate: thisMonth(1), time: "" }])); } catch (e) {}
+  ({ d, w } = await load("budget.html"));
+  ok("8a. tidak ada kategori -> empty state lama tampil; baris tanpa budget & note tidak tampil", !!d.querySelector("#category-list .category-empty") && !card(d, "__other") && d.getElementById("category-note").hidden);
+
+  // ---------- 9. Dashboard & analytics tidak terpengaruh ----------
+  try { w.localStorage.setItem("financeData.transactions", JSON.stringify(SEED_TX)); w.localStorage.setItem("financeData.budget", JSON.stringify(SEED_BUDGET)); } catch (e) {}
+  ({ d, w } = await load("index.html"));
+  const dbc = d.getElementById("budget-card");
+  ok("9a. dashboard Budget Bulan Ini: Rp1.825.000 / Rp2.400.000, status lama (warning), tanpa 'Lebih'", /Rp1\.825\.000/.test(txt(dbc)) && dbc.querySelector(".progress-bar-fill").dataset.status === "warning" && !/Lebih/.test(txt(dbc)) && !d.getElementById("category-list"));
+  ({ d, w } = await load("analytics.html"));
+  ok("9b. analytics: insight makanan terlewati 13% (round 112,5) tetap dari getBudgetAlertLevel; halaman render tanpa card kategori", /terlewati 13%/.test(txt(d.getElementById("insight-list"))) && !d.getElementById("category-list"));
+
+  // ---------- B. Tahap B: navigator bulan ----------
+  ({ d, w } = await load("budget.html"));
+  const MONTHS = ["Januari","Februari","Maret","April","Mei","Juni","Juli","Agustus","September","Oktober","November","Desember"];
+  const lbl = (dt) => `${MONTHS[dt.getMonth()]} ${dt.getFullYear()}`;
+  const mAgo = (n) => new Date(today.getFullYear(), today.getMonth() - n, 1);
+  const pt = () => txt(d.getElementById("budget-period-title"));
+  const nextBtn = () => d.getElementById("budget-next-month"), prevBtn = () => d.getElementById("budget-prev-month"), nowBtn = () => d.getElementById("budget-this-month");
+  const click = async (b) => { b.click(); await wait(80); };
+  ok("B1. default = bulan berjalan: label benar, › disabled, 'Bulan Ini' disabled, hint tersembunyi, judul summary 'Budget Bulan Ini'", pt() === lbl(mAgo(0)) && nextBtn().disabled && nowBtn().disabled && d.getElementById("budget-period-hint").hidden && txt(d.getElementById("budget-summary-title")) === "Budget Bulan Ini");
+  const som = w.startOfMonth(new Date(2026, 1, 17, 13, 45));
+  ok("B1b. helper lokal: startOfMonth -> tgl 1 00:00 lokal; isCurrentMonth; formatMonthYearID", som.getDate() === 1 && som.getHours() === 0 && som.getMonth() === 1 && w.isCurrentMonth(new Date()) && !w.isCurrentMonth(mAgo(1)) && w.formatMonthYearID(new Date(2026, 8, 1)) === "September 2026" && !/toISOString/.test(String(w.setupBudgetPeriodNav) + String(w.startOfMonth) + String(w.renderBudgetPeriod)));
+  await click(prevBtn());
+  ok("B2. ‹ -> bulan lalu: label berubah, › & 'Bulan Ini' aktif, hint 'dibandingkan dengan budget saat ini' tampil", pt() === lbl(mAgo(1)) && !nextBtn().disabled && !nowBtn().disabled && !d.getElementById("budget-period-hint").hidden && /budget saat ini/.test(txt(d.getElementById("budget-period-hint"))));
+  ok("B2b. bulan lalu: makanan terpakai Rp500.000 (62,5%, Aman), budget tetap Rp800.000", /Terpakai: Rp500\.000/.test(txt(card(d, "makanan"))) && /62,5%/.test(txt(card(d, "makanan"))) && statusOf(d, "makanan").dataset.status === "safe" && /Budget: Rp800\.000/.test(txt(card(d, "makanan"))));
+  ok("B2c. bulan lalu: bensin/belanja/tagihan Rp0 Aman, hiburan tetap 'Belum ada budget' Rp0", ["bensin","belanja","tagihan"].every(k => statusOf(d, k).dataset.status === "safe" && /Terpakai: Rp0\b/.test(txt(card(d, k)))) && statusOf(d, "hiburan").dataset.status === "unset" && /Terpakai: Rp0\b/.test(txt(card(d, "hiburan"))));
+  ok("B2d. bulan lalu: note over tersembunyi, baris 'Pengeluaran lain' tidak ada", d.getElementById("category-note").hidden && !card(d, "__other"));
+  ok("B2e. bulan lalu: summary 'Budget <bulan lalu>' Rp500.000 / Rp2.400.000, 20,8%", txt(d.getElementById("budget-summary-title")) === `Budget ${lbl(mAgo(1))}` && /Rp500\.000/.test(txt(d.getElementById("budget-card"))) && /20,8%/.test(txt(d.getElementById("budget-card"))));
+  await click(prevBtn());
+  ok("B3. ‹ lagi -> dua bulan lalu: semua Rp0, summary Rp0 / Rp2.400.000, 0%", pt() === lbl(mAgo(2)) && [...d.querySelectorAll("#category-list .category-card")].every(c => /Terpakai: Rp0\b/.test(txt(c))) && /Rp0 \/ Rp2\.400\.000/.test(txt(d.getElementById("budget-card")).replace(/\s+/g, " ")) && /\b0%/.test(txt(d.getElementById("budget-card"))));
+  await click(nextBtn()); await click(nextBtn());
+  ok("B4. › dua kali -> kembali bulan berjalan; › disabled lagi", pt() === lbl(mAgo(0)) && nextBtn().disabled && nowBtn().disabled);
+  nextBtn().dispatchEvent(new MouseEvent("click", { bubbles: true })); await wait(80);
+  ok("B4b. › saat disabled tidak menggeser ke bulan depan (label tetap, view tetap)", pt() === lbl(mAgo(0)) && nextBtn().disabled);
+  await click(prevBtn()); await click(prevBtn()); await click(prevBtn());
+  ok("B5a. ‹ 3x -> tiga bulan lalu (lintas tahun aman)", pt() === lbl(mAgo(3)));
+  await click(nowBtn());
+  ok("B5b. 'Bulan Ini' -> kembali bulan berjalan; 'Bulan Ini' & › disabled", pt() === lbl(mAgo(0)) && nowBtn().disabled && nextBtn().disabled);
+  ok("B6. status & note ikut bulan: bulan berjalan makanan OVER + note '1 kategori … bulan ini'", statusOf(d, "makanan").dataset.status === "over" && !d.getElementById("category-note").hidden && /melebihi budget bulan ini/.test(txt(d.getElementById("category-note"))));
+  ok("B7. baris pengeluaran lain kembali (Rp95.000, 2 transaksi) di bulan berjalan", !!card(d, "__other") && /Rp95\.000/.test(txt(card(d, "__other"))));
+  // note menyebut bulan saat bukan bulan berjalan: buat kopi (kategori terhapus) jadi over di bulan lalu? cukup verifikasi teks via makanan bulan lalu dengan budget kecil
+  await click(prevBtn());
+  card(d, "makanan").querySelector('[data-action="edit-category"]').click(); await wait(300);
+  const fbB = d.getElementById("field-category-budget"); fbB.value = "400000"; fbB.dispatchEvent(new Event("input", { bubbles: true }));
+  d.getElementById("category-form").requestSubmit(); await wait(350);
+  ok("B8. edit budget saat melihat bulan lalu: tetap di bulan lalu, makanan 500k/400k -> OVER 125%, 'Lebih Rp100.000', note menyebut bulannya", pt() === lbl(mAgo(1)) && statusOf(d, "makanan").dataset.status === "over" && /125%/.test(txt(card(d, "makanan"))) && /Lebih Rp100\.000/.test(txt(card(d, "makanan"))) && new RegExp(`melebihi budget pada ${lbl(mAgo(1))}`).test(txt(d.getElementById("category-note"))));
+  const savedB = JSON.parse(w.localStorage.getItem("financeData.budget"));
+  ok("B9. localStorage: hanya { monthly, categories } (tanpa periode), key lain tidak bertambah", Object.keys(savedB).sort().join() === "categories,monthly" && savedB.categories.makanan.budget === 400000 && Object.keys(w.localStorage).filter(k => k.startsWith("financeData.")).sort().join() === "financeData.budget,financeData.transactions");
+  ({ d, w } = await load("budget.html"));
+  ok("B10. muat ulang halaman -> kembali ke bulan berjalan (periode tidak dipersist)", pt() === lbl(mAgo(0)) && statusOf(d, "makanan").dataset.status === "over" && /225%/.test(txt(card(d, "makanan"))));
+  ({ d, w } = await load("index.html"));
+  ok("B11. dashboard: tanpa navigator, Budget Bulan Ini tetap bulan berjalan (Rp1.825.000), judul statis", !d.getElementById("budget-period-title") && /Rp1\.825\.000/.test(txt(d.getElementById("budget-card"))) && !d.getElementById("budget-summary-title"));
+  const cssB = await fetchStyleCss(BASE);
+  ok("B12. CSS: hover hanya untuk tombol aktif, disabled diberi gaya, focus-visible global, tombol ikut press feedback", /\.calendar-nav:not\(:disabled\):hover/.test(cssB) && /\.calendar-nav:disabled,\s*\.btn:disabled\s*\{[^}]*cursor: not-allowed/.test(cssB) && /button:focus-visible/.test(cssB) && /\.btn--ghost:not\(:disabled\):hover/.test(cssB));
+  for (const wd of [320, 375, 1280]) {
+    const r = await load("budget.html", wd);
+    const nav = r.d.querySelector(".budget-period-nav"), ttl = r.d.getElementById("budget-period-title");
+    const btns = [r.d.getElementById("budget-prev-month"), r.d.getElementById("budget-next-month"), r.d.getElementById("budget-this-month")];
+    const noOverflow = r.d.documentElement.scrollWidth === r.d.documentElement.clientWidth && nav.scrollWidth <= nav.clientWidth + 5; /* +4px = halo area-tap .btn--xs::before, bukan overflow nyata (html.sw == cw) */
+    const titleOk = ttl.scrollWidth <= ttl.clientWidth + 1 && r.w.getComputedStyle(ttl).whiteSpace === "nowrap";
+    const sizeOk = btns.every(b => b.getBoundingClientRect().height >= 36 && b.getBoundingClientRect().width >= 36);
+    const sameRow = Math.abs(btns[0].getBoundingClientRect().top - btns[1].getBoundingClientRect().top) < 2;
+    ok(`B13-${wd}. navigator: tanpa overflow, label utuh, tombol >= 36px, ‹ › sebaris${wd <= 360 ? ", 'Bulan Ini' di baris kedua rata kanan" : ", 'Bulan Ini' sebaris di kanan"}`, noOverflow && titleOk && sizeOk && sameRow && (wd <= 360 ? btns[2].getBoundingClientRect().top > btns[1].getBoundingClientRect().bottom - 1 && Math.abs(btns[2].getBoundingClientRect().right - nav.getBoundingClientRect().right) < 2 : Math.abs(btns[2].getBoundingClientRect().top - btns[1].getBoundingClientRect().top) < 2), `title sw=${ttl.scrollWidth} cw=${ttl.clientWidth}`);
+    r.d.getElementById("budget-prev-month").click(); await wait(80);
+    ok(`B13b-${wd}. bulan lalu + hint tampil: tetap tanpa overflow`, r.d.documentElement.scrollWidth === r.d.documentElement.clientWidth && !r.d.getElementById("budget-period-hint").hidden);
+  }
+  try { w.localStorage.setItem("financeData.transactions", JSON.stringify(SEED_TX)); w.localStorage.setItem("financeData.budget", JSON.stringify(SEED_BUDGET)); } catch (e) {}
+
+  // ---------- C. Tahap C: Atur / Kosongkan Budget + empty state ----------
+  ({ d, w } = await load("budget.html"));
+  const modal = () => d.getElementById("category-modal-overlay");
+  const submitBtn = () => d.getElementById("category-modal-submit");
+  const clearBtn = () => d.getElementById("btn-clear-budget");
+  const delBtn = () => d.getElementById("btn-delete-category");
+  const fB = () => d.getElementById("field-category-budget");
+  const openEdit = async (key, viaFoot = false) => { card(d, key).querySelector(viaFoot ? ".btn-set-budget" : '.category-card-head [data-action="edit-category"]').click(); await wait(300); };
+  const submit = async () => { d.getElementById("category-form").requestSubmit(); await wait(350); };
+  const setB = (v) => { fB().value = v; fB().dispatchEvent(new Event("input", { bubbles: true })); };
+  const validity = () => fB().validationMessage;
+
+  // C1. kategori budget 0 -> tombol Atur Budget di card & di modal
+  ok("C1a. card hiburan (budget 0) punya tombol 'Atur Budget' di foot (handler edit yang sama) + Edit di head", !!card(d, "hiburan").querySelector('.btn-set-budget[data-action="edit-category"][data-key="hiburan"]') && !!card(d, "hiburan").querySelector('.category-card-head [data-action="edit-category"]'));
+  await openEdit("hiburan", true);
+  ok("C1b. modal dari 'Atur Budget': judul 'Atur Budget Hiburan', submit 'Atur Budget', input kosong (placeholder 0), Kosongkan tersembunyi, Hapus Kategori tampil", !modal().hidden && /Atur Budget Hiburan/.test(txt(d.getElementById("category-modal-title"))) && txt(submitBtn()) === "Atur Budget" && fB().value === "" && clearBtn().hidden && !delBtn().hidden && /belum punya budget/.test(txt(d.getElementById("category-modal-sub"))));
+  // C2. validasi
+  setB(""); await submit();
+  ok("C2a. input kosong ditolak (modal tetap terbuka, pesan 'Isi nominal budget kategori.')", !modal().hidden && validity() === "Isi nominal budget kategori." && w.getCategory("hiburan").budget === 0);
+  fB().value = "-200000"; await submit();
+  ok("C2b. angka negatif ditolak (pesan menyebut angka positif / tanpa minus)", !modal().hidden && /angka positif/.test(validity()) && w.getCategory("hiburan").budget === 0);
+  fB().value = "abc"; await submit();
+  ok("C2c. non-numerik ditolak", !modal().hidden && /angka positif/.test(validity()) && w.getCategory("hiburan").budget === 0);
+  fB().value = "0"; await submit();
+  ok("C2d. angka 0 lewat input utama ditolak, pesan mengarahkan ke tombol Kosongkan Budget", !modal().hidden && /lebih dari 0/.test(validity()) && /Kosongkan Budget/.test(validity()));
+  setB("250000"); await submit();
+  ok("C2e. budget positif tersimpan: modal tertutup, hiburan 250.000, card jadi 'Aman' 20% (50k/250k), tanpa tombol Atur Budget", modal().hidden && w.getCategory("hiburan").budget === 250000 && statusOf(d, "hiburan").dataset.status === "safe" && /20%/.test(txt(card(d, "hiburan"))) && !card(d, "hiburan").querySelector(".btn-set-budget"));
+  ok("C2f. localStorage: hiburan.budget = 250000, struktur { monthly, categories } tetap", (() => { const sv = JSON.parse(w.localStorage.getItem("financeData.budget")); return sv.categories.hiburan.budget === 250000 && Object.keys(sv).sort().join() === "categories,monthly" && Object.keys(sv.categories.hiburan).sort().join() === "budget,emoji,name"; })());
+  // C3. kategori budget positif -> Simpan Perubahan + Kosongkan Budget
+  await openEdit("makanan");
+  ok("C3a. modal makanan (budget > 0): judul 'Edit Kategori', submit 'Simpan Perubahan', Kosongkan Budget & Hapus Kategori tampil, Kosongkan bergaya ghost (bukan merah)", /Edit Kategori Makanan/.test(txt(d.getElementById("category-modal-title"))) && txt(submitBtn()) === "Simpan Perubahan" && !clearBtn().hidden && !delBtn().hidden && clearBtn().classList.contains("btn--ghost") && !clearBtn().classList.contains("btn--danger-ghost") && delBtn().classList.contains("btn--danger-ghost"));
+  ok("C3b. modal: tombol tidak meluber di 390px", [submitBtn(), clearBtn(), delBtn()].every(b => b.getBoundingClientRect().right <= modal().querySelector(".modal").getBoundingClientRect().right + 0.5));
+  // C4. Kosongkan Budget saat melihat bulan lalu -> bulan tetap, budget 0, kategori & transaksi tetap
+  d.querySelector("[data-modal-close]").click(); await wait(300);
+  await click(prevBtn());
+  const txCountBefore = JSON.parse(w.localStorage.getItem("financeData.transactions")).length;
+  await openEdit("makanan");
+  clearBtn().click(); await wait(350);
+  ok("C4a. Kosongkan Budget: modal tertutup, makanan.budget = 0, kategori tetap ada, transaksi tetap (10)", modal().hidden && w.getCategory("makanan").budget === 0 && w.getCategory("makanan").name === "Makanan" && JSON.parse(w.localStorage.getItem("financeData.transactions")).length === txCountBefore);
+  ok("C4b. card makanan -> 'Belum ada budget' dengan tombol Atur Budget; terpakai bulan lalu Rp500.000 tetap tampil", statusOf(d, "makanan").dataset.status === "unset" && !!card(d, "makanan").querySelector(".btn-set-budget") && /Terpakai: Rp500\.000/.test(txt(card(d, "makanan"))));
+  ok("C4c. bulan aktif tetap bulan lalu (budgetViewDate tidak di-reset), summary judul bulan lalu", pt() === lbl(mAgo(1)) && txt(d.getElementById("budget-summary-title")) === `Budget ${lbl(mAgo(1))}`);
+  ok("C4d. localStorage makanan.budget = 0 (tersimpan), tanpa key periode", JSON.parse(w.localStorage.getItem("financeData.budget")).categories.makanan.budget === 0 && Object.keys(w.localStorage).filter(k => k.startsWith("financeData.")).length === 2);
+  await click(nowBtn());
+  ok("C4e. kembali bulan berjalan: note over hilang (makanan tidak lagi dihitung over), status lain tetap (bensin near)", d.getElementById("category-note").hidden && statusOf(d, "bensin").dataset.status === "near");
+  // C5. Kosongkan Budget ikut menyimpan nama yang sedang diubah
+  await openEdit("bensin");
+  d.getElementById("field-category-name").value = "Bensin & Parkir";
+  clearBtn().click(); await wait(350);
+  ok("C5. Kosongkan Budget menyimpan nama yang sedang diedit ('Bensin & Parkir'), budget 0, emoji tetap", w.getCategory("bensin").budget === 0 && w.getCategory("bensin").name === "Bensin & Parkir" && w.getCategory("bensin").emoji === "⛽");
+  // C6. empty state: semua budget 0
+  for (const k of ["belanja", "tagihan", "hiburan"]) { await openEdit(k); clearBtn().click(); await wait(300); }
+  ok("C6a. semua kategori budget 0 -> empty state 'Belum ada budget yang diatur' tampil di atas card, card tetap ada (5) dengan Atur Budget", !!d.getElementById("category-empty-budget") && /Belum ada budget yang diatur/.test(txt(d.getElementById("category-empty-budget"))) && d.querySelectorAll("#category-list .category-card--unset").length === 5 && d.getElementById("category-list").firstElementChild.id === "category-empty-budget");
+  ok("C6b. empty state tidak menutupi baris 'Pengeluaran lain tanpa budget' (Rp95.000 tetap tampil di bawah)", !!card(d, "__other") && /Rp95\.000/.test(txt(card(d, "__other"))) && d.getElementById("category-list").lastElementChild === card(d, "__other"));
+  ok("C6c. summary & note: note over tersembunyi, budget bulanan tetap Rp2.400.000", d.getElementById("category-note").hidden && /Rp2\.400\.000/.test(txt(d.getElementById("budget-card"))));
+  await openEdit("belanja", true); setB("500000"); await submit();
+  ok("C6d. atur satu budget lagi -> empty state hilang, belanja 'Perlu diperhatikan' 80%", !d.getElementById("category-empty-budget") && statusOf(d, "belanja").dataset.status === "watch");
+  // C7. tanpa pengeluaran lain: empty state saja + card
+  try { w.localStorage.setItem("financeData.transactions", JSON.stringify(SEED_TX.filter(tx => !["lainnya", "kopi"].includes(tx.category) || tx.type === "income"))); w.localStorage.setItem("financeData.budget", JSON.stringify({ monthly: 2400000, categories: Object.fromEntries(Object.entries(SEED_BUDGET.categories).map(([k, c]) => [k, { ...c, budget: 0 }])) })); } catch (e) {}
+  ({ d, w } = await load("budget.html"));
+  ok("C7. semua 0 & tanpa pengeluaran lain -> empty state + 5 card unset, tanpa baris lain", !!d.getElementById("category-empty-budget") && d.querySelectorAll("#category-list .category-card--unset").length === 5 && !card(d, "__other"));
+  // C8. tambah kategori: mode add tanpa Kosongkan, 0 ditolak dengan pesan tanpa rujukan Kosongkan
+  d.getElementById("btn-add-category").click(); await wait(300);
+  ok("C8a. mode tambah: submit 'Tambah Kategori', Kosongkan & Hapus tersembunyi", txt(submitBtn()) === "Tambah Kategori" && clearBtn().hidden && delBtn().hidden);
+  d.getElementById("field-category-name").value = "Kopi"; setB("0"); await submit();
+  ok("C8b. tambah dengan 0 ditolak ('lebih dari 0', tanpa rujukan Kosongkan Budget)", !modal().hidden && /lebih dari 0/.test(validity()) && !/Kosongkan/.test(validity()));
+  setB("150000"); await submit();
+  ok("C8c. tambah dengan 150.000 berhasil, empty state hilang", modal().hidden && w.getCategory("kopi").name === "Kopi" && w.getCategory("kopi").budget === 150000 && !d.getElementById("category-empty-budget"));
+  ok("C8d. tidak ada window.prompt/confirm dalam alur (fungsi tidak dipanggil)", !/window\.(prompt|confirm)|[^.\w](prompt|confirm)\(/.test(String(w.setupBudgetEditor)));
+  // C9. dashboard & analytics tidak berubah
+  try { w.localStorage.setItem("financeData.transactions", JSON.stringify(SEED_TX)); w.localStorage.setItem("financeData.budget", JSON.stringify(SEED_BUDGET)); } catch (e) {}
+  ({ d, w } = await load("index.html"));
+  ok("C9a. dashboard: Budget Bulan Ini Rp1.825.000 / Rp2.400.000 (warning), tanpa elemen budget-kategori", /Rp1\.825\.000/.test(txt(d.getElementById("budget-card"))) && d.getElementById("budget-card").querySelector(".progress-bar-fill").dataset.status === "warning" && !d.getElementById("category-list") && !d.getElementById("btn-clear-budget"));
+  ({ d, w } = await load("analytics.html"));
+  ok("C9b. analytics: insight makanan terlewati 13% tetap; hiburan (budget 0) tidak diberi insight budget", /terlewati 13%/.test(txt(d.getElementById("insight-list"))) && !/Budget Hiburan/.test(txt(d.getElementById("insight-list"))));
+  // C10. responsif modal & card unset
+  for (const wd of [320, 375, 1280]) {
+    const r = await load("budget.html", wd);
+    const hc = r.d.querySelector('#category-list .category-card[data-category="hiburan"]');
+    const cardOk = hc.scrollWidth <= hc.clientWidth + 1 && hc.querySelector(".btn-set-budget").getBoundingClientRect().right <= hc.getBoundingClientRect().right + 0.5;
+    hc.querySelector(".btn-set-budget").click(); await wait(300);
+    const m = r.d.querySelector("#category-modal-overlay .modal");
+    const btns = [r.d.getElementById("category-modal-submit"), r.d.getElementById("btn-delete-category")];
+    const modalOk = !r.d.getElementById("category-modal-overlay").hidden && btns.every(b => b.getBoundingClientRect().right <= m.getBoundingClientRect().right + 0.5 && b.getBoundingClientRect().height >= 36);
+    r.d.querySelector("#category-modal-overlay [data-modal-close]").click(); await wait(300);
+    r.d.querySelector('#category-list .category-card[data-category="makanan"] .category-card-head [data-action="edit-category"]').click(); await wait(300);
+    const cb = r.d.getElementById("btn-clear-budget");
+    const cs = r.w.getComputedStyle(cb);
+    const clearOk = !cb.hidden && cb.getBoundingClientRect().right <= m.getBoundingClientRect().right + 0.5 && cs.cursor === "pointer" && cs.transitionDuration !== "0s";
+    ok(`C10-${wd}. card unset & modal (Atur Budget / Kosongkan Budget) tanpa overflow, tombol >= 36px, cursor pointer + transition`, cardOk && modalOk && clearOk && r.d.documentElement.scrollWidth === r.d.documentElement.clientWidth, `html sw=${r.d.documentElement.scrollWidth}`);
+  }
+  const cssC = await fetchStyleCss(BASE);
+  ok("C11. CSS: hover ghost, pressed scale, focus-visible, disabled untuk .btn terdefinisi", /\.btn--ghost(?::not\(:disabled\))?:hover/.test(cssC) && /:is\(:active, \.is-pressed\)\s*\{[^}]*scale\(0\.97\)/.test(cssC) && /button:focus-visible/.test(cssC) && /\.btn:disabled/.test(cssC));
+  try { w.localStorage.setItem("financeData.transactions", JSON.stringify(SEED_TX)); w.localStorage.setItem("financeData.budget", JSON.stringify(SEED_BUDGET)); } catch (e) {}
+
+  // ---------- 10. Responsif & console ----------
+  for (const wd of [320, 375, 1280]) {
+    const r = await load("budget.html", wd);
+    const overflow = r.d.documentElement.scrollWidth > r.d.documentElement.clientWidth;
+    const cards = [...r.d.querySelectorAll("#category-list .category-card")];
+    const spill = cards.some(c => c.scrollWidth > c.clientWidth + 1);
+    ok(`10-${wd}. tidak ada overflow horizontal; card tidak meluber (Lebih Rp…, baris tanpa budget, note)`, !overflow && !spill && cards.length === 6, `sw=${r.d.documentElement.scrollWidth} cw=${r.d.documentElement.clientWidth}`);
+  }
+  ok("11. console 0 error selama test", errors.length === 0, errors.join(" | "));
+
+  try { w.localStorage.clear(); } catch (e) {}
+  document.getElementById("r").textContent = out.join("\n");
+})().catch(e => { out.push("EXCEPTION " + e.stack); document.getElementById("r").textContent = out.join("\n"); });
+</script>

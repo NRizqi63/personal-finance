@@ -1,0 +1,271 @@
+<!doctype html>
+<meta charset="utf-8">
+<pre id="r">running…</pre>
+<script>
+const out = []; const ok = (n, c, x = "") => out.push(`${c ? "PASS" : "FAIL"} ${n}${x ? "  (" + x + ")" : ""}`);
+const wait = (ms) => new Promise(r => setTimeout(r, ms));
+const BASE = new URL("../../frontend/", location.href).href;
+// JS-6: app.js sudah dihapus. Sumber kode HIDUP untuk pemeriksaan regex = gabungan 8 file split (urutan muat).
+const APP_SPLIT_FILES = ["core.js", "transactions-shared.js", "dashboard.js", "goals.js", "analytics.js", "budget.js", "transactions.js", "settings.js"];
+async function fetchAppJs(base) { const parts = []; for (const f of APP_SPLIT_FILES) parts.push(`/* ==== ${f} ==== */\n` + await (await fetch(base + "js/" + f)).text()); return parts.join("\n"); }
+
+const pad = (n) => String(n).padStart(2, "0");
+const today = new Date();
+const isoToday = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`;
+
+const LIVE_TX = [
+  { id: 7, title: "Kopi Aktif", category: "makanan", type: "expense", amount: 18000, isoDate: isoToday, time: "" },
+  { id: 6, title: "Gaji Aktif", category: "lainnya", type: "income", amount: 5000000, isoDate: isoToday, time: "" },
+];
+const LIVE_BUDGET = { monthly: 1234000, categories: { makanan: { name: "Makanan Custom", emoji: "🍜", budget: 800000 } } };
+const LIVE_SETTINGS = { name: "Rizqi Aktif", hideBalanceOnOpen: true, showCheckin: false };
+const KEYS = ["financeData.transactions", "financeData.budget", "financeData.settings"];
+const backup = (data) => JSON.stringify({ app: "personal-finance", appName: "Personal Finance", schema: 1, appVersion: "V2.2", exportedAt: "2026-09-14T01:32:11.281Z", counts: { transactions: 1, categories: 1 }, data });
+const IMPORT_FILE = backup({
+  transactions: [{ id: 1, title: "Dari File", category: "makanan", type: "expense", amount: 12000, isoDate: isoToday, time: "" }],
+  budget: { monthly: 999000, categories: { makanan: { name: "Makanan", emoji: "🍜", budget: 100000 } } },
+  settings: { name: "Dari File", hideBalanceOnOpen: false, showCheckin: true },
+});
+
+let frame = null;
+async function load(page = "settings.html", width = 390) {
+  if (frame) frame.remove();
+  frame = document.createElement("iframe"); frame.width = width; frame.height = 1600; frame.src = BASE + page;
+  document.body.appendChild(frame);
+  await new Promise(r => frame.onload = r); await wait(400);
+  return { d: frame.contentDocument, w: frame.contentWindow };
+}
+const txt = (el) => (el ? el.textContent.replace(/\s+/g, " ").trim() : "");
+const snapLS = (w) => JSON.stringify(KEYS.map(k => w.localStorage.getItem(k)));
+const allKeys = (w) => { const ks = []; for (let i = 0; i < w.localStorage.length; i += 1) ks.push(w.localStorage.key(i)); return ks.sort().join(); };
+async function seed(w, opts = {}) {
+  try {
+    w.localStorage.clear(); w.sessionStorage.clear();
+    if (!opts.noTx) w.localStorage.setItem("financeData.transactions", JSON.stringify(LIVE_TX));
+    if (!opts.noBudget) w.localStorage.setItem("financeData.budget", JSON.stringify(LIVE_BUDGET));
+    if (!opts.noSettings) w.localStorage.setItem("financeData.settings", JSON.stringify(LIVE_SETTINGS));
+    w.localStorage.setItem("catatanLain", "jangan-disentuh");
+    w.sessionStorage.setItem("checkinDismissed", "true");
+  } catch (e) {}
+}
+function stubReload(w) { const calls = { n: 0 }; w.reloadPage = () => { calls.n += 1; }; return calls; }
+const openReset = async (d, target) => { d.querySelector(`[data-reset-target="${target}"]`).click(); await wait(250); };
+const summaryMap = (d) => Object.fromEntries([...d.querySelectorAll("#reset-modal-summary .settings-meta-row")].map(r => [r.querySelector("dt").textContent, r.querySelector("dd").textContent]));
+async function pickFile(d, w, name, content) {
+  const input = d.getElementById("import-file");
+  const fb = d.getElementById("settings-data-status");
+  const before = fb.textContent;
+  const dt = new w.DataTransfer();
+  dt.items.add(new w.File([content], name, { type: "application/json" }));
+  input.files = dt.files;
+  input.dispatchEvent(new w.Event("change", { bubbles: true }));
+  for (let i = 0; i < 40 && fb.textContent === before; i += 1) await wait(100);
+  await wait(150);
+}
+
+(async () => {
+  let { d, w } = await load();
+  await seed(w);
+  ({ d, w } = await load());
+  const errors = []; w.addEventListener("error", e => errors.push(e.message));
+  const overlay = () => d.getElementById("reset-modal-overlay");
+  const confirmBtn = () => d.getElementById("btn-reset-confirm");
+  const fb = () => d.getElementById("settings-data-status");
+  const before = snapLS(w);
+  const keysBefore = allKeys(w);
+
+  // ================= 1. UI Zona Berbahaya =================
+  ok("1a. tiga aksi reset ada (transactions, budget, settings) dengan tombol danger", ["transactions", "budget", "settings"].every(t => { const b = d.querySelector(`[data-reset-target="${t}"]`); return b && b.classList.contains("btn--danger-ghost"); }) && d.querySelectorAll("#reset-actions [data-reset-target]").length === 3);
+  ok("1b. judul blok reset (copy aktual: 'Reset & Hapus Data') + peringatan tidak bisa dibatalkan tetap ada", txt(d.getElementById("settings-danger-title")) === "Reset & Hapus Data" && /Reset tidak bisa dibatalkan/.test(txt(d.getElementById("data"))) && /Export backup dulu/.test(txt(d.getElementById("data"))), txt(d.getElementById("settings-danger-title"))); // peringatan ada di <p class="settings-info"> setelah #reset-actions
+  ok("1c. RESET SELURUH DATA belum dibuat", !d.querySelector('[data-reset-target="all"]') && !/Reset Seluruh Data/i.test(txt(d.getElementById("data"))));
+  ok("1d. placeholder 'Segera hadir' untuk reset sudah hilang; import & export tetap ada", !/Hapus & reset data/.test(txt(d.getElementById("data"))) && !!d.getElementById("btn-import-pick") && !!d.getElementById("btn-export-json") && !!d.getElementById("btn-export-csv"));
+  ok("1e. tombol reset memakai warna bahaya (beda dari tombol hijau export)", (() => { const danger = w.getComputedStyle(d.querySelector('[data-reset-target="transactions"]')).color; const primary = w.getComputedStyle(d.getElementById("btn-export-json")).color; const probe = d.createElement("span"); probe.style.color = "var(--color-danger)"; d.body.append(probe); const expected = w.getComputedStyle(probe).color; probe.remove(); return danger !== primary && danger === expected; })());
+
+  // ================= 2. modal per jenis =================
+  await openReset(d, "transactions");
+  ok("2a. modal reset transaksi: judul, label tombol, ringkasan 2 transaksi + budget/settings tetap", !overlay().hidden && txt(d.getElementById("reset-modal-title")) === "Hapus Semua Transaksi?" && txt(confirmBtn()) === "Hapus Transaksi" && summaryMap(d)["Transaksi dihapus"] === "2 transaksi" && summaryMap(d)["Budget & kategori"] === "tetap" && summaryMap(d)["Profil & preferensi"] === "tetap", JSON.stringify(summaryMap(d)));
+  ok("2b. membuka modal tidak mengubah storage", snapLS(w) === before && allKeys(w) === keysBefore);
+  d.getElementById("btn-reset-cancel").click(); await wait(300);
+  await openReset(d, "budget");
+  ok("2c. modal reset budget: kembali ke Rp2.400.000 + 5 kategori bawaan, transaksi tetap", txt(d.getElementById("reset-modal-title")) === "Reset Budget & Kategori?" && txt(confirmBtn()) === "Reset Budget" && summaryMap(d)["Budget bulanan"] === "kembali ke Rp2.400.000" && summaryMap(d)["Kategori"] === "kembali ke 5 kategori bawaan" && summaryMap(d)["Transaksi"] === "tetap (2 transaksi)", JSON.stringify(summaryMap(d)));
+  d.getElementById("btn-reset-cancel").click(); await wait(300);
+  await openReset(d, "settings");
+  ok("2d. modal reset settings: nama kembali ke Rizqi, preferensi default, transaksi & budget tetap", txt(d.getElementById("reset-modal-title")) === "Reset Profil & Preferensi?" && txt(confirmBtn()) === "Reset Profil" && summaryMap(d)["Nama pengguna"] === 'kembali ke "Rizqi"' && summaryMap(d)["Transaksi & budget"] === "tetap", JSON.stringify(summaryMap(d)));
+  ok("2e. satu modal dipakai bersama (hanya satu #reset-modal-overlay di DOM)", d.querySelectorAll("#reset-modal-overlay").length === 1 && d.querySelectorAll(".modal-overlay:not([hidden])").length === 1);
+  ok("2f. ringkasan dibangun tanpa elemen asing (textContent)", d.querySelectorAll("#reset-modal-summary img, #reset-modal-summary b, #reset-modal-summary script").length === 0);
+
+  // ================= 3. pembatalan =================
+  d.getElementById("btn-reset-cancel").click(); await wait(300);
+  ok("3a. Batal: modal tertutup, storage utuh, pesan dibatalkan", overlay().hidden && snapLS(w) === before && /Reset dibatalkan/.test(txt(fb())));
+  await openReset(d, "transactions");
+  d.dispatchEvent(new w.KeyboardEvent("keydown", { key: "Escape", bubbles: true })); await wait(300);
+  ok("3b. Escape: modal tertutup tanpa perubahan", overlay().hidden && snapLS(w) === before);
+  await openReset(d, "transactions");
+  overlay().dispatchEvent(new w.MouseEvent("click", { bubbles: true })); await wait(300);
+  ok("3c. klik overlay: modal tertutup tanpa perubahan", overlay().hidden && snapLS(w) === before);
+  await openReset(d, "transactions");
+  d.getElementById("reset-modal-close").click(); await wait(300);
+  ok("3d. tombol ✕: modal tertutup tanpa perubahan", overlay().hidden && snapLS(w) === before && allKeys(w) === keysBefore);
+
+  // ================= 4. Export dulu =================
+  await openReset(d, "transactions");
+  const files = []; let lastBlob = null;
+  const realCreate = w.URL.createObjectURL.bind(w.URL);
+  const realClick = w.HTMLAnchorElement.prototype.click;
+  w.URL.createObjectURL = (b) => { lastBlob = b; return "blob:stub"; };
+  w.HTMLAnchorElement.prototype.click = function () { if (this.download) files.push({ name: this.download, blob: lastBlob }); else realClick.call(this); };
+  d.getElementById("btn-reset-export-first").click(); await wait(200);
+  const exported = JSON.parse(await new Promise(res => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.readAsText(files[0].blob); }));
+  ok("4a. 'Export dulu' memakai export JSON 3A dengan DATA AKTIF", files.length === 1 && /^personal-finance-backup-/.test(files[0].name) && exported.data.transactions.length === 2 && exported.data.budget.monthly === 1234000 && exported.data.settings.name === "Rizqi Aktif");
+  ok("4b. modal tetap terbuka & storage tidak berubah setelah export", !overlay().hidden && snapLS(w) === before);
+  w.URL.createObjectURL = realCreate; w.HTMLAnchorElement.prototype.click = realClick;
+
+  // ================= 5. reset transaksi =================
+  let reload = stubReload(w);
+  confirmBtn().click(); await wait(300);
+  ok("5a. reset transaksi: HANYA financeData.transactions hilang", w.localStorage.getItem("financeData.transactions") === null && w.localStorage.getItem("financeData.budget") === JSON.stringify(LIVE_BUDGET) && w.localStorage.getItem("financeData.settings") === JSON.stringify(LIVE_SETTINGS));
+  ok("5b. key lain utuh & checkinDismissed tetap 'true'", w.localStorage.getItem("catatanLain") === "jangan-disentuh" && w.sessionStorage.getItem("checkinDismissed") === "true");
+  ok("5c. reload dipanggil tepat 1x setelah operasi sukses", reload.n === 1);
+  ok("5d. notice sukses tersimpan di key data notice", /Semua transaksi sudah dihapus/.test(w.sessionStorage.getItem("financeData.importNotice") || ""));
+  ({ d, w } = await load());
+  ok("5e. setelah reload: 0 transaksi, budget & nama lama tetap, notice tampil sekali", w.financeDataTransactionsLength === undefined && w.getUserName() === "Rizqi Aktif" && w.getCategory("makanan").name === "Makanan Custom" && /Semua transaksi sudah dihapus/.test(txt(d.getElementById("settings-data-status"))) && w.sessionStorage.getItem("financeData.importNotice") === null);
+  ({ d, w } = await load("index.html"));
+  ok("5f. dashboard setelah reset transaksi: saldo Rp0 & daftar kosong, tanpa error", /Rp0/.test(txt(d.getElementById("balance-value"))) || txt(d.getElementById("balance-value")) === "••••••••", txt(d.getElementById("balance-value")));
+
+  // ================= 6. reset budget =================
+  await seed(w); ({ d, w } = await load());
+  reload = stubReload(w);
+  await openReset(d, "budget");
+  confirmBtn().click(); await wait(300);
+  ok("6a. reset budget: HANYA financeData.budget hilang", w.localStorage.getItem("financeData.budget") === null && w.localStorage.getItem("financeData.transactions") === JSON.stringify(LIVE_TX) && w.localStorage.getItem("financeData.settings") === JSON.stringify(LIVE_SETTINGS));
+  ok("6b. key lain & checkinDismissed utuh; reload 1x", w.localStorage.getItem("catatanLain") === "jangan-disentuh" && w.sessionStorage.getItem("checkinDismissed") === "true" && reload.n === 1);
+  ({ d, w } = await load("budget.html"));
+  ok("6c. setelah reload: budget kembali Rp2.400.000 + 5 kategori bawaan, transaksi tetap", /Rp2\.400\.000/.test(txt(d.getElementById("budget-card"))) && d.querySelectorAll("#category-list .category-card:not(.category-card--other)").length === 5 && !!d.querySelector('[data-category="makanan"]') && txt(d.querySelector('[data-category="makanan"]')).includes("Makanan"));
+  ({ d, w } = await load());
+  ok("6d. transaksi tidak terhapus oleh reset budget", JSON.parse(w.localStorage.getItem("financeData.transactions")).length === 2);
+
+  // ================= 7. reset settings =================
+  await seed(w); ({ d, w } = await load());
+  reload = stubReload(w);
+  await openReset(d, "settings");
+  confirmBtn().click(); await wait(300);
+  ok("7a. reset settings: HANYA financeData.settings hilang", w.localStorage.getItem("financeData.settings") === null && w.localStorage.getItem("financeData.transactions") === JSON.stringify(LIVE_TX) && w.localStorage.getItem("financeData.budget") === JSON.stringify(LIVE_BUDGET));
+  ok("7b. key lain & checkinDismissed utuh; reload 1x", w.localStorage.getItem("catatanLain") === "jangan-disentuh" && w.sessionStorage.getItem("checkinDismissed") === "true" && reload.n === 1);
+  ({ d, w } = await load());
+  ok("7c. setelah reload: nama kembali 'Rizqi', switch kembali default (hide off, checkin on)", d.getElementById("settings-name").value === "Rizqi" && d.getElementById("pref-hide-balance").checked === false && d.getElementById("pref-show-checkin").checked === true);
+
+  // ================= 8. pendingImport & guard =================
+  await seed(w); ({ d, w } = await load());
+  await pickFile(d, w, "backup.json", IMPORT_FILE);
+  ok("8a. pendingImport terisi setelah file valid", !!w.getPendingImport());
+  d.getElementById("btn-import-cancel").click(); await wait(300);
+  await pickFile(d, w, "backup.json", IMPORT_FILE);
+  d.getElementById("btn-import-cancel").click(); await wait(250);
+  await pickFile(d, w, "backup.json", IMPORT_FILE);
+  reload = stubReload(w);
+  await openReset(d, "transactions");
+  confirmBtn().click(); await wait(300);
+  ok("8b. reset membersihkan pendingImport (hasil pemeriksaan file lama tidak dipakai)", w.getPendingImport() === null && reload.n === 1);
+  ok("8c. data yang ditulis bukan dari file import (budget lama tetap, bukan 999.000)", JSON.parse(w.localStorage.getItem("financeData.budget")).monthly === 1234000);
+
+  // klik ganda
+  await seed(w); ({ d, w } = await load());
+  reload = stubReload(w);
+  await openReset(d, "transactions");
+  let removeCalls = 0;
+  const realRemove = w.localStorage.removeItem.bind(w.localStorage);
+  w.localStorage.removeItem = (k) => { removeCalls += 1; return realRemove(k); };
+  confirmBtn().click(); confirmBtn().click(); confirmBtn().click(); await wait(300);
+  delete w.localStorage.removeItem;
+  ok("8d. klik ganda: hanya satu operasi (1 removeItem, reload 1x)", removeCalls === 1 && reload.n === 1, `remove=${removeCalls} reload=${reload.n}`);
+  ok("8e. tombol dinonaktifkan selama proses", confirmBtn().disabled === true);
+
+  // ================= 9. kegagalan & rollback =================
+  const failReset = async (target, opts = {}) => {
+    await seed(w, opts); ({ d, w } = await load());
+    await openReset(d, target);
+    const snapBefore = snapLS(w); const kBefore = allKeys(w);
+    const rl = stubReload(w);
+    const real = w.localStorage.removeItem.bind(w.localStorage);
+    w.localStorage.removeItem = () => { throw new DOMException("SecurityError", "SecurityError"); };
+    d.getElementById("btn-reset-confirm").click(); await wait(300);
+    delete w.localStorage.removeItem;
+    return { snapBefore, kBefore, snapAfter: snapLS(w), kAfter: allKeys(w), reloads: rl.n, d, w };
+  };
+  let r = await failReset("transactions");
+  ok("9a. removeItem gagal (transaksi) -> rollback, data lama utuh, tidak reload", r.snapAfter === r.snapBefore && r.reloads === 0 && r.kAfter === r.kBefore);
+  ok("9b. pesan gagal + data dikembalikan tampil", /gagal dijalankan/.test(txt(r.d.getElementById("settings-data-status"))) && /dikembalikan seperti semula/.test(txt(r.d.getElementById("settings-data-status"))));
+  ok("9c. tidak ada notice sukses saat gagal & checkinDismissed utuh", r.w.sessionStorage.getItem("financeData.importNotice") === null && r.w.sessionStorage.getItem("checkinDismissed") === "true");
+  r = await failReset("budget");
+  ok("9d. removeItem gagal (budget) -> rollback penuh, tidak reload", r.snapAfter === r.snapBefore && r.reloads === 0);
+  r = await failReset("settings");
+  ok("9e. removeItem gagal (settings) -> rollback penuh, tidak reload", r.snapAfter === r.snapBefore && r.reloads === 0);
+  r = await failReset("settings", { noSettings: true });
+  ok("9f. key yang sebelumnya TIDAK ADA tetap tidak ada setelah rollback", r.w.localStorage.getItem("financeData.settings") === null && r.kAfter === r.kBefore);
+
+  // rollback gagal -> pesan kritis, modal tetap terbuka, tidak reload
+  await seed(w); ({ d, w } = await load());
+  await openReset(d, "transactions");
+  const rl2 = stubReload(w);
+  const realRemove2 = w.localStorage.removeItem.bind(w.localStorage);
+  const realSet2 = w.localStorage.setItem.bind(w.localStorage);
+  w.localStorage.removeItem = () => { throw new DOMException("SecurityError", "SecurityError"); };
+  w.localStorage.setItem = () => { throw new DOMException("SecurityError", "SecurityError"); };
+  confirmBtn().click(); await wait(300);
+  delete w.localStorage.removeItem; delete w.localStorage.setItem;
+  ok("9g. rollback gagal -> pesan kritis di modal, modal TETAP terbuka, tidak reload", /belum bisa dikembalikan sepenuhnya/.test(txt(d.getElementById("reset-modal-status"))) && !overlay().hidden && rl2.n === 0);
+
+  // ================= 10. unit applyDataReset =================
+  await seed(w); ({ d, w } = await load());
+  ok("10a. applyDataReset menolak target tidak dikenal (termasuk 'all')", ["all", "", "__proto__", "constructor"].every(t => { const res = w.applyDataReset(t); return !res.ok && res.code === "unknown-target"; }) && snapLS(w) === before);
+  const appSrc = await fetchAppJs(BASE);
+  ok("10b. DATA_RESET_TARGETS hanya 3 target & tiap target satu key financeData.*", (() => { const block = appSrc.match(/const DATA_RESET_TARGETS = \{([\s\S]*?)\};/); if (!block) return false; const body = block[1]; const entries = body.match(/^\s*(\w+):/gm) || []; return entries.map(x => x.trim().replace(":", "")).sort().join() === "budget,settings,transactions" && (body.match(/STORAGE_KEY/g) || []).length === 3 && !/all\s*:/.test(body); })());
+  ok("10c. removeStorageKeys hanya memakai removeItem & melempar saat gagal", /removeItem/.test(String(w.removeStorageKeys)) && !/clear\(/.test(String(w.removeStorageKeys)) && !/try/.test(String(w.removeStorageKeys)));
+  ok("10d. snapshotStorage/rollbackStorage menerima daftar key (import lama tetap default)", w.snapshotStorage(["financeData.budget"]) && Object.keys(w.snapshotStorage(["financeData.budget"])).join() === "financeData.budget" && Object.keys(w.snapshotStorage()).length === 3);
+  ok("10e. applyDataReset tidak menyentuh DOM/reload/checkinDismissed", !/document\.|getElementById|innerHTML|reloadPage|checkinDismissed/.test(String(w.applyDataReset)));
+  ok("10f. satu guard bersama dataOpBusy untuk import & reset", /dataOpBusy/.test(String(w.setupSettingsImport)) && /dataOpBusy/.test(String(w.setupSettingsReset)));
+
+  // ================= 11. import & export tetap berjalan =================
+  await seed(w); ({ d, w } = await load());
+  await pickFile(d, w, "backup.json", IMPORT_FILE);
+  reload = stubReload(w);
+  d.getElementById("btn-import-apply").click(); await wait(300);
+  ok("11a. import masih bekerja penuh setelah generalisasi helper", reload.n === 1 && JSON.parse(w.localStorage.getItem("financeData.transactions")).length === 1 && JSON.parse(w.localStorage.getItem("financeData.budget")).monthly === 999000 && /Import berhasil/.test(w.sessionStorage.getItem("financeData.importNotice") || ""));
+  ({ d, w } = await load());
+  ok("11b. notice import tetap tampil sekali setelah reload", /Import berhasil/.test(txt(d.getElementById("settings-data-status"))) && w.sessionStorage.getItem("financeData.importNotice") === null);
+  const files2 = []; let blob2 = null;
+  const rc = w.URL.createObjectURL.bind(w.URL); const rcl = w.HTMLAnchorElement.prototype.click;
+  w.URL.createObjectURL = (b) => { blob2 = b; return "blob:stub"; };
+  w.HTMLAnchorElement.prototype.click = function () { if (this.download) files2.push({ name: this.download, blob: blob2 }); else rcl.call(this); };
+  d.getElementById("btn-export-json").click(); d.getElementById("btn-export-csv").click(); await wait(200);
+  ok("11c. export JSON & CSV tetap berjalan", files2.length === 2 && /\.json$/.test(files2[0].name) && /\.csv$/.test(files2[1].name));
+  w.URL.createObjectURL = rc; w.HTMLAnchorElement.prototype.click = rcl;
+
+  // ================= 12. keamanan & halaman lain =================
+  const appJs = await fetchAppJs(BASE);
+  const clean = appJs.replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, "");
+  ok("12a. tidak ada localStorage.clear(), fetch, eval, new Function di app.js", !/localStorage\.clear\(\)/.test(clean) && !/[^.\w]eval\s*\(|new Function|XMLHttpRequest|\bfetch\s*\(/.test(clean));
+  ok("12b. reset seluruh data belum ada di kode", !/DATA_RESET_TARGETS\.all|resetAllData|"all":/.test(clean) && !/data-reset-target="all"/.test(await (await fetch(BASE + "settings.html")).text()));
+  for (const p of ["index.html", "transactions.html", "analytics.html", "budget.html"]) {
+    const r2 = await load(p);
+    const errs = []; r2.w.addEventListener("error", e => errs.push(e.message));
+    await wait(150);
+    ok(`12c. ${p} render normal tanpa error`, errs.length === 0 && !!r2.d.querySelector(".app"));
+  }
+
+  // ================= 13. responsif =================
+  for (const wd of [320, 375, 430, 768, 1024, 1280]) {
+    const r3 = await load("settings.html", wd);
+    await openReset(r3.d, "budget");
+    const de = r3.d.documentElement;
+    const box = r3.d.querySelector("#reset-modal-overlay .modal").getBoundingClientRect();
+    const btns = ["btn-reset-cancel", "btn-reset-confirm", "btn-reset-export-first"].map(id => r3.d.getElementById(id).getBoundingClientRect());
+    const inside = btns.every(b => b.right <= box.right + 0.5 && b.left >= box.left - 0.5 && b.height >= 36);
+    const rowsOk = [...r3.d.querySelectorAll("#reset-modal-summary .settings-meta-row, #reset-actions .settings-row")].every(el => el.scrollWidth <= el.clientWidth + 1);
+    ok(`13-${wd}. tanpa overflow; modal & tombol reset rapi`, de.scrollWidth === de.clientWidth && inside && rowsOk && box.width <= de.clientWidth, `sw=${de.scrollWidth} cw=${de.clientWidth}`);
+  }
+  ok("14. console 0 error", errors.length === 0, errors.join(" | "));
+  try { w.localStorage.clear(); w.sessionStorage.clear(); } catch (e) {}
+  document.getElementById("r").textContent = out.join("\n");
+})().catch(e => { out.push("EXCEPTION " + e.stack); document.getElementById("r").textContent = out.join("\n"); });
+</script>

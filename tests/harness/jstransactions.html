@@ -1,0 +1,196 @@
+<!doctype html>
+<meta charset="utf-8">
+<pre id="r">running…</pre>
+<script>
+const out = []; const ok = (n, c, x = "") => out.push(`${c ? "PASS" : "FAIL"} ${n}${x ? "  (" + x + ")" : ""}`);
+const wait = (ms) => new Promise(r => setTimeout(r, ms));
+const FRONT = new URL("../../frontend/", location.href).href;
+const HERE = location.href.replace(/[^/]*$/, "");
+const pad = (n) => String(n).padStart(2, "0");
+const iso = (dt) => `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`;
+const today = new Date(); today.setHours(0, 0, 0, 0); const T = iso(today);
+const rel = (n) => iso(new Date(today.getFullYear(), today.getMonth(), today.getDate() + n));
+const lastPrev = new Date(today.getFullYear(), today.getMonth(), 0);
+const TX = [
+  { id: 9, title: "Makan Siang", category: "makanan", type: "expense", amount: 25000, isoDate: T, time: "" },
+  { id: 8, title: "Gaji Bulanan", category: "lainnya", type: "income", amount: 5000000, isoDate: T, time: "" },
+  { id: 7, title: "Kopi Sore", category: "makanan", type: "expense", amount: 18000, isoDate: T, time: "14:10" },
+  { id: 6, title: "Bensin", category: "bensin", type: "expense", amount: 40000, isoDate: rel(-1), time: "" },
+  { id: 5, title: "Nonton", category: "hiburan", type: "expense", amount: 60000, isoDate: rel(-1), time: "" },
+  { id: 4, title: "Tagihan Bulan Lalu", category: "tagihan", type: "expense", amount: 310000, isoDate: iso(lastPrev), time: "" },
+  { id: 3, title: "Bonus", category: "lainnya", type: "income", amount: 750000, isoDate: rel(-3), time: "" },
+  { id: 2, title: "Tanpa Tanggal", category: "makanan", type: "expense", amount: 1000, isoDate: "", time: "" },
+  { id: 1, title: "Kategori Hilang", category: "hantu", type: "expense", amount: 5000, isoDate: T, time: "" },
+];
+const KEYS = ["financeData.transactions", "financeData.budget", "financeData.settings", "financeData.goals"];
+const txt = (el) => (el ? el.textContent.replace(/\s+/g, " ").trim() : "");
+const $ = (d, id) => d.getElementById(id);
+
+let frame = null;
+async function load(url, width = 390) {
+  if (frame) frame.remove();
+  frame = document.createElement("iframe"); frame.width = width; frame.height = 2200; frame.src = url; document.body.appendChild(frame);
+  const r = { errors: [], warns: [] };
+  await new Promise(res => frame.onload = res);
+  r.d = frame.contentDocument; r.w = frame.contentWindow;
+  r.w.addEventListener("error", e => r.errors.push(e.message));
+  r.w.console.error = (...a) => r.errors.push("console.error " + a.join(" ")); r.w.console.warn = (...a) => r.warns.push(a.join(" "));
+  await wait(350);
+  return r;
+}
+async function open(url, { tx = TX, width = 390 } = {}) {
+  if (!frame) await load(new URL("../fixtures/pages/jsf_page.html", location.href).href);
+  const w0 = frame.contentWindow;
+  try { w0.localStorage.clear(); w0.sessionStorage.clear(); if (tx !== null) w0.localStorage.setItem("financeData.transactions", typeof tx === "string" ? tx : JSON.stringify(tx)); } catch (e) {}
+  return load(url, width);
+}
+const snapLS = (w) => JSON.stringify(KEYS.map(k => w.localStorage.getItem(k)));
+const stored = (w) => JSON.parse(w.localStorage.getItem("financeData.transactions"));
+const click = async (el) => { el.focus(); el.click(); await wait(120); };
+const type = (d, id, v) => { const f = $(d, id); f.value = v; f.dispatchEvent(new Event("input", { bubbles: true })); f.dispatchEvent(new Event("change", { bubbles: true })); };
+const key = (d, k, extra = {}) => { const ev = new KeyboardEvent("keydown", Object.assign({ key: k, bubbles: true, cancelable: true }, extra)); d.dispatchEvent(ev); return ev; };
+const items = (d) => [...d.querySelectorAll("#all-transaction-list .transaction-item")];
+const editOf = (d, id) => d.querySelector(`#all-transaction-list [data-action="edit"][data-id="${id}"]`);
+const delOf = (d, id) => d.querySelector(`#all-transaction-list [data-action="delete"][data-id="${id}"]`);
+const activeOf = (d) => { const e = d.activeElement; if (!e || e === d.body || e.disabled) return "body"; return e.id || e.dataset.id || e.dataset.date || e.getAttribute("aria-label") || e.className; };
+const norm = (h) => h.replace(/\s+/g, " ").replace(/<script src="[^"]*"><\/script>/g, "").replace(/<!--[\s\S]*?-->/g, "").replace(/ is-open"/g, '"').replace(/ no-transition"/g, '"').replace(/style="left: [\d.]+px; width: [\d.]+px;"/g, "").trim(); // .is-open/.no-transition/inline indikator = rAF (artefak timing headless)
+
+(async () => {
+  const coreSrc = await (await fetch(FRONT + "js/core.js")).text();
+  const sharedSrc = await (await fetch(FRONT + "js/transactions-shared.js")).text();
+  const txSrc = await (await fetch(FRONT + "js/transactions.js")).text();
+  const dashSrc = await (await fetch(FRONT + "js/dashboard.js")).text();
+  const appSrc = await (await fetch(new URL("../fixtures/legacy/app.js", location.href).href)).text() /* referensi legacy beku (app.js dihapus pada JS-6) */;
+  const html = await (await fetch(FRONT + "transactions.html")).text();
+  const legacyHtml = await (await fetch(new URL("../fixtures/pages/transactions_legacy.html", location.href).href)).text();
+  const TXJS = ["DATE_LIST_LIMIT", "countTransactionsByDate", "renderCalendar", "hasActiveFilter", "isFilterMode", "SORT_LABELS", "getFilteredTransactions", "sortTransactions", "renderAllTransactionsList", "syncFilterControls", "setupTransactionFilters", "setupCalendar", "initTransactionsPage"];
+
+  /* ===================== 1. Parse & dependency ===================== */
+  let r = await open(FRONT + "transactions.html"); let { d, w } = r;
+  ok("1a. transactions.html memuat core.js, transactions-shared.js, transactions.js (urutan itu), tanpa app.js", [...d.querySelectorAll("script[src]")].map(x => x.getAttribute("src")).join(",") === "js/core.js,js/transactions-shared.js,js/transactions.js");
+  ok("1b. ketiga file terparse & dieksekusi tanpa error/warn", r.errors.length === 0 && r.warns.length === 0, r.errors.concat(r.warns).join(" | "));
+  const fnNames = TXJS.filter(n => !["DATE_LIST_LIMIT", "SORT_LABELS"].includes(n));
+  ok("1c. fungsi transactions + shared (setupTransactionModal, handleTransactionListClick, refreshDashboard) + core (renderTransactionItem, formatDateID, groupTransactionsByDay, getSortedTransactions, escapeHtml) tersedia", fnNames.every(n => typeof w[n] === "function") && ["setupTransactionModal", "handleTransactionListClick", "refreshDashboard", "renderTransactionItem", "renderTransactionListItems", "showTransactionFeedback", "formatDateID", "toIsoDate", "groupTransactionsByDay", "getSortedTransactions", "getTransactionAmountMeta", "getDayLabel", "escapeHtml", "createModalController", "hasCategory"].every(n => typeof w[n] === "function"));
+  ok("1d. state shared tersedia: transactionsPage (bulan ini, hari ini), openTransactionModal fungsi, confirmDeleteTransaction fungsi (halaman punya konfirmasi)", (() => { try { const p = w.eval("transactionsPage"); return p.month === today.getMonth() && p.year === today.getFullYear() && p.selected === T && typeof w.eval("openTransactionModal") === "function" && typeof w.eval("confirmDeleteTransaction") === "function"; } catch (e) { return false; } })());
+  const names = (s) => s.split("\n").map(l => (l.match(/^(?:function|const|let)\s+([A-Za-z_$][\w$]*)/) || [])[1]).filter(Boolean);
+  const nc = names(coreSrc), ns = names(sharedSrc), nt = names(txSrc);
+  ok("1e. tidak ada deklarasi ganda antar core/shared/transactions", new Set([...nc, ...ns, ...nt]).size === nc.length + ns.length + nt.length);
+  ok("1f. transactions.js berisi persis 13 deklarasi yang dimaksud, urutan asli", nt.length === 13 && nt.join() === TXJS.join(), nt.join());
+  ok("1g. transactions.js tidak menyalin fungsi core/shared", !/^function (setupTransactionModal|handleTransactionListClick|refreshDashboard|renderTransactionItem|renderTransactionListItems|showTransactionFeedback|formatDateID|groupTransactionsByDay|getSortedTransactions|escapeHtml|createModalController|recalcFromTransactions|saveTransactions)\b/m.test(txSrc) && !/^(const|let) (transactionsPage|openTransactionModal|confirmDeleteTransaction|financeData|nextTransactionId|openModals)\b/m.test(txSrc));
+  ok("1h. 11 fungsi identik byte-per-byte dengan app.js", fnNames.every(n => { const m = new RegExp(`^function ${n}\\([\\s\\S]*?\\n\\}`, "m"); const a = m.exec(appSrc), b = m.exec(txSrc); return a && b && a[0] === b[0]; }));
+  ok("1i. tidak ada DOMContentLoaded / keydown / document|window listener di transactions.js", !txSrc.includes('addEventListener("DOMContentLoaded"') && !txSrc.includes('addEventListener("keydown"') && !/(document|window)\.addEventListener\(/.test(txSrc));
+  ok("1j. listener global halaman ini = core (7) + shared (1: resize) = 8; keydown global tepat 1 (modal) — dropdown dashboard tidak dimuat", (coreSrc.match(/(document|window)\.addEventListener\(/g) || []).length === 7 && (sharedSrc.match(/(document|window)\.addEventListener\(/g) || []).length === 1 && (coreSrc + sharedSrc + txSrc).split('addEventListener("keydown"').length - 1 === 1);
+  ok("1k. fungsi dashboard/goals/analytics/budget/settings memang absen (isolasi)", ["initDashboard", "renderSummary", "renderRecentTransactions", "setupHeaderActions", "renderGoalList", "renderAnalytics", "setupBudgetEditor", "renderCategoryList", "validateBackup"].every(n => typeof w[n] === "undefined"));
+  ok("1l. transactions.html vs transactions_legacy.html identik selain tag script & tag <link> CSS (JS-6: legacy = style.css tunggal, sekarang base.css + transactions.css)", (() => { const strip = (h) => h.replace(/<!--[\s\S]*?-->/g, "").replace(/\s*<script src="[^"]*"><\/script>/g, "").replace(/\s*<link rel="stylesheet" href="[^"]*\.css" \/>/g, "").replace(/\s+/g, " "); return strip(html) === strip(legacyHtml) && strip(html).length > 5000; })());
+  ok("1m. dashboard.js & shared tidak berubah (fungsi yang dipakai dashboard tetap di shared)", ["setupTransactionModal", "handleTransactionListClick", "refreshDashboard", "transactionsPage", "openTransactionModal", "confirmDeleteTransaction"].every(n => new RegExp(`^(?:function|const|let)\\s+${n}\\b`, "m").test(sharedSrc)) && /^function initDashboard\(/m.test(dashSrc));
+
+  /* ===================== 2. Perilaku (ringkas; detail: v21test, calendartest, uxflowtest, modaltest) ===================== */
+  const before = snapLS(w);
+  ok("2a. membuka halaman tidak menulis storage", snapLS(w) === before && stored(w).length === 9);
+  const MONTHS_L = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"];
+  const dateTitle = (dt) => `${dt.getDate()} ${MONTHS_L[dt.getMonth()]} ${dt.getFullYear()}`;
+  ok("2b. daftar hari ini: 4 transaksi, tampil 3 (DATE_LIST_LIMIT) + tombol 'Lihat semua'; judul = tanggal hari ini", items(d).length === 3 && !$(d, "btn-toggle-all").hidden && txt($(d, "selected-date-title")) === dateTitle(today), txt($(d, "selected-date-title")));
+  await click($(d, "btn-toggle-all"));
+  ok("2b2. Lihat semua: 4 item tampil (3 pengeluaran + 1 pemasukan)", items(d).length === 4);
+  ok("2c. pemasukan bertanda +, pengeluaran −; nominal Rupiah", /\+\s?Rp5\.000\.000/.test(txt($(d, "all-transaction-list"))) && /[−-]\s?Rp25\.000/.test(txt($(d, "all-transaction-list"))));
+  ok("2d. kategori terhapus tampil sebagai Lainnya dengan emoji cadangan; item punya tombol edit & hapus", (() => { const it = items(d).find(i => /Kategori Hilang/.test(txt(i))); return it && /Lainnya/.test(txt(it)) && /💼/.test(txt(it)) && it.querySelector('[data-action="edit"]') && it.querySelector('[data-action="delete"]'); })());
+  ok("2e. kalender: bulan ini, hari ini terpilih, titik pada tanggal bertransaksi (hari ini, kemarin, -3)", d.querySelector(`.calendar-day[data-date="${T}"]`).getAttribute("aria-pressed") === "true" && [T, rel(-1), rel(-3)].every(dt => d.querySelector(`.calendar-day[data-date="${dt}"] .calendar-dot`)));
+  await click(d.querySelector(`.calendar-day[data-date="${rel(-1)}"]`));
+  ok("2f. klik tanggal kemarin: 2 item, judul = tanggal kemarin", items(d).length === 2 && txt($(d, "selected-date-title")) === dateTitle(new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1)), txt($(d, "selected-date-title")));
+  await click(d.querySelector('[data-cal-nav="-1"]'));
+  ok("2g. bulan sebelumnya: kalender berpindah, tanggal terakhir bulan lalu bertitik", d.querySelector(`.calendar-day[data-date="${iso(lastPrev)}"] .calendar-dot`) !== null);
+  await click(d.querySelector(`.calendar-day[data-date="${iso(lastPrev)}"]`));
+  ok("2h. pilih tanggal bulan lalu: 1 item Tagihan", items(d).length === 1 && /Tagihan Bulan Lalu/.test(txt($(d, "all-transaction-list"))));
+  // filter & cari
+  await click($(d, "btn-filter-toggle"));
+  ok("2i. panel filter terbuka", !$(d, "filter-panel").hidden);
+  await click(d.querySelector('[data-filter-type="income"]'));
+  ok("2j. filter pemasukan: mode filter (lintas tanggal), 2 pemasukan (Gaji, Bonus), tanpa pengeluaran", items(d).length === 2 && /Gaji Bulanan/.test(txt($(d, "all-transaction-list"))) && /Bonus/.test(txt($(d, "all-transaction-list"))) && !/Makan Siang/.test(txt($(d, "all-transaction-list"))));
+  type(d, "tx-search", "bonus"); await wait(150);
+  ok("2k. cari 'bonus' + filter pemasukan: 1 item", items(d).length === 1 && /Bonus/.test(txt($(d, "all-transaction-list"))));
+  type(d, "tx-search", "zzz"); await wait(150);
+  ok("2l. cari tanpa hasil: empty state + tombol Hapus Filter", items(d).length === 0 && d.querySelector("#all-transaction-list [data-filter-reset]") !== null);
+  await click($(d, "btn-clear-filter"));
+  ok("2m. Hapus Filter: kembali ke mode tanggal, cari kosong", $(d, "tx-search").value === "" && items(d).length >= 1);
+  await click($(d, "btn-filter-toggle")); type(d, "filter-sort", "highest"); await wait(150); await click(d.querySelector('[data-filter-type="all"]')); type(d, "tx-search", "a"); await wait(150);
+  const amounts = items(d).map(i => Number((txt(i).match(/Rp([\d.]+)/) || [0, "0"])[1].replace(/\./g, "")));
+  ok("2n. urutkan nominal terbesar: daftar menurun", amounts.length > 2 && amounts.every((v, i) => i === 0 || v <= amounts[i - 1]), amounts.join(","));
+  await click($(d, "btn-clear-filter"));
+  // edit
+  r = await open(FRONT + "transactions.html"); ({ d, w } = r);
+  await click(editOf(d, 9));
+  ok("2o. edit: modal terisi (Makan Siang, makanan, 25.000, hari ini, pengeluaran aktif), fokus tombol tutup, body lock", !$(d, "transaction-modal-overlay").hidden && $(d, "field-title").value === "Makan Siang" && $(d, "field-category").value === "makanan" && $(d, "field-amount").value === "25.000" && $(d, "field-date").value === T && d.activeElement === $(d, "modal-close") && d.body.classList.contains("is-modal-open"));
+  type(d, "field-amount", ""); $(d, "transaction-form").requestSubmit(); await wait(120);
+  ok("2p. validasi edit: nominal kosong ditolak, modal tetap terbuka, storage utuh", !$(d, "transaction-modal-overlay").hidden && !$(d, "field-amount").checkValidity() && stored(w)[0].amount === 25000);
+  type(d, "field-amount", "30000"); type(d, "field-title", "Makan Siang Enak"); $(d, "transaction-form").requestSubmit(); await wait(300);
+  ok("2q. edit tersimpan: id tetap, nominal 30.000, daftar & feedback diperbarui (refreshDashboard guard aman), fokus kembali ke tombol Edit", stored(w)[0].id === 9 && stored(w)[0].amount === 30000 && stored(w)[0].title === "Makan Siang Enak" && /Makan Siang Enak/.test(txt($(d, "all-transaction-list"))) && /Perubahan tersimpan/.test(txt($(d, "transaction-feedback"))) && d.activeElement === editOf(d, 9) && r.errors.length === 0);
+  await click(editOf(d, 7)); type(d, "field-date", rel(-5)); $(d, "transaction-form").requestSubmit(); await wait(300);
+  ok("2r. edit tanggal: kalender & daftar pindah ke tanggal baru (transaksi tidak 'hilang')", d.querySelector(`.calendar-day[data-date="${rel(-5)}"]`).getAttribute("aria-pressed") === "true" && /Kopi Sore/.test(txt($(d, "all-transaction-list"))));
+  // hapus
+  r = await open(FRONT + "transactions.html"); ({ d, w } = r);
+  await click(delOf(d, 9));
+  ok("2s. hapus: konfirmasi terbuka menyebut judul & nominal, fokus di modal (bukan tombol Hapus)", !$(d, "confirm-modal-overlay").hidden && /Makan Siang/.test(txt($(d, "confirm-title"))) && /Rp25\.000/.test(txt($(d, "confirm-text"))) && $(d, "confirm-modal-overlay").contains(d.activeElement) && d.activeElement !== $(d, "confirm-delete"));
+  key(d, "Escape"); await wait(300);
+  ok("2t. Escape: batal, storage utuh, fokus kembali ke tombol Hapus", $(d, "confirm-modal-overlay").hidden && stored(w).length === 9 && d.activeElement === delOf(d, 9));
+  await click(delOf(d, 9)); await click($(d, "confirm-delete")); await wait(250);
+  ok("2u. hapus: id 9 hilang, 8 tersisa, daftar & feedback diperbarui, transaksi lain utuh", stored(w).length === 8 && !stored(w).some(t => t.id === 9) && !/Makan Siang/.test(txt($(d, "all-transaction-list"))) && /dihapus/.test(txt($(d, "transaction-feedback"))) && stored(w).map(t => t.id).join() === "8,7,6,5,4,3,2,1");
+  // focus trap di modal edit
+  await click(editOf(d, 8));
+  const f = [...$(d, "transaction-modal-overlay").querySelectorAll("button:not([disabled]), input:not([disabled]):not([type=hidden]), select")].filter(el => el.getClientRects().length);
+  f[f.length - 1].focus(); let ev = key(d, "Tab");
+  ok("2v. focus trap: Tab dari terakhir berputar ke pertama", ev.defaultPrevented && d.activeElement === f[0]);
+  $(d, "transaction-modal-overlay").dispatchEvent(new MouseEvent("click", { bubbles: true })); await wait(300);
+  ok("2w. klik overlay menutup + restore focus + body lepas", $(d, "transaction-modal-overlay").hidden && d.activeElement === editOf(d, 8) && !d.body.classList.contains("is-modal-open"));
+  await click($(d, "btn-filter-toggle")); type(d, "tx-search", "tanpa tanggal"); await wait(150);
+  ok("2x. transaksi tanpa tanggal: tersimpan, tidak muncul di kalender, muncul lewat cari (mode filter) dengan label 'Tanpa tanggal'", stored(w).some(t => t.id === 2 && t.isoDate === "") && items(d).length === 1 && /Tanpa tanggal/i.test(txt($(d, "all-transaction-list"))));
+  r = await open(FRONT + "transactions.html", { tx: [] }); ({ d, w } = r);
+  ok("2y. tanpa transaksi: empty state, kalender tanpa titik, 0 error", items(d).length === 0 && /Belum ada|Tidak ada/.test(txt($(d, "all-transaction-list"))) && !d.querySelector(".calendar-dot") && r.errors.length === 0);
+  r = await open(FRONT + "transactions.html", { tx: "{rusak" }); ({ d, w } = r);
+  ok("2z. storage korup: halaman tetap render, 0 error, data tidak ditimpa", $(d, "calendar").children.length > 0 && r.errors.length === 0 && w.localStorage.getItem("financeData.transactions") === "{rusak");
+
+  /* ===================== 3. Kesetaraan vs app.js (transactions_legacy.html) ===================== */
+  const scenarios = [
+    ["awal", {}, async () => {}],
+    ["kosong", { tx: [] }, async () => {}],
+    ["korup", { tx: "{rusak" }, async () => {}],
+    ["pilih kemarin", {}, async (d) => { await click(d.querySelector(`.calendar-day[data-date="${rel(-1)}"]`)); }],
+    ["bulan sebelumnya + pilih tanggal", {}, async (d) => { await click(d.querySelector('[data-cal-nav="-1"]')); await click(d.querySelector(`.calendar-day[data-date="${iso(lastPrev)}"]`)); }],
+    ["filter pemasukan", {}, async (d) => { await click($(d, "btn-filter-toggle")); await click(d.querySelector('[data-filter-type="income"]')); }],
+    ["cari + urut terbesar", {}, async (d) => { await click($(d, "btn-filter-toggle")); type(d, "filter-sort", "highest"); type(d, "tx-search", "a"); await wait(150); }],
+    ["cari tanpa hasil", {}, async (d) => { type(d, "tx-search", "zzz"); await wait(150); }],
+    ["hapus filter", {}, async (d) => { await click($(d, "btn-filter-toggle")); await click(d.querySelector('[data-filter-type="income"]')); await click($(d, "btn-clear-filter")); }],
+    ["modal edit terbuka", {}, async (d) => { await click(editOf(d, 9)); await wait(600); }],
+    ["validasi edit gagal", {}, async (d) => { await click(editOf(d, 9)); type(d, "field-title", ""); $(d, "transaction-form").requestSubmit(); await wait(300); }],
+    ["setelah edit", {}, async (d) => { await click(editOf(d, 9)); type(d, "field-amount", "30000"); $(d, "transaction-form").requestSubmit(); await wait(300); }],
+    ["edit ubah tanggal", {}, async (d) => { await click(editOf(d, 7)); type(d, "field-date", rel(-5)); $(d, "transaction-form").requestSubmit(); await wait(300); }],
+    ["konfirmasi hapus terbuka", {}, async (d) => { await click(delOf(d, 9)); await wait(300); }],
+    ["setelah hapus", {}, async (d) => { await click(delOf(d, 9)); await click($(d, "confirm-delete")); await wait(300); }],
+    ["Escape di konfirmasi", {}, async (d) => { await click(delOf(d, 9)); key(d, "Escape"); await wait(300); }],
+    ["Lihat semua (toggle-all)", {}, async (d) => { const b = $(d, "btn-toggle-all"); if (b && !b.hidden) await click(b); }],
+  ];
+  for (const width of [320, 390, 1280]) {
+    for (const [lbl, seed, act] of scenarios) {
+      const a = await open(FRONT + "transactions.html", Object.assign({ width }, seed)); await act(a.d); await wait(200);
+      const A = { html: norm(a.d.body.innerHTML), ls: snapLS(a.w), active: activeOf(a.d), n: items(a.d).length, err: a.errors.concat(a.warns), scrollW: a.d.documentElement.scrollWidth, cw: a.d.documentElement.clientWidth };
+      const b = await open(new URL("../fixtures/pages/transactions_legacy.html", location.href).href, Object.assign({ width }, seed)); await act(b.d); await wait(200);
+      const B = { html: norm(b.d.body.innerHTML), ls: snapLS(b.w), active: activeOf(b.d), n: items(b.d).length, err: b.errors.concat(b.warns) };
+      let di = 0; while (di < A.html.length && A.html[di] === B.html[di]) di++;
+      ok(`3. @${width} ${lbl}: body.innerHTML identik dengan versi app.js`, A.html === B.html, A.html === B.html ? "" : `pos ${di} SPLIT[${A.html.substr(Math.max(0, di - 30), 80)}] LEGACY[${B.html.substr(Math.max(0, di - 30), 80)}]`);
+      ok(`3. @${width} ${lbl}: storage, fokus, jumlah item (${A.n}), error identik; tanpa overflow`, A.ls === B.ls && A.active === B.active && A.n === B.n && A.err.length === 0 && B.err.length === 0 && A.scrollW <= A.cw, `${A.active}|${B.active} ${A.n}|${B.n} ${A.err.concat(B.err).join(",")} scroll=${A.scrollW}/${A.cw}`);
+    }
+  }
+
+  /* ===================== 4. Dashboard masih membaca transaksi & halaman lain tak berubah ===================== */
+  r = await open(FRONT + "index.html"); ({ d, w } = r); const cc = $(d, "checkin-close"); if (cc && !$(d, "checkin-overlay").hidden) { cc.click(); await wait(250); }
+  ok("4a. dashboard membaca transaksi yang sama: saldo Rp5.291.000, 3 transaksi terbaru, 0 error", txt($(d, "balance-value")) === "Rp5.291.000" && $(d, "transaction-list").querySelectorAll(".transaction-item").length === 3 && r.errors.length === 0, txt($(d, "balance-value")));
+  for (const [page, id, expect] of [["index.html", "balance-value", "js/core.js,js/transactions-shared.js,js/dashboard.js"], ["goals.html", "goal-list", "js/core.js,js/goals.js"], ["analytics.html", "analytics-period-title", "js/core.js,js/analytics.js"], ["budget.html", "budget-card", "js/core.js,js/budget.js"], ["settings.html", "settings-app-version", "js/core.js,js/settings.js"]]) {
+    const rr = await open(FRONT + page); await wait(100);
+    const scripts = [...rr.d.querySelectorAll("script[src]")].map(x => x.getAttribute("src")).join(",");
+    ok(`4. ${page}: script sesuai tahap (${expect}), elemen kunci ada, 0 error`, scripts === expect && rr.d.getElementById(id) !== null && rr.errors.length === 0, scripts + " " + rr.errors.join("|"));
+  }
+
+  try { frame.contentWindow.localStorage.clear(); frame.contentWindow.sessionStorage.clear(); } catch (e) {}
+  const pass = out.filter(l => l.startsWith("PASS")).length, fail = out.filter(l => l.startsWith("FAIL")).length;
+  document.getElementById("r").textContent = out.join("\n") + `\n\n== ${pass} PASS / ${fail} FAIL ==`;
+})().catch(e => { document.getElementById("r").textContent = out.join("\n") + "\nEXCEPTION " + e.message + "\n" + e.stack; });
+</script>
