@@ -1,0 +1,131 @@
+<!doctype html>
+<meta charset="utf-8">
+<pre id="r">running…</pre>
+<script>
+/* Metode Pembayaran — P-1: fondasi data (konstanta + 2 helper di core.js).
+
+   Tahap ini SENGAJA belum menyentuh form, payload transaksi, renderer, dan
+   backup/import — bagian 4 di bawah mematok itu supaya P-2..P-5 tidak
+   ter-merge diam-diam tanpa test-nya sendiri.                              */
+const out = []; const ok = (n, c, x = "") => out.push(`${c ? "PASS" : "FAIL"} ${n}${x ? "  (" + x + ")" : ""}`);
+const wait = (ms) => new Promise(r => setTimeout(r, ms));
+const BASE = new URL("../../frontend/", location.href).href;
+
+const pad = (n) => String(n).padStart(2, "0");
+const iso = (dt) => `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`;
+const T = iso(new Date());
+const TX = [{ id: 1, title: "Makan", category: "makanan", type: "expense", amount: 25000, isoDate: T, time: "" }];
+
+let frame = null;
+async function load(page = "index.html") {
+  if (!frame) {
+    frame = document.createElement("iframe"); frame.width = 390; frame.height = 1600;
+    frame.src = BASE + "index.html"; document.body.appendChild(frame);
+    await new Promise(r => frame.onload = r);
+  }
+  try {
+    const w0 = frame.contentWindow;
+    w0.localStorage.clear(); w0.sessionStorage.clear();
+    w0.sessionStorage.setItem("checkinDismissed", "true");
+    w0.localStorage.setItem("financeData.transactions", JSON.stringify(TX));
+  } catch (e) {}
+  frame.remove();
+  frame = document.createElement("iframe"); frame.width = 390; frame.height = 1600; frame.src = BASE + page;
+  document.body.appendChild(frame);
+  await new Promise(r => frame.onload = r); await wait(300);
+  const r = { d: frame.contentDocument, w: frame.contentWindow, errors: [] };
+  r.w.addEventListener("error", e => r.errors.push(e.message));
+  r.w.console.error = (...a) => r.errors.push("console.error " + a.join(" "));
+  return r;
+}
+/** Panggil helper di dalam iframe tanpa pernah melempar ke luar: hasilnya
+ * { value } kalau normal, { threw } kalau helper melempar. */
+function call(w, fn, arg) {
+  try { return { value: w[fn](arg) }; } catch (e) { return { threw: String(e && e.message || e) }; }
+}
+
+(async () => {
+  const r = await load("index.html"); const { d, w } = r;
+
+  /* ============ 1. KONSTANTA ============ */
+  const list = w.eval("PAYMENT_METHODS");
+  ok("1a. PAYMENT_METHODS tersedia sebagai array", Array.isArray(list));
+  ok("1b. berisi tepat 6 metode, urutan sesuai kesepakatan", list.length === 6 && list.map(m => m.key).join() === "cash,mbanking,ewallet,debit,kredit,lainnya", list.map(m => m.key).join());
+  ok("1c. tiap entri punya key, name, emoji bertipe string non-kosong", list.every(m => ["key", "name", "emoji"].every(f => typeof m[f] === "string" && m[f].length > 0)));
+  ok("1d. nama tampil sesuai spesifikasi", list.map(m => m.name).join() === "Cash,M-Banking,E-Wallet,Debit,Kredit,Lainnya", list.map(m => m.name).join());
+  ok("1e. key unik & huruf kecil tanpa spasi", new Set(list.map(m => m.key)).size === 6 && list.every(m => /^[a-z]+$/.test(m.key)));
+  ok("1f. PAYMENT_UNSET adalah string kosong", w.eval("PAYMENT_UNSET") === "" && w.eval("typeof PAYMENT_UNSET") === "string");
+  ok("1g. tidak ada key yang bentrok dengan nama bawaan Object", list.every(m => !["__proto__", "constructor", "prototype", "toString"].includes(m.key)));
+  ok("1h. helper tersedia sebagai fungsi global", w.eval("typeof getPaymentLabel") === "function" && w.eval("typeof normalizePaymentMethod") === "function");
+
+  /* ============ 2. getPaymentLabel ============ */
+  const EXPECTED = { cash: "💵 Cash", mbanking: "🏦 M-Banking", ewallet: "📱 E-Wallet", debit: "💳 Debit", kredit: "🪙 Kredit", lainnya: "🧾 Lainnya" };
+  ok("2a. keenam key valid menghasilkan label 'emoji + nama'", Object.keys(EXPECTED).every(k => call(w, "getPaymentLabel", k).value === EXPECTED[k]),
+    Object.keys(EXPECTED).map(k => `${k}=${call(w, "getPaymentLabel", k).value}`).join(" | "));
+  ok("2b. label dibangun dari konstanta, bukan dari argumen", list.every(m => call(w, "getPaymentLabel", m.key).value === `${m.emoji} ${m.name}`));
+  const INVALID = [
+    ["string kosong", ""], ["undefined", undefined], ["null", null],
+    ["angka", 123], ["angka 0", 0], ["boolean", true],
+    ["objek", { key: "cash" }], ["array", ["cash"]], ["array kosong", []],
+    ["key tidak dikenal", "gopay"], ["huruf besar", "CASH"], ["ada spasi", " cash"],
+    ["nama bebas", "Cash"], ["nama bebas 2", "M-Banking"],
+    ["__proto__", "__proto__"], ["constructor", "constructor"], ["prototype", "prototype"], ["toString", "toString"],
+    ["markup", "<img src=x onerror=alert(1)>"],
+  ];
+  const badLabel = INVALID.filter(([, v]) => call(w, "getPaymentLabel", v).value !== "");
+  ok("2c. SEMUA nilai tidak valid menghasilkan \"\"", badLabel.length === 0, badLabel.map(([n]) => n).join(","));
+  ok("2d. getPaymentLabel tidak pernah melempar", INVALID.every(([, v]) => !("threw" in call(w, "getPaymentLabel", v))) && Object.keys(EXPECTED).every(k => !("threw" in call(w, "getPaymentLabel", k))));
+
+  /* ============ 3. normalizePaymentMethod ============ */
+  ok("3a. keenam key valid dikembalikan apa adanya", list.every(m => call(w, "normalizePaymentMethod", m.key).value === m.key));
+  const badNorm = INVALID.filter(([, v]) => call(w, "normalizePaymentMethod", v).value !== "");
+  ok("3b. SEMUA nilai tidak valid jatuh ke PAYMENT_UNSET (\"\")", badNorm.length === 0, badNorm.map(([n]) => n).join(","));
+  ok("3c. hasilnya selalu string (tidak pernah undefined/null/objek)", INVALID.every(([, v]) => typeof call(w, "normalizePaymentMethod", v).value === "string") && list.every(m => typeof call(w, "normalizePaymentMethod", m.key).value === "string"));
+  ok("3d. normalizePaymentMethod tidak pernah melempar", INVALID.every(([, v]) => !("threw" in call(w, "normalizePaymentMethod", v))));
+  ok("3e. idempoten: normalize(normalize(x)) === normalize(x)", [...INVALID.map(([, v]) => v), ...list.map(m => m.key)].every(v => {
+    const once = call(w, "normalizePaymentMethod", v).value;
+    return call(w, "normalizePaymentMethod", once).value === once;
+  }));
+  ok("3f. hasil normalize selalu bisa dipakai getPaymentLabel tanpa error", list.map(m => m.key).concat([""]).every(k => typeof call(w, "getPaymentLabel", call(w, "normalizePaymentMethod", k).value).value === "string"));
+  ok("3g. \"__proto__\" tidak mengotori objek apa pun (prototype tetap bersih)", (() => {
+    call(w, "normalizePaymentMethod", "__proto__");
+    call(w, "getPaymentLabel", "__proto__");
+    return w.eval("({}).polluted === undefined && Object.prototype.polluted === undefined");
+  })());
+  ok("3h. memanggil helper tidak mengubah PAYMENT_METHODS", (() => {
+    const after = w.eval("PAYMENT_METHODS");
+    return after.length === 6 && after.map(m => m.key).join() === "cash,mbanking,ewallet,debit,kredit,lainnya";
+  })());
+
+  /* ============ 4. PAGAR TAHAP: P-2..P-5 belum dikerjakan ============ */
+  const FILES = ["core.js", "transactions-shared.js", "dashboard.js", "goals.js", "analytics.js", "budget.js", "transactions.js", "settings.js"];
+  const srcOf = {};
+  for (const f of FILES) srcOf[f] = await (await fetch(BASE + "js/" + f)).text();
+  const allJs = FILES.map(f => srcOf[f]).join("\n");
+  const html = { index: await (await fetch(BASE + "index.html")).text(), transactions: await (await fetch(BASE + "transactions.html")).text() };
+
+  ok("4a. P-1: konstanta & helper HANYA ada di core.js", /const PAYMENT_METHODS = \[/.test(srcOf["core.js"]) && FILES.filter(f => f !== "core.js").every(f => !/PAYMENT_METHODS|PAYMENT_UNSET|getPaymentLabel|normalizePaymentMethod/.test(srcOf[f])));
+  ok("4b. P-2 belum: markup form belum punya field metode", !/field-method|name="method"/.test(html.index) && !/field-method|name="method"/.test(html.transactions));
+  ok("4c. P-2 belum: payload transaksi masih 6 field (tanpa metode)", /const payload = \{\s*\n\s*title,\s*\n\s*category: fieldCategory\.value,\s*\n\s*type: getSelectedType\(\),\s*\n\s*amount,\s*\n\s*isoDate: fieldDate\.value,\s*\n\s*time: formatDateID\(fieldDate\.value\),\s*\n\s*\};/.test(srcOf["transactions-shared.js"]));
+  ok("4d. P-3 belum: renderTransactionItem belum menampilkan metode", !/transaction-method|getPaymentLabel/.test((srcOf["core.js"].match(/function renderTransactionItem\([\s\S]*?\n\}/) || [""])[0]));
+  ok("4e. P-4 belum: backup masih schema 2 & validator belum membaca method", /const BACKUP_SCHEMA_VERSION = 2;/.test(srcOf["settings.js"]) && !/raw\.method|normalizePaymentMethod/.test(srcOf["settings.js"]));
+  ok("4f. P-4 belum: header CSV belum punya kolom metode", /const CSV_HEADER = \["tanggal", "jenis", "judul", "kategori", "kategori_nama", "jumlah", "waktu"\];/.test(srcOf["settings.js"]));
+  ok("4g. P-5 belum: filter transaksi belum mengenal metode", !/method/.test(srcOf["transactions.js"]));
+  ok("4h. tidak ada nama global baru selain dua helper + dua konstanta", (() => {
+    const names = allJs.split("\n").map(l => (l.match(/^(?:async function|function|const|let)\s+([A-Za-z_$][\w$]*)/) || [])[1]).filter(Boolean);
+    const added = names.filter(n => /payment/i.test(n));
+    return added.sort().join() === "PAYMENT_METHODS,PAYMENT_UNSET,getPaymentLabel,normalizePaymentMethod";
+  })(), "");
+
+  /* ============ 5. TIDAK ADA EFEK SAMPING ============ */
+  ok("5a. halaman tetap dimuat tanpa error konsol", r.errors.length === 0, r.errors.join(" | "));
+  ok("5b. transaksi tersimpan tidak berubah oleh P-1", w.localStorage.getItem("financeData.transactions") === JSON.stringify(TX));
+  ok("5c. baris transaksi yang dirender belum memuat metode", (() => {
+    const meta = d.querySelector("#transaction-list .transaction-meta");
+    return !!meta && !/Cash|M-Banking|E-Wallet|💵|🏦/.test(meta.textContent);
+  })());
+  ok("5d. transaksi lama (tanpa field method) tetap tampil normal", d.querySelectorAll("#transaction-list .transaction-item").length === 1);
+
+  document.getElementById("r").textContent = out.join("\n") + `\n\nTOTAL PASS=${out.filter(l => l.startsWith("PASS")).length} FAIL=${out.filter(l => l.startsWith("FAIL")).length}`;
+})().catch(e => { document.getElementById("r").textContent = out.join("\n") + "\nEXCEPTION " + e.message + "\n" + e.stack; });
+</script>

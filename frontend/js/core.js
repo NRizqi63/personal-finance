@@ -154,6 +154,44 @@ function getTransactionEmoji(tx) {
   return tx.type === "income" ? INCOME_EMOJI : getCategoryEmoji(tx.category);
 }
 
+// Metode pembayaran transaksi (P-1: fondasi data saja — belum dipakai form,
+// renderer, maupun backup). Daftar TETAP: key disimpan di data, nama & emoji
+// hanya untuk tampilan, jadi label bisa diubah tanpa migrasi data dan tidak
+// ada teks dari file import yang pernah masuk ke DOM.
+const PAYMENT_METHODS = [
+  { key: "cash", name: "Cash", emoji: "💵" },
+  { key: "mbanking", name: "M-Banking", emoji: "🏦" },
+  { key: "ewallet", name: "E-Wallet", emoji: "📱" },
+  { key: "debit", name: "Debit", emoji: "💳" },
+  { key: "kredit", name: "Kredit", emoji: "🪙" },
+  { key: "lainnya", name: "Lainnya", emoji: "🧾" },
+];
+
+// "Belum ditentukan": transaksi lama (dibuat sebelum fitur ini) dan nilai yang
+// tidak dikenal. Sengaja string kosong, bukan "cash" — mengisi default ke data
+// lama sama dengan mengarang fakta keuangan user.
+const PAYMENT_UNSET = "";
+
+/** Label siap tampil untuk sebuah key: "💵 Cash". Key yang tidak dikenal
+ * (termasuk transaksi lama yang belum punya metode) menghasilkan "" supaya
+ * pemanggil bisa melewatkannya tanpa pengecekan tambahan.
+ * Dicocokkan ke daftar tetap, BUKAN lookup objek — jadi key bawaan Object
+ * ("__proto__", "constructor", "toString", …) tidak pernah cocok. */
+function getPaymentLabel(key) {
+  if (typeof key !== "string" || !key) return "";
+  const method = PAYMENT_METHODS.find((item) => item.key === key);
+  return method ? `${method.emoji} ${method.name}` : "";
+}
+
+/** Satu-satunya pintu masuk nilai metode dari luar (form, localStorage, file
+ * backup nanti): hanya key yang ada di PAYMENT_METHODS yang lolos, sisanya
+ * jatuh ke PAYMENT_UNSET. Nama bebas ("Cash"), angka, objek, dan array TIDAK
+ * diterima — pola yang sama dengan normalizeCategoryKey() di settings.js. */
+function normalizePaymentMethod(raw) {
+  if (typeof raw !== "string" || !raw) return PAYMENT_UNSET;
+  return PAYMENT_METHODS.some((item) => item.key === raw) ? raw : PAYMENT_UNSET;
+}
+
 // Pilihan emoji di popup tambah/edit kategori.
 const EMOJI_CHOICES = ["🍜", "☕", "⛽", "🚌", "🛍️", "👕", "🧾", "💡", "🏠", "📱", "🎬", "🎮", "💊", "🎓", "🐾", "✈️", "🎁", "💰"];
 

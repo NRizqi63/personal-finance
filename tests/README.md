@@ -30,8 +30,8 @@ CHROME_FLAGS="--no-sandbox" ./tests/scripts/run-tests.sh
 ## Cara menjalankan
 
 ```bash
-./tests/scripts/run-tests.sh              # semua: 38 suite + console + overflow (~10-15 menit)
-./tests/scripts/run-tests.sh suites       # hanya 38 suite
+./tests/scripts/run-tests.sh              # semua: 39 suite + console + overflow (~10-15 menit)
+./tests/scripts/run-tests.sh suites       # hanya 39 suite
 ./tests/scripts/run-tests.sh console      # 6 halaman x 4 lebar, error konsol harus 0
 ./tests/scripts/run-tests.sh overflow     # 6 halaman x 6 lebar, tidak boleh scroll horizontal
 ./tests/scripts/run-tests.sh modalracetest jssettings    # suite tertentu saja
@@ -55,7 +55,7 @@ tests/
 ├── fixtures/
 │   ├── legacy/          app.js & style.css versi pra-refactor (BEKU — jangan diedit)
 │   └── pages/           halaman referensi: *_legacy.html, app_ref.html, jsf_page.html
-├── harness/             38 suite + 2 harness berparameter (consolecheck, harness)
+├── harness/             39 suite + 2 harness berparameter (consolecheck, harness)
 └── scripts/
     └── run-tests.sh     satu-satunya runner
 ```
@@ -81,10 +81,12 @@ karena yang di atas memberi diagnosis paling cepat saat ada yang rusak.
    (`duration`, `onOpenFrame`, `onClose` untuk kelima jalur tutup) plus
    matriks 10 modal x jalur tutup — tombol X, Batal/CTA, klik latar, Escape,
    `close()` programatik — berikut focus restore dan kunci scroll.
-3. **Data & penyimpanan (M1)** — `m1datatest`: Target Keuangan di
+3. **Data & penyimpanan** — `m1datatest`: Target Keuangan di
    backup/import/reset, rollback empat key, kontrak boolean `saveTransactions`/
    `saveBudget`/`saveSettings`/`saveGoals`, dan perilaku setiap pemanggilnya
-   saat localStorage menolak menulis.
+   saat localStorage menolak menulis. `paymentmethodtest` menguji fondasi data
+   Metode Pembayaran (konstanta + `getPaymentLabel`/`normalizePaymentMethod`)
+   sekaligus memagari tahap yang belum dikerjakan.
 4. **Per fitur** — goals (`goalstest`, `goals2test`, `goals3atest`,
    `goals3btest`, `goals4test`), analytics (`analyticsperiodtest`,
    `analyticstest`, `charttest`), budget (`budgettest`), transaksi & dashboard
@@ -116,8 +118,9 @@ functest               PASS=59   FAIL=1   (1 known artifact)
   sebagai kegagalan dan tidak membuat exit code merah.
 - Ringkasan terakhir: `TOTAL PASS=… FAIL(baru)=… known artifact=…`.
 
-Angka acuan saat milestone M2 (Chrome 141, Windows): 38 suite hijau, `functest`
-59/1 (artefak di bawah), console 24/24 bersih, overflow 36/36 bersih.
+Angka acuan saat milestone Metode Pembayaran P-1 (Chrome 141, Windows): 39 suite
+hijau, `functest` 59/1 (artefak di bawah), console 24/24 bersih, overflow 36/36
+bersih.
 
 ## Known artifact: `functest` 59 PASS / 1 FAIL
 

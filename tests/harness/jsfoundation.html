@@ -60,7 +60,12 @@ const snap = () => { const o = {}; for (let i = 0; i < localStorage.length; i++)
   ok("2a. tidak ada nama ganda di dalam core.js", new Set(nc).size === nc.length);
   ok("2b. tidak ada nama ganda di dalam transactions-shared.js", new Set(ns).size === ns.length);
   ok("2c. core.js dan shared tidak berbagi nama", nc.every(n => !ns.includes(n)));
-  ok("2d. semua nama di file baru berasal dari app.js", [...nc, ...ns].every(n => na.includes(n)), [...nc, ...ns].filter(n => !na.includes(n)).join(","));
+  // Nama yang memang BARU (bukan hasil pemecahan app.js) — ditambahkan setelah
+  // refactor selesai. Dipatok satu per satu supaya nama baru yang tidak
+  // direncanakan tetap tertangkap.
+  const NEW_SINCE_REFACTOR = ["PAYMENT_METHODS", "PAYMENT_UNSET", "getPaymentLabel", "normalizePaymentMethod"]; // fondasi Metode Pembayaran (P-1)
+  ok("2d. semua nama di file baru berasal dari app.js, kecuali daftar nama baru yang disetujui", [...nc, ...ns].every(n => na.includes(n) || NEW_SINCE_REFACTOR.includes(n)), [...nc, ...ns].filter(n => !na.includes(n) && !NEW_SINCE_REFACTOR.includes(n)).join(","));
+  ok("2d2. tiap nama baru memang TIDAK ada di app.js beku (bukan salinan yang berubah)", NEW_SINCE_REFACTOR.every(n => !na.includes(n)), NEW_SINCE_REFACTOR.filter(n => na.includes(n)).join(","));
   ok(`2e. jumlah deklarasi: core ${nc.length} + shared ${ns.length} = ${nc.length + ns.length} dari ${na.length} di app.js`, nc.length + ns.length > 100 && nc.length + ns.length < na.length);
   const expectedShared = ["refreshDashboard", "transactionsPage", "openTransactionModal", "confirmDeleteTransaction", "handleTransactionListClick", "setupTransactionModal"];
   ok("2f. shared berisi persis 6 deklarasi yang diminta", ns.length === 6 && expectedShared.every(n => ns.includes(n)), ns.join(","));
@@ -136,7 +141,10 @@ const snap = () => { const o = {}; for (let i = 0; i < localStorage.length; i++)
   await new Promise(r => frame.onload = r); await wait(300);
   const W = frame.contentWindow;
   const fnNames = [...nc, ...ns].filter(n => typeof window[n] === "function");
-  const diffs = fnNames.filter(n => typeof W[n] !== "function" || W[n].toString() !== window[n].toString());
+  // Fungsi baru (tidak ada di app.js beku) dihitung terpisah dari fungsi yang
+  // "berubah", supaya keduanya tetap dipatok masing-masing.
+  const newFns = fnNames.filter(n => NEW_SINCE_REFACTOR.includes(n));
+  const diffs = fnNames.filter(n => !newFns.includes(n)).filter(n => typeof W[n] !== "function" || W[n].toString() !== window[n].toString());
   // --- Fungsi yang SENGAJA berbeda dari app.js beku (Modal Stabilization + M1) ---
   // Fence tetap ketat: selain yang terdaftar di sini semuanya wajib identik
   // byte-per-byte, dan yang terdaftar wajib berbeda PERSIS sebanyak baris
@@ -157,6 +165,8 @@ const snap = () => { const o = {}; for (let i = 0; i < localStorage.length; i++)
   };
   const srcOf = (src, name) => { const m = new RegExp(`^(?:async )?function ${name}\\([\\s\\S]*?\\n\\}`, "m").exec(src); return m ? m[0] : ""; };
   const EXPECTED_DIFF = ["createModalController", "handleTransactionListClick", "refreshDashboard", "saveBudget", "saveSettings", "saveTransactions", "setupTransactionModal"];
+  const EXPECTED_NEW = ["getPaymentLabel", "normalizePaymentMethod"]; // helper Metode Pembayaran (P-1)
+  ok("8a0. fungsi baru = TEPAT daftar yang disetujui, dan semuanya absen di app.js beku", JSON.stringify(newFns.slice().sort()) === JSON.stringify(EXPECTED_NEW) && EXPECTED_NEW.every(n => typeof W[n] !== "function"), newFns.join(","));
   ok(`8a. ${fnNames.length - EXPECTED_DIFF.length} fungsi identik byte-per-byte dengan versi app.js (toString); yang berbeda TEPAT ${EXPECTED_DIFF.length}: guard JS-1, perbaikan race modal, dan kontrak save M1`, JSON.stringify(diffs.slice().sort()) === JSON.stringify(EXPECTED_DIFF), diffs.join(","));
   ok("8a2. setiap fungsi yang berbeda hanya berbeda PERSIS sebatas perubahan yang sudah direview (race modal + kontrak save M1)", EXPECTED_DIFF.every(n => n === "refreshDashboard" || fixMatches(n, W[n].toString(), window[n].toString())), EXPECTED_DIFF.filter(n => n !== "refreshDashboard" && !fixMatches(n, W[n].toString(), window[n].toString())).join(","));
   ok("8a3. kontrak save M1: ketiganya mengembalikan boolean (true saat tertulis)", [window.saveTransactions, window.saveBudget, window.saveSettings, window.saveGoals].every(f => f() === true));
