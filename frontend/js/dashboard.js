@@ -534,11 +534,30 @@ function setupCheckin() {
   if (!overlay) return; // bukan di dashboard
   const checkinEntry = { close: () => closeCheckin(), overlay };
   let checkinTrigger = null;
+  // Pola yang sama dengan createModalController() di core.js — lihat catatan
+  // di sana. Durasi animasi check-in 220ms (bukan 180ms), sisanya identik.
+  let checkinShowing = false;
+  let checkinHideTimer = null;
+  let checkinOpenFrame = null;
+  function cancelCheckinPending() {
+    if (checkinHideTimer !== null) {
+      clearTimeout(checkinHideTimer);
+      checkinHideTimer = null;
+    }
+    if (checkinOpenFrame !== null) {
+      cancelAnimationFrame(checkinOpenFrame);
+      checkinOpenFrame = null;
+    }
+  }
 
   function closeCheckin() {
+    if (!checkinShowing) return; // close ganda: jangan jadwalkan timer kedua
+    cancelCheckinPending();
+    checkinShowing = false;
     popModal(checkinEntry);
     overlay.classList.remove("is-open");
-    setTimeout(() => {
+    checkinHideTimer = setTimeout(() => {
+      checkinHideTimer = null;
       overlay.hidden = true;
     }, 220);
     unlockBodyScroll();
@@ -553,14 +572,19 @@ function setupCheckin() {
   }
 
   function openCheckin() {
-    if (overlay.hidden) checkinTrigger = document.activeElement;
+    if (!checkinShowing) checkinTrigger = document.activeElement;
+    cancelCheckinPending();
+    checkinShowing = true;
     renderCheckin();
     overlay.hidden = false;
     pushModal(checkinEntry);
     lockBodyScroll();
     focusModal(overlay);
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => overlay.classList.add("is-open"));
+    checkinOpenFrame = requestAnimationFrame(() => {
+      checkinOpenFrame = requestAnimationFrame(() => {
+        checkinOpenFrame = null;
+        overlay.classList.add("is-open");
+      });
     });
   }
 

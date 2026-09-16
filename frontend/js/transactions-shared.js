@@ -96,6 +96,23 @@ function handleTransactionListClick(e) {
 function setupTransactionModal() {
   const overlay = document.getElementById("transaction-modal-overlay");
   const modalEntry = { close: () => closeModal(), overlay };
+  // State & pekerjaan tertunda modal transaksi — pola yang sama dengan
+  // createModalController() di core.js: timer hide 180ms dan rAF pemasang
+  // .is-open dibatalkan setiap kali state berubah, supaya timer lama tidak
+  // menyembunyikan modal yang baru dibuka.
+  let modalShowing = false;
+  let modalHideTimer = null;
+  let modalOpenFrame = null;
+  function cancelModalPending() {
+    if (modalHideTimer !== null) {
+      clearTimeout(modalHideTimer);
+      modalHideTimer = null;
+    }
+    if (modalOpenFrame !== null) {
+      cancelAnimationFrame(modalOpenFrame);
+      modalOpenFrame = null;
+    }
+  }
   let modalTrigger = null; // elemen yang membuka modal (untuk kembalikan fokus)
   const modalTitle = document.getElementById("modal-title");
   const submitBtn = document.getElementById("modal-submit");
@@ -280,7 +297,9 @@ function setupTransactionModal() {
   }
 
   function openModal(mode, tx) {
-    if (overlay.hidden) modalTrigger = document.activeElement;
+    if (!modalShowing) modalTrigger = document.activeElement;
+    cancelModalPending();
+    modalShowing = true;
     resetForm();
 
     let typeToSelect = "expense";
@@ -311,8 +330,9 @@ function setupTransactionModal() {
     // muncul tanpa animasi (lebih sering terjadi di Safari/iOS
     // dibanding Chrome). rAF bersarang memastikan frame awal (belum
     // is-open) benar-benar sempat digambar dulu sebelum transisi mulai.
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
+    modalOpenFrame = requestAnimationFrame(() => {
+      modalOpenFrame = requestAnimationFrame(() => {
+        modalOpenFrame = null;
         overlay.classList.add("is-open");
         // offsetLeft/offsetWidth (dipakai positionIndicator) hanya akurat
         // setelah modal benar-benar dirender (bukan display:none lagi) —
@@ -328,9 +348,13 @@ function setupTransactionModal() {
   }
 
   function closeModal() {
+    if (!modalShowing) return; // close ganda: jangan jadwalkan timer kedua
+    cancelModalPending();
+    modalShowing = false;
     popModal(modalEntry);
     overlay.classList.remove("is-open");
-    setTimeout(() => {
+    modalHideTimer = setTimeout(() => {
+      modalHideTimer = null;
       overlay.hidden = true;
     }, 180);
     unlockBodyScroll();

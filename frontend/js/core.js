@@ -1126,23 +1126,56 @@ document.addEventListener("keydown", (e) => {
 function createModalController(overlay, options = {}) {
   const entry = { close: () => close(), overlay };
   let lastTrigger = null;
+  // State buka/tutup yang sebenarnya. TIDAK boleh disimpulkan dari
+  // overlay.hidden: selama animasi tutup (180ms) hidden masih false padahal
+  // modal sudah dianggap tertutup, dan modal yang dibuka ulang di jendela
+  // itu akan terbaca "masih terbuka" sehingga pemicunya tidak tercatat.
+  let showing = false;
+  // Pekerjaan tertunda dari siklus sebelumnya, dibatalkan setiap kali state
+  // berubah:
+  // - hideTimer: setTimeout(hidden = true) milik close(). Kalau tidak
+  //   dibatalkan, membuka ulang modal < 180ms setelah ditutup membuat timer
+  //   lama menyembunyikan modal yang BARU dibuka.
+  // - openFrame: rAF bersarang milik open() yang memasang .is-open. Kalau
+  //   tidak dibatalkan, kelas itu bisa terpasang pada modal yang sudah
+  //   tertutup dan bocor ke siklus berikutnya.
+  let hideTimer = null;
+  let openFrame = null;
+  function cancelPending() {
+    if (hideTimer !== null) {
+      clearTimeout(hideTimer);
+      hideTimer = null;
+    }
+    if (openFrame !== null) {
+      cancelAnimationFrame(openFrame);
+      openFrame = null;
+    }
+  }
   function open() {
     // Pemicu hanya dicatat saat modal benar-benar baru dibuka, supaya
     // membuka ulang modal yang sudah tampil tidak menimpa pemicu aslinya.
-    if (overlay.hidden) lastTrigger = document.activeElement;
+    if (!showing) lastTrigger = document.activeElement;
+    cancelPending();
+    showing = true;
     overlay.hidden = false;
     pushModal(entry);
     lockBodyScroll();
     focusModal(overlay);
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => overlay.classList.add("is-open"));
+    openFrame = requestAnimationFrame(() => {
+      openFrame = requestAnimationFrame(() => {
+        openFrame = null;
+        overlay.classList.add("is-open");
+      });
     });
   }
   function close() {
-    if (overlay.hidden) return;
+    if (!showing) return; // termasuk saat close() dipanggil dua kali
+    cancelPending();
+    showing = false;
     popModal(entry);
     overlay.classList.remove("is-open");
-    setTimeout(() => {
+    hideTimer = setTimeout(() => {
+      hideTimer = null;
       overlay.hidden = true;
     }, 180);
     unlockBodyScroll();

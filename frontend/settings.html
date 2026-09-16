@@ -56,13 +56,13 @@
     <!-- 2. PREFERENSI APLIKASI — switch disimpan langsung saat diubah
          (setupSettingsPreferences()). -->
     <section class="settings-section" id="preferensi" aria-labelledby="settings-preferensi-title">
-      <h2 class="section-title" id="settings-preferensi-title">Preferensi Aplikasi</h2>
+      <h2 class="section-title" id="settings-preferensi-title">Fitur Aplikasi</h2>
       <div class="settings-card">
         <label class="settings-row settings-row-switch" for="pref-hide-balance">
           <span class="settings-row-icon" aria-hidden="true">👁️</span>
           <span class="settings-row-body">
-            <span class="settings-row-title">Sembunyikan saldo saat membuka dashboard</span>
-            <span class="settings-row-desc">Saldo, pemasukan, dan pengeluaran ditutup dulu saat dashboard dibuka. Tombol mata tetap bisa menampilkannya.</span>
+            <span class="settings-row-title">Sembunyikan saldo</span>
+            <span class="settings-row-desc">Saldo, pemasukan, dan pengeluaran ditutup dulu saat dashboard dibuka.</span>
           </span>
           <span class="switch">
             <input type="checkbox" class="switch-input" id="pref-hide-balance" role="switch" />
@@ -73,7 +73,7 @@
           <span class="settings-row-icon" aria-hidden="true">👋</span>
           <span class="settings-row-body">
             <span class="settings-row-title">Tampilkan check-in harian</span>
-            <span class="settings-row-desc">Popup Financial Check-in muncul sekali per sesi saat membuka dashboard.</span>
+            <span class="settings-row-desc">Popup Financial Check-in muncul sekali saat membuka dashboard.</span>
           </span>
           <span class="switch">
             <input type="checkbox" class="switch-input" id="pref-show-checkin" role="switch" />
@@ -127,7 +127,7 @@
           <span class="settings-row-icon" aria-hidden="true">📄</span>
           <span class="settings-row-body">
             <span class="settings-row-title">Export Transaksi (CSV)</span>
-            <span class="settings-row-desc">Untuk dibuka di spreadsheet. File CSV tidak bisa dipakai memulihkan data — gunakan backup JSON untuk itu.</span>
+            <span class="settings-row-desc">File CSV tidak bisa dipakai memulihkan data — gunakan backup JSON.</span>
           </span>
           <button type="button" class="btn btn--ghost btn--xs settings-row-action" id="btn-export-csv">Export CSV</button>
         </div>
@@ -137,7 +137,7 @@
           <span class="settings-row-icon" aria-hidden="true">📥</span>
           <span class="settings-row-body">
             <span class="settings-row-title">Import Backup (JSON)</span>
-            <span class="settings-row-desc">Hanya menerima file backup JSON dari aplikasi ini, maksimal 5 MB. File akan diperiksa dulu — data kamu belum diganti.</span>
+            <span class="settings-row-desc">Hanya menerima file backup JSON dari aplikasi ini, maksimal 5 MB.</span>
           </span>
           <input type="file" id="import-file" accept=".json,application/json" hidden />
           <button type="button" class="btn btn--ghost btn--xs settings-row-action" id="btn-import-pick">Pilih File…</button>
@@ -152,13 +152,13 @@
 
       <!-- ZONA BERBAHAYA — tiga reset terpisah, masing-masing lewat modal
            konfirmasi. Menghapus seluruh data sekaligus belum tersedia. -->
-      <h3 class="section-title settings-subtitle" id="settings-danger-title">Zona Berbahaya</h3>
+      <h3 class="section-title settings-subtitle" id="settings-danger-title">Reset & Hapus Data</h3>
       <div class="settings-card" id="reset-actions">
         <div class="settings-row settings-row--action">
           <span class="settings-row-icon" aria-hidden="true">🧹</span>
           <span class="settings-row-body">
             <span class="settings-row-title">Hapus Semua Transaksi</span>
-            <span class="settings-row-desc">Menghapus seluruh catatan pemasukan &amp; pengeluaran. Budget, kategori, dan pengaturan tetap.</span>
+            <span class="settings-row-desc">Menghapus seluruh catatan pemasukan &amp; pengeluaran.</span>
           </span>
           <button type="button" class="btn btn--danger-ghost btn--xs settings-row-action" data-reset-target="transactions">Hapus</button>
         </div>
@@ -166,7 +166,7 @@
           <span class="settings-row-icon" aria-hidden="true">🏷️</span>
           <span class="settings-row-body">
             <span class="settings-row-title">Reset Budget &amp; Kategori</span>
-            <span class="settings-row-desc">Budget bulanan dan kategori kembali ke bawaan aplikasi. Transaksi tidak dihapus.</span>
+            <span class="settings-row-desc">Budget bulanan dan kategori kembali ke bawaan aplikasi.</span>
           </span>
           <button type="button" class="btn btn--danger-ghost btn--xs settings-row-action" data-reset-target="budget">Reset</button>
         </div>
@@ -174,7 +174,7 @@
           <span class="settings-row-icon" aria-hidden="true">👤</span>
           <span class="settings-row-body">
             <span class="settings-row-title">Reset Profil &amp; Preferensi</span>
-            <span class="settings-row-desc">Nama panggilan dan preferensi tampilan kembali ke default. Transaksi dan budget tetap.</span>
+            <span class="settings-row-desc">Nama panggilan dan preferensi tampilan kembali ke default.</span>
           </span>
           <button type="button" class="btn btn--danger-ghost btn--xs settings-row-action" data-reset-target="settings">Reset</button>
         </div>
