@@ -2,11 +2,16 @@
 <meta charset="utf-8">
 <pre id="r">running…</pre>
 <script>
-/* Metode Pembayaran — P-1: fondasi data (konstanta + 2 helper di core.js).
+/* Metode Pembayaran — P-1 (fondasi data) + P-2 (form & simpan).
 
-   Tahap ini SENGAJA belum menyentuh form, payload transaksi, renderer, dan
-   backup/import — bagian 4 di bawah mematok itu supaya P-2..P-5 tidak
-   ter-merge diam-diam tanpa test-nya sendiri.                              */
+   1-3 : konstanta & helper di core.js (11 metode populer + fallback legacy)
+   4   : pagar tahap — apa yang SUDAH dan BELUM dikerjakan
+   5   : P-1 tanpa efek samping
+   6   : P-2 form transaksi (opsi, default, tambah, edit, reset, nilai canonical)
+   7   : P-3/P-4/P-5 belum tersentuh
+
+   Renderer, backup/import/CSV, dan filter sengaja belum berubah; bagian 7
+   mematoknya supaya tahap berikutnya tidak ter-merge tanpa test-nya sendiri. */
 const out = []; const ok = (n, c, x = "") => out.push(`${c ? "PASS" : "FAIL"} ${n}${x ? "  (" + x + ")" : ""}`);
 const wait = (ms) => new Promise(r => setTimeout(r, ms));
 const BASE = new URL("../../frontend/", location.href).href;
@@ -40,6 +45,7 @@ async function load(page = "index.html") {
 }
 /** Panggil helper di dalam iframe tanpa pernah melempar ke luar: hasilnya
  * { value } kalau normal, { threw } kalau helper melempar. */
+async function tap(el) { el.focus(); el.click(); await wait(120); }
 function call(w, fn, arg) {
   try { return { value: w[fn](arg) }; } catch (e) { return { threw: String(e && e.message || e) }; }
 }
@@ -50,25 +56,52 @@ function call(w, fn, arg) {
   /* ============ 1. KONSTANTA ============ */
   const list = w.eval("PAYMENT_METHODS");
   ok("1a. PAYMENT_METHODS tersedia sebagai array", Array.isArray(list));
-  ok("1b. berisi tepat 6 metode, urutan sesuai kesepakatan", list.length === 6 && list.map(m => m.key).join() === "cash,mbanking,ewallet,debit,kredit,lainnya", list.map(m => m.key).join());
-  ok("1c. tiap entri punya key, name, emoji bertipe string non-kosong", list.every(m => ["key", "name", "emoji"].every(f => typeof m[f] === "string" && m[f].length > 0)));
-  ok("1d. nama tampil sesuai spesifikasi", list.map(m => m.name).join() === "Cash,M-Banking,E-Wallet,Debit,Kredit,Lainnya", list.map(m => m.name).join());
-  ok("1e. key unik & huruf kecil tanpa spasi", new Set(list.map(m => m.key)).size === 6 && list.every(m => /^[a-z]+$/.test(m.key)));
+  const POPULAR = ["cash", "bca-mobile", "brimo", "livin", "mybca", "wondr", "gopay", "dana", "ovo", "shopeepay", "linkaja"];
+  ok("1b. berisi tepat 11 metode populer, urutan sesuai keputusan produk", list.length === 11 && list.map(m => m.key).join() === POPULAR.join(), list.map(m => m.key).join());
+  ok("1c. tiap entri punya key, name, emoji, group, logo bertipe string non-kosong", list.every(m => ["key", "name", "emoji", "group", "logo"].every(f => typeof m[f] === "string" && m[f].length > 0)));
+  ok("1d. nama tampil sesuai keputusan produk", list.map(m => m.name).join() === "Cash,BCA Mobile,BRImo,Livin' by Mandiri,myBCA,wondr by BNI,GoPay,DANA,OVO,ShopeePay,LinkAja", list.map(m => m.name).join());
+  ok("1d2. grup: 1 cash + 5 mbanking + 5 ewallet, dan hanya tiga grup itu", (() => {
+    const g = list.reduce((acc, m) => (acc[m.group] = (acc[m.group] || 0) + 1, acc), {});
+    return Object.keys(g).sort().join() === "cash,ewallet,mbanking" && g.cash === 1 && g.mbanking === 5 && g.ewallet === 5;
+  })(), JSON.stringify(list.map(m => m.group)));
+  ok("1d3. grup tiap metode tepat: Cash -> cash, lima bank -> mbanking, lima dompet -> ewallet", list.map(m => `${m.key}:${m.group}`).join() === "cash:cash,bca-mobile:mbanking,brimo:mbanking,livin:mbanking,mybca:mbanking,wondr:mbanking,gopay:ewallet,dana:ewallet,ovo:ewallet,shopeepay:ewallet,linkaja:ewallet", list.map(m => `${m.key}:${m.group}`).join());
+  ok("1e. key unik, huruf kecil, hanya a-z & tanda hubung (aman sebagai key data)", new Set(list.map(m => m.key)).size === 11 && list.every(m => /^[a-z][a-z0-9-]*$/.test(m.key)));
+  const LEGACY = ["mbanking", "ewallet", "debit", "kredit", "lainnya"];
+  const legacyList = w.eval("PAYMENT_LEGACY_METHODS");
+  ok("1e2. PAYMENT_METHOD_KEYS = daftar key aktif, urutan sama dengan PAYMENT_METHODS", JSON.stringify(w.eval("PAYMENT_METHOD_KEYS")) === JSON.stringify(POPULAR));
+  ok("1e3. PAYMENT_LEGACY_METHODS berisi 5 key generik versi pertama", Array.isArray(legacyList) && legacyList.map(m => m.key).join() === LEGACY.join(), legacyList.map(m => m.key).join());
+  ok("1e4. key legacy TIDAK ada di daftar aktif (tidak ditawarkan sebagai pilihan baru)", LEGACY.every(k => !list.some(m => m.key === k)) && LEGACY.every(k => !w.eval("PAYMENT_METHOD_KEYS").includes(k)));
+  ok("1e5. Debit / Kredit / PayLater / Lainnya belum masuk daftar aktif", ["debit", "kredit", "paylater", "lainnya"].every(k => !w.eval("PAYMENT_METHOD_KEYS").includes(k)));
   ok("1f. PAYMENT_UNSET adalah string kosong", w.eval("PAYMENT_UNSET") === "" && w.eval("typeof PAYMENT_UNSET") === "string");
   ok("1g. tidak ada key yang bentrok dengan nama bawaan Object", list.every(m => !["__proto__", "constructor", "prototype", "toString"].includes(m.key)));
   ok("1h. helper tersedia sebagai fungsi global", w.eval("typeof getPaymentLabel") === "function" && w.eval("typeof normalizePaymentMethod") === "function");
+  ok("1i. daftar aktif & legacy tidak beririsan sama sekali", legacyList.every(l => !list.some(m => m.key === l.key)));
+
+  /* ---- 1L. metadata logo (struktur saja; asetnya menyusul di tahap UI) ---- */
+  const LOGO_DIR = w.eval("PAYMENT_LOGO_DIR");
+  ok("1L1. PAYMENT_LOGO_DIR terdefinisi & relatif (tanpa protokol, host, atau slash di depan)", LOGO_DIR === "assets/payment-methods/");
+  ok("1L2. setiap metode aktif punya logo dengan pola <dir>/<key>.svg", list.every(m => m.logo === `${LOGO_DIR}${m.key}.svg`), list.map(m => m.logo).join(" | "));
+  ok("1L3. path logo TIDAK pernah URL eksternal / absolut / naik folder", list.every(m => !/^https?:|^\/\/|^\/|^file:|\.\./.test(m.logo)));
+  ok("1L4. satu logo per metode (tidak ada yang dipakai dua metode)", new Set(list.map(m => m.logo)).size === list.length);
+  ok("1L5. key legacy TIDAK punya logo (tetap memakai emoji)", legacyList.every(m => m.logo === "" && typeof m.emoji === "string" && m.emoji.length > 0));
+  ok("1L6. emoji tetap ada sebagai lambang sementara di SEMUA metode aktif", list.every(m => typeof m.emoji === "string" && m.emoji.length > 0));
+  ok("1L7. label aplikasi masih memakai emoji, belum logo (tahap UI belum dikerjakan)", list.every(m => call(w, "getPaymentLabel", m.key).value === `${m.emoji} ${m.name}`) && !/logo/.test(w.eval("String(getPaymentLabel)")));
 
   /* ============ 2. getPaymentLabel ============ */
-  const EXPECTED = { cash: "💵 Cash", mbanking: "🏦 M-Banking", ewallet: "📱 E-Wallet", debit: "💳 Debit", kredit: "🪙 Kredit", lainnya: "🧾 Lainnya" };
+  const EXPECTED = { cash: "💵 Cash", "bca-mobile": "🏦 BCA Mobile", brimo: "🏦 BRImo", livin: "🏦 Livin' by Mandiri", mybca: "🏦 myBCA", wondr: "🏦 wondr by BNI", gopay: "📱 GoPay", dana: "📱 DANA", ovo: "📱 OVO", shopeepay: "📱 ShopeePay", linkaja: "📱 LinkAja" };
+  const EXPECTED_LEGACY = { mbanking: "🏦 M-Banking", ewallet: "📱 E-Wallet", debit: "💳 Debit", kredit: "🪙 Kredit", lainnya: "🧾 Lainnya" };
   ok("2a. keenam key valid menghasilkan label 'emoji + nama'", Object.keys(EXPECTED).every(k => call(w, "getPaymentLabel", k).value === EXPECTED[k]),
     Object.keys(EXPECTED).map(k => `${k}=${call(w, "getPaymentLabel", k).value}`).join(" | "));
   ok("2b. label dibangun dari konstanta, bukan dari argumen", list.every(m => call(w, "getPaymentLabel", m.key).value === `${m.emoji} ${m.name}`));
+  ok("2b2. FALLBACK LEGACY: key lama tetap punya label (transaksi lama tidak kehilangan informasi)", Object.keys(EXPECTED_LEGACY).every(k => call(w, "getPaymentLabel", k).value === EXPECTED_LEGACY[k]),
+    Object.keys(EXPECTED_LEGACY).map(k => `${k}=${call(w, "getPaymentLabel", k).value}`).join(" | "));
   const INVALID = [
     ["string kosong", ""], ["undefined", undefined], ["null", null],
     ["angka", 123], ["angka 0", 0], ["boolean", true],
     ["objek", { key: "cash" }], ["array", ["cash"]], ["array kosong", []],
-    ["key tidak dikenal", "gopay"], ["huruf besar", "CASH"], ["ada spasi", " cash"],
-    ["nama bebas", "Cash"], ["nama bebas 2", "M-Banking"],
+    ["key tidak dikenal", "qris"], ["key katalog (belum ada)", "seabank"], ["huruf besar", "CASH"], ["ada spasi", " cash"],
+    ["key populer + spasi", "gopay "], ["paylater (belum dipakai)", "paylater"],
+    ["nama bebas", "Cash"], ["nama bebas 2", "M-Banking"], ["nama bebas 3", "BCA Mobile"], ["nama bebas 4", "GoPay"],
     ["__proto__", "__proto__"], ["constructor", "constructor"], ["prototype", "prototype"], ["toString", "toString"],
     ["markup", "<img src=x onerror=alert(1)>"],
   ];
@@ -77,7 +110,8 @@ function call(w, fn, arg) {
   ok("2d. getPaymentLabel tidak pernah melempar", INVALID.every(([, v]) => !("threw" in call(w, "getPaymentLabel", v))) && Object.keys(EXPECTED).every(k => !("threw" in call(w, "getPaymentLabel", k))));
 
   /* ============ 3. normalizePaymentMethod ============ */
-  ok("3a. keenam key valid dikembalikan apa adanya", list.every(m => call(w, "normalizePaymentMethod", m.key).value === m.key));
+  ok("3a. kesebelas key populer dikembalikan apa adanya", list.every(m => call(w, "normalizePaymentMethod", m.key).value === m.key));
+  ok("3a2. FALLBACK LEGACY: key lama juga lolos apa adanya (menyunting transaksi lama tidak menghapus metodenya)", LEGACY.every(k => call(w, "normalizePaymentMethod", k).value === k), LEGACY.map(k => `${k}=${call(w, "normalizePaymentMethod", k).value}`).join(" | "));
   const badNorm = INVALID.filter(([, v]) => call(w, "normalizePaymentMethod", v).value !== "");
   ok("3b. SEMUA nilai tidak valid jatuh ke PAYMENT_UNSET (\"\")", badNorm.length === 0, badNorm.map(([n]) => n).join(","));
   ok("3c. hasilnya selalu string (tidak pernah undefined/null/objek)", INVALID.every(([, v]) => typeof call(w, "normalizePaymentMethod", v).value === "string") && list.every(m => typeof call(w, "normalizePaymentMethod", m.key).value === "string"));
@@ -92,9 +126,9 @@ function call(w, fn, arg) {
     call(w, "getPaymentLabel", "__proto__");
     return w.eval("({}).polluted === undefined && Object.prototype.polluted === undefined");
   })());
-  ok("3h. memanggil helper tidak mengubah PAYMENT_METHODS", (() => {
-    const after = w.eval("PAYMENT_METHODS");
-    return after.length === 6 && after.map(m => m.key).join() === "cash,mbanking,ewallet,debit,kredit,lainnya";
+  ok("3h. memanggil helper tidak mengubah PAYMENT_METHODS / PAYMENT_LEGACY_METHODS", (() => {
+    const after = w.eval("PAYMENT_METHODS"), afterLegacy = w.eval("PAYMENT_LEGACY_METHODS");
+    return after.length === 11 && after.map(m => m.key).join() === POPULAR.join() && afterLegacy.map(m => m.key).join() === LEGACY.join();
   })());
 
   /* ============ 4. PAGAR TAHAP: P-2..P-5 belum dikerjakan ============ */
@@ -103,19 +137,31 @@ function call(w, fn, arg) {
   for (const f of FILES) srcOf[f] = await (await fetch(BASE + "js/" + f)).text();
   const allJs = FILES.map(f => srcOf[f]).join("\n");
   const html = { index: await (await fetch(BASE + "index.html")).text(), transactions: await (await fetch(BASE + "transactions.html")).text() };
+  // Komentar dibuang saat memeriksa "apakah dipakai di KODE".
+  const codeOnly = (s) => s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|\s)\/\/.*$/gm, "$1");
 
-  ok("4a. P-1: konstanta & helper HANYA ada di core.js", /const PAYMENT_METHODS = \[/.test(srcOf["core.js"]) && FILES.filter(f => f !== "core.js").every(f => !/PAYMENT_METHODS|PAYMENT_UNSET|getPaymentLabel|normalizePaymentMethod/.test(srcOf[f])));
-  ok("4b. P-2 belum: markup form belum punya field metode", !/field-method|name="method"/.test(html.index) && !/field-method|name="method"/.test(html.transactions));
-  ok("4c. P-2 belum: payload transaksi masih 6 field (tanpa metode)", /const payload = \{\s*\n\s*title,\s*\n\s*category: fieldCategory\.value,\s*\n\s*type: getSelectedType\(\),\s*\n\s*amount,\s*\n\s*isoDate: fieldDate\.value,\s*\n\s*time: formatDateID\(fieldDate\.value\),\s*\n\s*\};/.test(srcOf["transactions-shared.js"]));
+  ok("4a. konstanta didefinisikan HANYA di core.js; P-2 memakainya di transactions-shared.js saja", /const PAYMENT_METHODS = \[/.test(srcOf["core.js"]) && FILES.filter(f => f !== "core.js" && f !== "transactions-shared.js").every(f => !/PAYMENT_METHODS|PAYMENT_UNSET|getPaymentLabel|normalizePaymentMethod/.test(srcOf[f])) && !/const PAYMENT_METHODS|const PAYMENT_UNSET|function getPaymentLabel|function normalizePaymentMethod/.test(srcOf["transactions-shared.js"]));
+  ok("4b. P-2 ADA: markup form punya #field-method di kedua halaman", /id="field-method"/.test(html.index) && /id="field-method"/.test(html.transactions) && /name="method"/.test(html.index));
+  ok("4c. P-2 ADA: payload memuat method hasil normalizePaymentMethod (bukan nilai mentah <select>)", /method: normalizePaymentMethod\(fieldMethod\.value\),/.test(srcOf["transactions-shared.js"]));
+  ok("4c2. P-2: loadTransactions TIDAK mengisi default method ke transaksi lama", !/method/.test((srcOf["core.js"].match(/function loadTransactions\(\)[\s\S]*?\n\}/) || [""])[0]));
   ok("4d. P-3 belum: renderTransactionItem belum menampilkan metode", !/transaction-method|getPaymentLabel/.test((srcOf["core.js"].match(/function renderTransactionItem\([\s\S]*?\n\}/) || [""])[0]));
+  ok("4d2. P-3 belum: getPaymentLabel belum dipanggil di mana pun", FILES.every(f => !/getPaymentLabel\(/.test(srcOf[f].replace(/function getPaymentLabel\([\s\S]*?\n\}/, ""))));
   ok("4e. P-4 belum: backup masih schema 2 & validator belum membaca method", /const BACKUP_SCHEMA_VERSION = 2;/.test(srcOf["settings.js"]) && !/raw\.method|normalizePaymentMethod/.test(srcOf["settings.js"]));
   ok("4f. P-4 belum: header CSV belum punya kolom metode", /const CSV_HEADER = \["tanggal", "jenis", "judul", "kategori", "kategori_nama", "jumlah", "waktu"\];/.test(srcOf["settings.js"]));
   ok("4g. P-5 belum: filter transaksi belum mengenal metode", !/method/.test(srcOf["transactions.js"]));
-  ok("4h. tidak ada nama global baru selain dua helper + dua konstanta", (() => {
+  ok("4h. nama global fitur ini TEPAT delapan (5 konstanta/daftar + 2 helper publik + 1 pencari internal)", (() => {
     const names = allJs.split("\n").map(l => (l.match(/^(?:async function|function|const|let)\s+([A-Za-z_$][\w$]*)/) || [])[1]).filter(Boolean);
     const added = names.filter(n => /payment/i.test(n));
-    return added.sort().join() === "PAYMENT_METHODS,PAYMENT_UNSET,getPaymentLabel,normalizePaymentMethod";
+    return added.sort().join() === "PAYMENT_LEGACY_METHODS,PAYMENT_LOGO_DIR,PAYMENT_METHODS,PAYMENT_METHOD_KEYS,PAYMENT_UNSET,findPaymentMethod,getPaymentLabel,normalizePaymentMethod";
   })(), "");
+  ok("4L. R-1: metadata logo ADA di data, tapi belum dipakai UI mana pun", /const PAYMENT_LOGO_DIR = "assets\/payment-methods\/";/.test(srcOf["core.js"]) && FILES.every(f => !/<img|\.logo\b/.test(codeOnly(srcOf[f]))) && !/payment-methods\//.test(html.index + html.transactions));
+  ok("4L2. R-1: tidak ada aset logo yang di-load (file belum ada, jadi tidak ada request gagal)", await (async () => {
+    // Kalau nanti ada kode yang memuat logo sebelum asetnya disiapkan, request
+    // ini akan gagal dan halaman mencatat error — cek konsol di 5a menangkapnya.
+    try { const res = await fetch(BASE + "assets/payment-methods/gopay.svg"); return !res.ok || (await res.text()).length === 0; }
+    catch (e) { return true; } // file:// menolak file yang tidak ada -> memang belum ada
+  })());
+  ok("4i. R-1: katalog lengkap & metode custom BELUM dikerjakan", !/PAYMENT_CATALOG|financeData\.paymentMethods|"user:/.test(allJs) && !/Tambah metode pembayaran/.test(html.index + html.transactions));
 
   /* ============ 5. TIDAK ADA EFEK SAMPING ============ */
   ok("5a. halaman tetap dimuat tanpa error konsol", r.errors.length === 0, r.errors.join(" | "));
@@ -125,6 +171,105 @@ function call(w, fn, arg) {
     return !!meta && !/Cash|M-Banking|E-Wallet|💵|🏦/.test(meta.textContent);
   })());
   ok("5d. transaksi lama (tanpa field method) tetap tampil normal", d.querySelectorAll("#transaction-list .transaction-item").length === 1);
+
+  /* ============ 6. P-2 — FORM & SIMPAN ============ */
+  const optionsOf = (doc) => [...doc.getElementById("field-method").options].map(o => ({ value: o.value, text: o.textContent.trim() }));
+  const storedTx = (w) => JSON.parse(w.localStorage.getItem("financeData.transactions") || "[]");
+  const fill = (doc, { title, amount, category = "makanan", date = T }) => {
+    const set = (id, v) => { const f = doc.getElementById(id); f.value = v; f.dispatchEvent(new Event("input", { bubbles: true })); f.dispatchEvent(new Event("change", { bubbles: true })); };
+    set("field-title", title); set("field-amount", amount); set("field-date", date);
+    doc.getElementById("field-category").value = category;
+  };
+  const pickMethod = (doc, key) => { const f = doc.getElementById("field-method"); f.value = key; f.dispatchEvent(new Event("change", { bubbles: true })); };
+
+  // --- 6A. field & opsi di KEDUA halaman ---
+  for (const page of ["index.html", "transactions.html"]) {
+    const rp = await load(page); const dp = rp.d;
+    const sel = dp.getElementById("field-method");
+    ok(`6a. ${page}: #field-method ada, berupa <select name="method">`, !!sel && sel.tagName === "SELECT" && sel.name === "method");
+    // R-1 baru menyentuh fondasi data; markup form masih daftar P-2 dan akan
+    // disamakan pada R-2. Keadaan transisi itu dipatok di sini supaya tidak
+    // terlupakan, bukan dibiarkan longgar.
+    ok(`6b. ${page}: markup masih daftar P-2 (6 opsi) — R-2 yang menyamakannya dengan PAYMENT_METHODS`, optionsOf(dp).map(o => o.value).join() === "cash,mbanking,ewallet,debit,kredit,lainnya", optionsOf(dp).map(o => o.value).join());
+    ok(`6b2. ${page}: SETIAP opsi di markup masih bisa dibaca aplikasi (aktif atau legacy) — tidak ada pilihan yang menghasilkan data kosong`, optionsOf(dp).every(o => call(w, "normalizePaymentMethod", o.value).value === o.value && call(w, "getPaymentLabel", o.value).value !== ""));
+    ok(`6c. ${page}: teks opsi = label aplikasi untuk key itu (emoji + nama)`, optionsOf(dp).every(o => o.text === call(w, "getPaymentLabel", o.value).value), optionsOf(dp).map(o => o.text).join("|"));
+    ok(`6d. ${page}: field metode berada SEBELUM field tanggal`, (() => {
+      const fields = [...dp.querySelectorAll("#transaction-form .form-field")];
+      const iM = fields.findIndex(f => f.querySelector("#field-method"));
+      const iD = fields.findIndex(f => f.querySelector("#field-date"));
+      return iM > -1 && iD > -1 && iM < iD;
+    })());
+    ok(`6e. ${page}: tidak wajib diisi (tanpa required)`, !sel.required && !sel.hasAttribute("required"));
+  }
+
+  // --- 6B. tambah transaksi: default cash & tersimpan canonical ---
+  let rr = await load("index.html"); let dd = rr.d, ww = rr.w;
+  await tap(dd.querySelector('[data-action="add-transaction"]'));
+  ok("6f. modal tambah: metode default 'cash'", dd.getElementById("field-method").value === "cash");
+  fill(dd, { title: "Kopi", amount: "20000" });
+  dd.getElementById("transaction-form").requestSubmit();
+  await wait(300);
+  let saved = storedTx(ww)[0];
+  ok("6g. transaksi baru tersimpan dengan method 'cash'", saved.title === "Kopi" && saved.method === "cash", JSON.stringify(saved));
+  ok("6h. yang disimpan key canonical, BUKAN label/emoji", !/💵|Cash|M-Banking|🏦/.test(String(saved.method)) && list.some(m => m.key === saved.method));
+  ok("6i. field lain tidak berubah bentuknya (8 field)", Object.keys(saved).sort().join() === "amount,category,id,isoDate,method,time,title,type", Object.keys(saved).sort().join());
+
+  // pilih metode lain
+  await tap(dd.querySelector('[data-action="add-transaction"]'));
+  fill(dd, { title: "Transfer", amount: "50000" });
+  pickMethod(dd, "mbanking");
+  dd.getElementById("transaction-form").requestSubmit();
+  await wait(300);
+  saved = storedTx(ww)[0];
+  ok("6j. metode pilihan user tersimpan apa adanya", saved.title === "Transfer" && saved.method === "mbanking", String(saved.method));
+
+  // --- 6C. reset form kembali ke cash ---
+  await tap(dd.querySelector('[data-action="add-transaction"]'));
+  ok("6k. modal dibuka lagi: metode kembali ke 'cash' (tidak mewarisi pilihan sebelumnya)", dd.getElementById("field-method").value === "cash");
+  dd.getElementById("modal-close").click(); await wait(400);
+
+  // --- 6D. edit transaksi ---
+  rr = await load("transactions.html"); dd = rr.d; ww = rr.w;
+  const beforeEdit = ww.localStorage.getItem("financeData.transactions");
+  await tap(dd.querySelector('#all-transaction-list [data-action="edit"]'));
+  ok("6l. edit transaksi LAMA (tanpa method): tidak ada opsi terpilih (tidak diisi 'cash' diam-diam)", dd.getElementById("field-method").selectedIndex === -1 && dd.getElementById("field-method").value === "");
+  ok("6m. membuka modal edit TIDAK mengubah data tersimpan", ww.localStorage.getItem("financeData.transactions") === beforeEdit);
+  ok("6n. transaksi lama tetap tampil normal saat modal edit terbuka", dd.querySelectorAll("#all-transaction-list .transaction-item").length >= 1 && rr.errors.length === 0, rr.errors.join(" | "));
+  pickMethod(dd, "ewallet");
+  dd.getElementById("transaction-form").requestSubmit();
+  await wait(300);
+  ok("6o. edit menyimpan metode yang dipilih", storedTx(ww).find(t => t.id === 1).method === "ewallet");
+
+  // edit transaksi yang SUDAH punya method -> preselect benar
+  try { ww.localStorage.setItem("financeData.transactions", JSON.stringify([{ id: 5, title: "Listrik", category: "tagihan", type: "expense", amount: 150000, isoDate: T, time: "", method: "debit" }])); } catch (e) {}
+  rr = await load("transactions.html"); dd = rr.d; ww = rr.w;
+  // load() menulis ulang seed; tulis lagi lalu muat ulang halaman saja
+  try { ww.localStorage.setItem("financeData.transactions", JSON.stringify([{ id: 5, title: "Listrik", category: "tagihan", type: "expense", amount: 150000, isoDate: T, time: "", method: "debit" }])); } catch (e) {}
+  ww.location.reload(); await wait(500);
+  dd = frame.contentDocument; ww = frame.contentWindow;
+  await tap(dd.querySelector('#all-transaction-list [data-action="edit"]'));
+  ok("6p. edit transaksi dengan method valid: preselect tepat", dd.getElementById("field-method").value === "debit");
+  dd.getElementById("modal-close").click(); await wait(400);
+
+  // nilai rusak di storage
+  try { ww.localStorage.setItem("financeData.transactions", JSON.stringify([{ id: 6, title: "Rusak", category: "makanan", type: "expense", amount: 1000, isoDate: T, time: "", method: "<img src=x onerror=alert(1)>" }])); } catch (e) {}
+  ww.location.reload(); await wait(500);
+  dd = frame.contentDocument; ww = frame.contentWindow;
+  await tap(dd.querySelector('#all-transaction-list [data-action="edit"]'));
+  ok("6r. method tidak valid di storage: select kosong, tidak ada elemen baru di DOM", dd.getElementById("field-method").selectedIndex === -1 && dd.querySelectorAll("#field-method option").length === 6 && !dd.querySelector("#transaction-form img"));
+  dd.getElementById("transaction-form").requestSubmit();
+  await wait(300);
+  ok("6s. menyimpan ulang membersihkan nilai rusak jadi \"\" (bukan menyimpan markup)", storedTx(ww)[0].method === "");
+
+  /* ============ 7. P-2 TIDAK MENYENTUH TAHAP LAIN ============ */
+  ok("7a. renderer belum berubah: baris transaksi tanpa label metode", (() => {
+    const meta = dd.querySelector("#all-transaction-list .transaction-meta");
+    return !!meta && !/💵|🏦|📱|💳|🪙|Cash|M-Banking|E-Wallet/.test(meta.textContent);
+  })());
+  const settingsSrc = await (await fetch(BASE + "js/settings.js")).text();
+  ok("7b. backup/import/CSV belum berubah (schema 2, tanpa method, CSV 7 kolom)", /const BACKUP_SCHEMA_VERSION = 2;/.test(settingsSrc) && !/method/.test(settingsSrc) && /const CSV_HEADER = \["tanggal", "jenis", "judul", "kategori", "kategori_nama", "jumlah", "waktu"\];/.test(settingsSrc));
+  ok("7c. filter/analitik belum mengenal metode", !/method/.test(await (await fetch(BASE + "js/transactions.js")).text()) && !/method/.test(await (await fetch(BASE + "js/analytics.js")).text()));
+  ok("7d. tanpa error konsol sepanjang alur P-2", rr.errors.length === 0, rr.errors.join(" | "));
 
   document.getElementById("r").textContent = out.join("\n") + `\n\nTOTAL PASS=${out.filter(l => l.startsWith("PASS")).length} FAIL=${out.filter(l => l.startsWith("FAIL")).length}`;
 })().catch(e => { document.getElementById("r").textContent = out.join("\n") + "\nEXCEPTION " + e.message + "\n" + e.stack; });

@@ -154,17 +154,58 @@ function getTransactionEmoji(tx) {
   return tx.type === "income" ? INCOME_EMOJI : getCategoryEmoji(tx.category);
 }
 
-// Metode pembayaran transaksi (P-1: fondasi data saja — belum dipakai form,
-// renderer, maupun backup). Daftar TETAP: key disimpan di data, nama & emoji
-// hanya untuk tampilan, jadi label bisa diubah tanpa migrasi data dan tidak
-// ada teks dari file import yang pernah masuk ke DOM.
+// Metode pembayaran transaksi. Daftar AKTIF = pilihan populer yang tampil di
+// form: Cash + 5 m-banking + 5 e-wallet yang paling banyak dipakai di
+// Indonesia. Katalog lengkap & metode buatan user menyusul di tahap
+// berikutnya — keduanya nanti memakai ruang key yang sama.
+//
+// Yang disimpan di data transaksi selalu `key`; sisanya hanya untuk tampilan
+// (boleh diubah tanpa migrasi data). Tidak ada teks dari luar yang pernah
+// dipakai sebagai label — label selalu datang dari daftar ini.
+//   group : pengelompokan opsi di form (cash | mbanking | ewallet).
+//   emoji : lambang sementara, dipakai label sampai logo tersedia.
+//   logo  : path RELATIF ke aset lokal di dalam repo. Filenya BELUM ada —
+//           disiapkan di tahap UI berikutnya; sampai saat itu tidak ada satu
+//           pun kode yang memuatnya, jadi tidak ada request yang gagal.
+//           Selalu relatif (tanpa protokol/host): aplikasi ini berjalan dari
+//           file:// maupun folder statis, dan aset pihak ketiga tidak boleh
+//           ditarik dari internet.
 const PAYMENT_METHODS = [
-  { key: "cash", name: "Cash", emoji: "💵" },
-  { key: "mbanking", name: "M-Banking", emoji: "🏦" },
-  { key: "ewallet", name: "E-Wallet", emoji: "📱" },
-  { key: "debit", name: "Debit", emoji: "💳" },
-  { key: "kredit", name: "Kredit", emoji: "🪙" },
-  { key: "lainnya", name: "Lainnya", emoji: "🧾" },
+  { key: "cash", name: "Cash", emoji: "💵", group: "cash", logo: "assets/payment-methods/cash.svg" },
+  { key: "bca-mobile", name: "BCA Mobile", emoji: "🏦", group: "mbanking", logo: "assets/payment-methods/bca-mobile.svg" },
+  { key: "brimo", name: "BRImo", emoji: "🏦", group: "mbanking", logo: "assets/payment-methods/brimo.svg" },
+  { key: "livin", name: "Livin' by Mandiri", emoji: "🏦", group: "mbanking", logo: "assets/payment-methods/livin.svg" },
+  { key: "mybca", name: "myBCA", emoji: "🏦", group: "mbanking", logo: "assets/payment-methods/mybca.svg" },
+  { key: "wondr", name: "wondr by BNI", emoji: "🏦", group: "mbanking", logo: "assets/payment-methods/wondr.svg" },
+  { key: "gopay", name: "GoPay", emoji: "📱", group: "ewallet", logo: "assets/payment-methods/gopay.svg" },
+  { key: "dana", name: "DANA", emoji: "📱", group: "ewallet", logo: "assets/payment-methods/dana.svg" },
+  { key: "ovo", name: "OVO", emoji: "📱", group: "ewallet", logo: "assets/payment-methods/ovo.svg" },
+  { key: "shopeepay", name: "ShopeePay", emoji: "📱", group: "ewallet", logo: "assets/payment-methods/shopeepay.svg" },
+  { key: "linkaja", name: "LinkAja", emoji: "📱", group: "ewallet", logo: "assets/payment-methods/linkaja.svg" },
+];
+
+// Folder aset logo (relatif terhadap halaman HTML). Dipakai tahap UI nanti
+// untuk memverifikasi/menyusun path; ditulis sekali di sini supaya tidak ada
+// yang menebak lokasinya sendiri.
+const PAYMENT_LOGO_DIR = "assets/payment-methods/";
+
+// Urutan key metode aktif — dipakai form & pemeriksaan cepat, supaya tidak ada
+// yang menyalin daftarnya sendiri (pola yang sama dengan DEFAULT_CATEGORIES ->
+// cloneDefaultCategories()).
+const PAYMENT_METHOD_KEYS = PAYMENT_METHODS.map((item) => item.key);
+
+// Key dari daftar generik versi pertama. HANYA untuk membaca data lama:
+// transaksi yang terlanjur memakai key ini tetap punya label dan tidak
+// kehilangan informasi, tapi key-nya TIDAK pernah ditawarkan lagi sebagai
+// pilihan baru di form (form hanya membaca PAYMENT_METHODS).
+// logo: "" — key generik ini tidak mewakili satu penyedia, jadi tidak akan
+// pernah punya logo; tampilannya tetap memakai emoji.
+const PAYMENT_LEGACY_METHODS = [
+  { key: "mbanking", name: "M-Banking", emoji: "🏦", logo: "" },
+  { key: "ewallet", name: "E-Wallet", emoji: "📱", logo: "" },
+  { key: "debit", name: "Debit", emoji: "💳", logo: "" },
+  { key: "kredit", name: "Kredit", emoji: "🪙", logo: "" },
+  { key: "lainnya", name: "Lainnya", emoji: "🧾", logo: "" },
 ];
 
 // "Belum ditentukan": transaksi lama (dibuat sebelum fitur ini) dan nilai yang
@@ -172,24 +213,36 @@ const PAYMENT_METHODS = [
 // lama sama dengan mengarang fakta keuangan user.
 const PAYMENT_UNSET = "";
 
-/** Label siap tampil untuk sebuah key: "💵 Cash". Key yang tidak dikenal
- * (termasuk transaksi lama yang belum punya metode) menghasilkan "" supaya
- * pemanggil bisa melewatkannya tanpa pengecekan tambahan.
- * Dicocokkan ke daftar tetap, BUKAN lookup objek — jadi key bawaan Object
- * ("__proto__", "constructor", "toString", …) tidak pernah cocok. */
+/** Data metode untuk sebuah key: dicari di daftar aktif dulu, lalu daftar
+ * legacy. null kalau tidak dikenal. Memakai pencarian pada ARRAY, bukan lookup
+ * objek — jadi key bawaan Object ("__proto__", "constructor", "toString", …)
+ * tidak pernah cocok tanpa perlu guard tambahan. */
+function findPaymentMethod(key) {
+  if (typeof key !== "string" || !key) return null;
+  return PAYMENT_METHODS.find((item) => item.key === key)
+    || PAYMENT_LEGACY_METHODS.find((item) => item.key === key)
+    || null;
+}
+
+/** Label TEKS siap tampil untuk sebuah key: "💵 Cash". Masih memakai emoji —
+ * logo di `PAYMENT_METHODS[].logo` belum dipakai sampai asetnya ada dan
+ * tahap UI-nya dikerjakan. Key legacy tetap punya label supaya transaksi lama
+ * terbaca. Key yang tidak dikenal (termasuk transaksi yang belum punya
+ * metode) menghasilkan "" supaya pemanggil bisa melewatkannya tanpa
+ * pengecekan tambahan. */
 function getPaymentLabel(key) {
-  if (typeof key !== "string" || !key) return "";
-  const method = PAYMENT_METHODS.find((item) => item.key === key);
+  const method = findPaymentMethod(key);
   return method ? `${method.emoji} ${method.name}` : "";
 }
 
 /** Satu-satunya pintu masuk nilai metode dari luar (form, localStorage, file
- * backup nanti): hanya key yang ada di PAYMENT_METHODS yang lolos, sisanya
- * jatuh ke PAYMENT_UNSET. Nama bebas ("Cash"), angka, objek, dan array TIDAK
- * diterima — pola yang sama dengan normalizeCategoryKey() di settings.js. */
+ * backup nanti): key aktif dan key legacy lolos apa adanya, sisanya jatuh ke
+ * PAYMENT_UNSET. Key legacy sengaja ikut lolos supaya menyunting transaksi
+ * lama tidak menghapus metode yang dulu dipilih user; yang menentukan pilihan
+ * BARU tetap PAYMENT_METHODS saja. Nama bebas ("Cash"), angka, objek, dan
+ * array TIDAK diterima — pola yang sama dengan normalizeCategoryKey(). */
 function normalizePaymentMethod(raw) {
-  if (typeof raw !== "string" || !raw) return PAYMENT_UNSET;
-  return PAYMENT_METHODS.some((item) => item.key === raw) ? raw : PAYMENT_UNSET;
+  return findPaymentMethod(raw) ? raw : PAYMENT_UNSET;
 }
 
 // Pilihan emoji di popup tambah/edit kategori.
