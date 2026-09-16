@@ -106,7 +106,7 @@ const setVal = (el, v, ev = "input") => { el.value = v; el.dispatchEvent(new el.
   setVal(d.getElementById("field-date"), isoOther, "change");
   d.getElementById("transaction-form").requestSubmit(); await wait(300);
   ok("5. tambah berhasil di dashboard: tersimpan + feedback 'Transaksi tersimpan.'", stored(w).length === 3 && stored(w)[0].title === "Belanja Bulan Lalu" && stored(w)[0].isoDate === isoOther && txt(d.getElementById("transaction-feedback")) === "Transaksi tersimpan." && !d.getElementById("transaction-feedback").hidden);
-  ok("5b. struktur transaksi tidak berubah (7 field, id angka, amount angka)", Object.keys(stored(w)[0]).sort().join() === "amount,category,id,isoDate,time,title,type" && typeof stored(w)[0].id === "number" && stored(w)[0].amount === 150000);
+  ok("5b. struktur transaksi: 8 field (7 lama + method P-2), id angka, amount angka", Object.keys(stored(w)[0]).sort().join() === "amount,category,id,isoDate,method,time,title,type" && typeof stored(w)[0].id === "number" && stored(w)[0].amount === 150000);
   ok("5c. dashboard tetap menampilkan transaksi terbaru (daftar tidak kosong)", d.querySelectorAll("#transaction-list .transaction-item").length >= 1);
 
   // tanggal berbeda: halaman Semua Transaksi (jalur yang bisa dicapai user =

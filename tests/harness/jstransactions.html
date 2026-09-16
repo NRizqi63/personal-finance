@@ -44,7 +44,19 @@ async function open(url, { tx = TX, width = 390 } = {}) {
   try { w0.localStorage.clear(); w0.sessionStorage.clear(); if (tx !== null) w0.localStorage.setItem("financeData.transactions", typeof tx === "string" ? tx : JSON.stringify(tx)); } catch (e) {}
   return load(url, width);
 }
-const snapLS = (w) => JSON.stringify(KEYS.map(k => w.localStorage.getItem(k)));
+// P-2: transaksi baru/diedit kini menyimpan field `method` (Metode Pembayaran).
+// app.js beku tidak mengenalnya, jadi field itu — dan HANYA field itu —
+// dilepas dari kedua sisi sebelum perbandingan storage. Isinya sendiri diuji
+// di paymentmethodtest.
+const stripMethod = (raw) => {
+  if (raw === null) return raw;
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return raw;
+    return JSON.stringify(parsed.map((tx) => { const copy = { ...tx }; delete copy.method; return copy; }));
+  } catch (e) { return raw; }
+};
+const snapLS = (w) => JSON.stringify(KEYS.map(k => stripMethod(w.localStorage.getItem(k))));
 const stored = (w) => JSON.parse(w.localStorage.getItem("financeData.transactions"));
 const click = async (el) => { el.focus(); el.click(); await wait(120); };
 const type = (d, id, v) => { const f = $(d, id); f.value = v; f.dispatchEvent(new Event("input", { bubbles: true })); f.dispatchEvent(new Event("change", { bubbles: true })); };

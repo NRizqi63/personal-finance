@@ -133,6 +133,9 @@ function setupTransactionModal() {
   const fieldTitle = document.getElementById("field-title");
   const fieldCategory = document.getElementById("field-category");
   const fieldAmount = document.getElementById("field-amount");
+  // Metode pembayaran: opsional. Nilai yang dipakai selalu key canonical dari
+  // PAYMENT_METHODS (core.js), tidak pernah label yang tampil di <option>.
+  const fieldMethod = document.getElementById("field-method");
   const fieldDate = document.getElementById("field-date");
 
   // Opsi kategori mengikuti financeData.categories (bisa diubah user di
@@ -311,7 +314,11 @@ function setupTransactionModal() {
   function resetForm() {
     form.reset();
     fieldId.value = "";
-    [fieldTitle, fieldCategory, fieldAmount, fieldDate].forEach((field) => field.setCustomValidity(""));
+    [fieldTitle, fieldCategory, fieldAmount, fieldMethod, fieldDate].forEach((field) => field.setCustomValidity(""));
+    // Transaksi baru dimulai dari Cash (pilihan paling umum) — user tetap
+    // bisa menggantinya sebelum menyimpan. form.reset() sudah mengembalikan
+    // <option selected>, ini hanya menegaskannya kalau markup berubah.
+    fieldMethod.value = PAYMENT_METHODS[0].key;
     populateCategoryOptions();
     setSelectedType("expense", { animate: false });
     // Tanggal LOKAL (toIsoDate), bukan toISOString() yang berbasis UTC: di
@@ -331,6 +338,12 @@ function setupTransactionModal() {
       fieldTitle.value = tx.title;
       populateCategoryOptions(tx.category);
       fieldAmount.value = formatAmountDigits(String(tx.amount));
+      // Transaksi lama belum punya metode: JANGAN diisi "cash" diam-diam —
+      // pilihan dikosongkan (selectedIndex -1) supaya menyimpan ulang tanpa
+      // menyentuh field ini tidak mengarang data yang tidak pernah dipilih user.
+      const method = normalizePaymentMethod(tx.method);
+      fieldMethod.value = method;
+      if (!method) fieldMethod.selectedIndex = -1;
       fieldDate.value = tx.isoDate || toIsoDate(new Date());
       typeToSelect = tx.type;
     } else {
@@ -368,6 +381,7 @@ function setupTransactionModal() {
   // ada pesan lama yang menempel saat submit berikutnya.
   fieldTitle.addEventListener("input", () => fieldTitle.setCustomValidity(""));
   fieldCategory.addEventListener("change", () => fieldCategory.setCustomValidity(""));
+  fieldMethod.addEventListener("change", () => fieldMethod.setCustomValidity(""));
   fieldDate.addEventListener("change", () => fieldDate.setCustomValidity(""));
 
   // Diekspos supaya tombol edit di daftar transaksi mana pun bisa membuka
@@ -406,6 +420,9 @@ function setupTransactionModal() {
       category: fieldCategory.value,
       type: getSelectedType(),
       amount,
+      // Dinormalisasi lagi di sini: apa pun isi <select> (termasuk kalau DOM
+      // diubah dari luar), yang tersimpan hanya key yang dikenal atau "".
+      method: normalizePaymentMethod(fieldMethod.value),
       isoDate: fieldDate.value,
       time: formatDateID(fieldDate.value),
     };
