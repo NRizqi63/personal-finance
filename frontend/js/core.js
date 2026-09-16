@@ -238,9 +238,12 @@ function loadTransactions() {
 function saveTransactions() {
   try {
     localStorage.setItem(TRANSACTIONS_STORAGE_KEY, JSON.stringify(financeData.transactions));
+    return true;
   } catch (err) {
-    // localStorage tidak tersedia (mis. private browsing) — abaikan, CRUD tetap
-    // berjalan di memori untuk sisa sesi ini saja.
+    // localStorage tidak tersedia/penuh (mis. private browsing). Perubahan
+    // tetap ada di memori sesi ini, tapi pemanggil WAJIB tahu supaya tidak
+    // mengklaim "tersimpan" — kontrak yang sama dengan saveGoals().
+    return false;
   }
 }
 
@@ -287,8 +290,10 @@ function saveBudget() {
       BUDGET_STORAGE_KEY,
       JSON.stringify({ monthly: financeData.budget.monthly, categories: financeData.categories })
     );
+    return true;
   } catch (err) {
-    // localStorage tidak tersedia — perubahan tetap berlaku di memori sesi ini.
+    // Gagal menulis: pemanggil yang memutuskan (rollback + pesan error).
+    return false;
   }
 }
 
@@ -311,8 +316,10 @@ function loadSettings() {
 function saveSettings() {
   try {
     localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(financeData.settings));
+    return true;
   } catch (err) {
-    // localStorage tidak tersedia — perubahan tetap berlaku di memori sesi ini.
+    // Gagal menulis: pemanggil yang memutuskan (rollback + pesan error).
+    return false;
   }
 }
 
@@ -422,7 +429,8 @@ function loadGoals() {
 /** Simpan financeData.goals saat ini ke localStorage (key sendiri).
  * Mengembalikan true kalau benar-benar tertulis, false kalau storage tidak
  * tersedia/penuh — pemanggil (form Tambah Target) memakai ini untuk TIDAK
- * mengklaim "tersimpan" pada sesuatu yang cuma ada di memori. */
+ * mengklaim "tersimpan" pada sesuatu yang cuma ada di memori.
+ * Kontrak boolean yang sama dipakai saveTransactions/saveBudget/saveSettings. */
 function saveGoals() {
   try {
     localStorage.setItem(GOALS_STORAGE_KEY, JSON.stringify(financeData.goals));

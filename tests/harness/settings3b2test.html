@@ -131,7 +131,7 @@ function stubReload(w) {
   d.getElementById("btn-import-export-first").click(); await wait(200);
   ok("3a. 'Export dulu' memanggil export JSON 3A (satu file backup ter-unduh)", files.length === 1 && /^personal-finance-backup-\d{4}-\d{2}-\d{2}\.json$/.test(files[0].name), JSON.stringify(files.map(f => f.name)));
   const exported = JSON.parse(await new Promise(res => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.readAsText(files[0].blob); }));
-  ok("3b. isi export = DATA AKTIF saat ini (bukan isi file import)", exported.data.transactions[0].title === "Kopi Aktif" && exported.data.budget.monthly === 1234000 && exported.schema === 1);
+  ok("3b. isi export = DATA AKTIF saat ini (bukan isi file import)", exported.data.transactions[0].title === "Kopi Aktif" && exported.data.budget.monthly === 1234000 && exported.schema === 2);
   ok("3c. 'Export dulu' tidak menutup modal & tidak menghapus pendingImport", !overlay().hidden && !!w.getPendingImport() && w.getPendingImport().counts.validRows === 2);
   ok("3d. 'Export dulu' tidak mengubah localStorage", snapLS(w) === before);
   w.URL.createObjectURL = realCreate; w.HTMLAnchorElement.prototype.click = realClick;
@@ -223,10 +223,10 @@ function stubReload(w) {
   const appJs = await fetchAppJs(BASE);
   ok("8a. tidak ada pemanggilan localStorage.clear() (komentar diabaikan)", !/localStorage\.clear\(\)/.test(appJs.replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, "")));
   ok("8b. rollback memakai removeItem (bukan clear) & hanya tiga key import", /IMPORT_STORAGE_KEYS/.test(String(w.rollbackStorage)) && /removeItem/.test(String(w.rollbackStorage)) && !/clear\(/.test(String(w.rollbackStorage)));
-  ok("8c. writeImportedData hanya menulis tiga key financeData.* dari data tervalidasi", (String(w.writeImportedData).match(/localStorage\.setItem/g) || []).length === 3 && /JSON\.stringify\(data\.transactions\)/.test(String(w.writeImportedData)));
+  ok("8c. writeImportedData menulis tiga key wajib + key goals HANYA kalau file membawanya", (() => { const src = String(w.writeImportedData); return (src.match(/localStorage\.setItem/g) || []).length === 4 && /JSON\.stringify\(data\.transactions\)/.test(src) && /if \(Array\.isArray\(data\.goals\)\) localStorage\.setItem\(GOALS_STORAGE_KEY/.test(src); })());
   ok("8d. checkinDismissed tidak pernah ditulis/dihapus oleh jalur import", !/checkinDismissed/.test([w.applyPendingImport, w.snapshotStorage, w.writeImportedData, w.rollbackStorage, w.setImportNotice, w.consumeImportNotice].map(String).join("\n")));
   ok("8e. tanpa fetch/XHR/eval/new Function di jalur import", !/[^.\w]eval\s*\(|new Function|XMLHttpRequest|WebSocket|\bfetch\s*\(/.test([w.applyPendingImport, w.writeImportedData, w.rollbackStorage, w.snapshotStorage, w.setupSettingsImport].map(String).join("\n")));
-  ok("8f. reset SELURUH data belum dibuat (hanya tiga reset parsial di Zona Berbahaya)", !d.querySelector('[data-reset-target="all"]') && d.querySelectorAll("#reset-actions [data-reset-target]").length === 3);
+  ok("8f. reset SELURUH data belum dibuat (empat reset parsial: transaksi, target, budget, profil)", !d.querySelector('[data-reset-target="all"]') && d.querySelectorAll("#reset-actions [data-reset-target]").length === 4);
   ok("8g. export JSON & CSV tetap ada", !!d.getElementById("btn-export-json") && !!d.getElementById("btn-export-csv"));
   ok("8h. applyPendingImport menolak kalau pendingImport hilang (tidak percaya DOM)", (() => { const res = w.applyPendingImport(); return !res.ok && res.code === "no-pending" && /Pilih ulang/.test(res.message); })());
 

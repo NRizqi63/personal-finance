@@ -267,9 +267,9 @@ function loadRaw(w, raw) {
     const refresh = (appCode.match(/function refreshDashboard\(\)[\s\S]*?\n\}/) || [""])[0];
     return /renderGoalsDashboard\(\)/.test(initDash) && !/Goal/.test(refresh);
   })());
-  ok("L15. G-6 belum: buildBackup belum menyebut goals", !/data:\s*\{[^}]*goals/.test(appCode));
-  ok("L16. G-6 belum: IMPORT_STORAGE_KEYS masih 3 key", /const IMPORT_STORAGE_KEYS = \[TRANSACTIONS_STORAGE_KEY, BUDGET_STORAGE_KEY, SETTINGS_STORAGE_KEY\];/.test(appJs));
-  ok("L17. G-7 belum: DATA_RESET_TARGETS masih 3 target", (appJs.match(/const DATA_RESET_TARGETS = \{[\s\S]*?\};/) || [""])[0].split("\n").filter(l => /STORAGE_KEY\]/.test(l)).length === 3);
+  ok("L15. G-6 ADA: buildBackup menyertakan data.goals + counts.goals (M1)", /goals: financeData\.goals,/.test(appCode) && /goals: financeData\.goals\.length,/.test(appCode));
+  ok("L16. M1: IMPORT_STORAGE_KEYS tetap 3 key dasar, key goals ditambahkan lewat importTargetKeys() hanya kalau file membawanya", /const IMPORT_STORAGE_KEYS = \[TRANSACTIONS_STORAGE_KEY, BUDGET_STORAGE_KEY, SETTINGS_STORAGE_KEY\];/.test(appJs) && /function importTargetKeys\(data\) \{[\s\S]*?Array\.isArray\(data\.goals\)[\s\S]*?GOALS_STORAGE_KEY/.test(appJs));
+  ok("L17. G-7 ADA: DATA_RESET_TARGETS 4 target termasuk goals -> [GOALS_STORAGE_KEY]", (() => { const block = (appJs.match(/const DATA_RESET_TARGETS = \{[\s\S]*?\};/) || [""])[0]; return block.split("\n").filter(l => /STORAGE_KEY\]/.test(l)).length === 4 && /goals: \[GOALS_STORAGE_KEY\],/.test(block); })());
   ok("L18. G-8 belum: mock financeData.goal masih ada", /goal: \{\s*\n\s*name: "Dana Darurat"/.test(appJs));
   ok("L19. G-8 belum: renderCheckin belum membaca financeData.goals", !/financeData\.goals/.test((appJs.match(/function renderCheckin\(\)[\s\S]*?\n\}/) || [""])[0]));
   // Fondasi murni: di KODE, getGoalStatus hanya 1 definisi + 2 panggilan di

@@ -194,6 +194,9 @@
           <input type="date" id="field-date" name="date" required />
         </div>
 
+        <!-- Kegagalan menyimpan (bukan validasi field) ditampilkan di sini,
+             di dalam popup, supaya isian user tidak hilang. -->
+        <p class="settings-feedback" id="transaction-modal-status" role="status" aria-live="polite" hidden></p>
         <div class="modal-actions">
           <button type="button" class="btn btn--ghost" id="modal-cancel">Batal</button>
           <button type="submit" class="btn btn--primary" id="modal-submit">Simpan Transaksi</button>

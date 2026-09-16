@@ -77,7 +77,7 @@ const RESETS = ["transactions", "budget", "settings"];
   // ================= B. layout tombol aksi =================
   ({ d, w } = await load("settings.html", 390));
   const rows = () => [...d.querySelectorAll("#data .settings-row--action, #reset-actions .settings-row--action")];
-  ok("B1. enam baris aksi memakai layout baris-aksi (.settings-row--action)", rows().length === 6);
+  ok("B1. tujuh baris aksi memakai layout baris-aksi (.settings-row--action; +1 reset target keuangan M1)", rows().length === 7);
   ok("B2. semua tombol aksi ada & berfungsi sebagai tombol", ACTIONS.every(id => !!d.getElementById(id)) && RESETS.every(t => !!d.querySelector(`[data-reset-target="${t}"]`)));
   ok("B3. tombol Zona Berbahaya memakai warna danger (merah), tombol Data & Backup hijau", (() => {
     const probe = d.createElement("span"); probe.style.color = "var(--color-danger)"; d.body.append(probe);

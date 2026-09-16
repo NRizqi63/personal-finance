@@ -213,9 +213,33 @@ function setupBudgetEditor() {
     renderBudgetPage(); // ikut bulan yang sedang dilihat (budgetViewDate)
   }
 
+  // Pesan gagal simpan di dalam popup masing-masing (elemen opsional supaya
+  // halaman tanpa markup ini tetap berjalan). Pola & kelasnya sama dengan
+  // #goal-modal-status di goals.html.
+  function setStatus(id, text) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.textContent = text;
+    // Atribut hanya dipasang saat ada pesan: elemen kosong tetap persis
+    // seperti markup awalnya.
+    if (text) el.dataset.type = "error";
+    else delete el.dataset.type;
+    el.hidden = !text;
+  }
+  function clearStatuses() {
+    setStatus("budget-modal-status", "");
+    setStatus("category-modal-status", "");
+    setStatus("budget-confirm-status", "");
+  }
+
+  const SAVE_FAILED_MESSAGE = "Perubahan tidak bisa disimpan — penyimpanan browser penuh atau tidak tersedia. Coba lagi.";
+
+  /** true = benar-benar tersimpan. false = storage menolak; pemanggil yang
+   * mengembalikan perubahan di memori dan memberi tahu user. */
   function persistAndRerender() {
-    saveBudget();
+    const stored = saveBudget();
     rerender();
+    return stored;
   }
 
   /** Nominal dari input "Rp" yang diformat ("1.250.000" -> 1250000). */
@@ -275,6 +299,7 @@ function setupBudgetEditor() {
     fieldMonthly.value = formatAmountDigits(String(financeData.budget.monthly));
     fieldMonthly.setCustomValidity("");
     renderQuickAmounts();
+    clearStatuses();
     budgetModal.open();
   });
 
@@ -286,8 +311,14 @@ function setupBudgetEditor() {
       budgetForm.reportValidity();
       return;
     }
+    const previousMonthly = financeData.budget.monthly;
     financeData.budget.monthly = amount;
-    persistAndRerender();
+    if (!persistAndRerender()) {
+      financeData.budget.monthly = previousMonthly;
+      persistAndRerender();
+      setStatus("budget-modal-status", SAVE_FAILED_MESSAGE);
+      return; // popup tetap terbuka: angka yang diketik tidak hilang
+    }
     budgetModal.close();
   });
 
@@ -364,6 +395,7 @@ function setupBudgetEditor() {
       clearBudgetBtn.hidden = true;
       deleteBtn.hidden = true;
     }
+    clearStatuses();
     categoryModal.open();
   }
 
@@ -402,8 +434,16 @@ function setupBudgetEditor() {
     }
     const key = fieldKey.value || makeCategoryKey(name);
     // Edit: key tetap (transaksi lama tetap terhubung), hanya isinya diganti.
+    const hadCategory = hasCategory(key);
+    const previousCategory = hadCategory ? financeData.categories[key] : null;
     financeData.categories[key] = { name, emoji: selectedEmoji, budget };
-    persistAndRerender();
+    if (!persistAndRerender()) {
+      if (hadCategory) financeData.categories[key] = previousCategory;
+      else delete financeData.categories[key];
+      persistAndRerender();
+      setStatus("category-modal-status", SAVE_FAILED_MESSAGE);
+      return;
+    }
     categoryModal.close();
   });
 
@@ -417,7 +457,12 @@ function setupBudgetEditor() {
     const cat = financeData.categories[key];
     const name = fieldName.value.trim() || cat.name;
     financeData.categories[key] = { name, emoji: selectedEmoji || cat.emoji, budget: 0 };
-    persistAndRerender();
+    if (!persistAndRerender()) {
+      financeData.categories[key] = cat;
+      persistAndRerender();
+      setStatus("category-modal-status", SAVE_FAILED_MESSAGE);
+      return;
+    }
     categoryModal.close();
   });
 
@@ -436,14 +481,22 @@ function setupBudgetEditor() {
     confirmText.textContent = count
       ? `${count} transaksi yang memakai kategori ini tidak akan ikut terhapus — semuanya tetap tersimpan dan akan tampil sebagai "Lainnya".`
       : "Transaksi yang sudah ada tidak akan ikut terhapus.";
+    clearStatuses();
     confirmModal.open();
   });
 
   confirmDelete.addEventListener("click", () => {
     if (!pendingDeleteKey) return;
-    delete financeData.categories[pendingDeleteKey]; // transaksi tidak disentuh
+    const key = pendingDeleteKey;
+    const removed = financeData.categories[key];
+    delete financeData.categories[key]; // transaksi tidak disentuh
+    if (!persistAndRerender()) {
+      financeData.categories[key] = removed;
+      persistAndRerender();
+      setStatus("budget-confirm-status", "Kategori tidak bisa dihapus — penyimpanan browser penuh atau tidak tersedia. Coba lagi.");
+      return; // konfirmasi tetap terbuka
+    }
     pendingDeleteKey = null;
-    persistAndRerender();
     confirmModal.close();
     categoryModal.close();
   });

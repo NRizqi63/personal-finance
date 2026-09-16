@@ -17,15 +17,18 @@
 
 // Versi FORMAT file backup (bukan versi aplikasi) — dinaikkan hanya kalau
 // struktur file berubah, dipakai import nanti untuk menolak file yang lebih baru.
-const BACKUP_SCHEMA_VERSION = 1;
+// 1 -> 2: file sekarang ikut membawa data.goals (Target Keuangan). File
+// schema 1 tetap sah diimpor; goals yang sudah tersimpan tidak disentuh.
+const BACKUP_SCHEMA_VERSION = 2;
 
 const BACKUP_APP_ID = "personal-finance";
 
 /**
- * Isi file backup JSON: HANYA data yang benar-benar dipersist (tiga key
- * localStorage). Mock (notifications, goal), state sesi (checkinDismissed,
- * isBalanceVisible, budgetViewDate, filter/sort, nextTransactionId) sengaja
- * TIDAK ikut — semuanya dihitung/di-reset sendiri saat aplikasi dibuka.
+ * Isi file backup JSON: HANYA data yang benar-benar dipersist (empat key
+ * localStorage: transaksi, budget+kategori, pengaturan, target keuangan).
+ * Mock (notifications, goal), state sesi (checkinDismissed, isBalanceVisible,
+ * budgetViewDate, filter/sort, nextTransactionId) sengaja TIDAK ikut —
+ * semuanya dihitung/di-reset sendiri saat aplikasi dibuka.
  */
 function buildBackup(now = new Date()) {
   return {
@@ -37,11 +40,15 @@ function buildBackup(now = new Date()) {
     counts: {
       transactions: financeData.transactions.length,
       categories: Object.keys(financeData.categories).length,
+      goals: financeData.goals.length,
     },
     data: {
       transactions: financeData.transactions,
       budget: { monthly: financeData.budget.monthly, categories: financeData.categories },
       settings: financeData.settings,
+      // Daftar kosong tetap ditulis sebagai [] (bukan dihilangkan): file
+      // schema 2 selalu menyatakan kondisi goals secara eksplisit.
+      goals: financeData.goals,
     },
   };
 }
@@ -120,7 +127,7 @@ function exportBackupJson() {
     const backup = buildBackup();
     const name = backupFileName("json");
     downloadFile(name, JSON.stringify(backup, null, 2), "application/json");
-    showDataFeedback(`Backup tersimpan sebagai ${name} (${backup.counts.transactions} transaksi, ${backup.counts.categories} kategori).`, "success");
+    showDataFeedback(`Backup tersimpan sebagai ${name} (${backup.counts.transactions} transaksi, ${backup.counts.categories} kategori, ${backup.counts.goals} target).`, "success");
   } catch (err) {
     showDataFeedback("Gagal membuat file backup. Coba lagi, atau periksa pengaturan unduhan browser.", "error");
   }
@@ -159,9 +166,19 @@ const CATEGORY_KEY_PATTERN = /^[A-Za-z0-9_.:@+-]{1,40}$/;
 // berjalan tetap terbaca setelah pembaruan ini.
 const DATA_NOTICE_KEY = "financeData.importNotice";
 
-// Tiga key yang boleh disentuh proses import (urutan penulisan: yang paling
+// Key yang SELALU disentuh proses import (urutan penulisan: yang paling
 // besar dulu, supaya kegagalan kuota terjadi sebelum key lain berubah).
 const IMPORT_STORAGE_KEYS = [TRANSACTIONS_STORAGE_KEY, BUDGET_STORAGE_KEY, SETTINGS_STORAGE_KEY];
+
+/** Key yang benar-benar akan ditulis untuk SATU file tertentu. Key goals
+ * hanya ikut kalau filenya memang membawa daftar target (schema 2); file
+ * lama (schema 1) tidak boleh menyentuh target yang sudah tersimpan.
+ * Snapshot & rollback memakai daftar yang sama supaya selalu utuh. */
+function importTargetKeys(data) {
+  return data && Array.isArray(data.goals)
+    ? [...IMPORT_STORAGE_KEYS, GOALS_STORAGE_KEY]
+    : IMPORT_STORAGE_KEYS;
+}
 
 // Key yang dihapus per jenis reset. Menghapus key = aplikasi kembali memakai
 // nilai awalnya sendiri: transaksi kosong, budget seed (Rp2.400.000 + 5
@@ -169,6 +186,7 @@ const IMPORT_STORAGE_KEYS = [TRANSACTIONS_STORAGE_KEY, BUDGET_STORAGE_KEY, SETTI
 // data belum termasuk di sini.
 const DATA_RESET_TARGETS = {
   transactions: [TRANSACTIONS_STORAGE_KEY],
+  goals: [GOALS_STORAGE_KEY],
   budget: [BUDGET_STORAGE_KEY],
   settings: [SETTINGS_STORAGE_KEY],
 };
@@ -176,6 +194,7 @@ const DATA_RESET_TARGETS = {
 // Pesan hasil per jenis reset (dipakai notice setelah reload).
 const DATA_RESET_MESSAGES = {
   transactions: "Semua transaksi sudah dihapus. Budget, kategori, dan pengaturan tidak berubah.",
+  goals: "Semua target keuangan sudah dihapus. Transaksi, budget, dan pengaturan tidak berubah.",
   budget: "Budget & kategori sudah dikembalikan ke pengaturan bawaan. Transaksi tidak berubah.",
   settings: "Profil & preferensi sudah dikembalikan ke default. Transaksi dan budget tidak berubah.",
 };
@@ -183,6 +202,7 @@ const DATA_RESET_MESSAGES = {
 // Label singkat untuk pesan kegagalan.
 const DATA_RESET_LABELS = {
   transactions: "Hapus semua transaksi",
+  goals: "Hapus semua target keuangan",
   budget: "Reset budget & kategori",
   settings: "Reset profil & preferensi",
 };
@@ -252,6 +272,7 @@ function validateBackup(rawText) {
   const meta = {
     exportedAt: null, appVersion: null, schema: null,
     budgetFound: false, settingsFound: false, budgetFallback: false, settingsFallback: false,
+    goalsFound: false, goals: 0, goalsSkipped: 0,
     categories: 0, categoriesSkipped: 0, monthly: 0,
     unknownCategories: [], idsRenumbered: false, duplicateIds: 0, invalidIds: 0,
   };
@@ -348,6 +369,37 @@ function validateBackup(rawText) {
   meta.settingsFallback = !meta.settingsFound;
   if (!meta.settingsFound) warnings.push("Pengaturan tidak ada di file, jadi pengaturan default yang akan dipakai.");
 
+  // ---------- target keuangan (goals) ----------
+  // File schema 1 tidak punya bagian ini. Keputusan produk: goals yang sudah
+  // tersimpan TIDAK disentuh, dan user diberi tahu lewat warning — bukan
+  // dikosongkan diam-diam. goals = null berarti "jangan tulis key goals".
+  const rawGoals = parsed.data.goals;
+  meta.goalsFound = Array.isArray(rawGoals);
+  let goals = null;
+  if (meta.goalsFound) {
+    const usedGoalIds = new Set();
+    goals = [];
+    rawGoals.forEach((raw, index) => {
+      // Batas GOAL_LIMIT dijaga di sini supaya file besar tidak menimbun
+      // target tanpa batas; sisanya dihitung sebagai dilewati.
+      if (goals.length >= GOAL_LIMIT) { meta.goalsSkipped += 1; return; }
+      const goal = normalizeGoal(raw, index + 1); // aturan G-1, sama dengan loadGoals()
+      if (!goal) { meta.goalsSkipped += 1; return; }
+      // id wajib unik supaya edit & hapus tidak pernah mengenai dua target.
+      if (usedGoalIds.has(goal.id)) goal.id = Math.max(0, ...usedGoalIds) + 1;
+      usedGoalIds.add(goal.id);
+      goals.push(goal);
+    });
+    meta.goals = goals.length;
+    if (meta.goalsSkipped) {
+      warnings.push(`${meta.goalsSkipped} target keuangan dilewati karena datanya tidak lengkap atau melebihi batas ${GOAL_LIMIT} target.`);
+    }
+  } else if (rawGoals === undefined) {
+    warnings.push("File backup ini dibuat sebelum fitur Target Keuangan, jadi target yang tersimpan sekarang tidak akan diubah.");
+  } else {
+    warnings.push("Bagian target keuangan di file tidak terbaca, jadi target yang tersimpan sekarang tidak akan diubah.");
+  }
+
   // ---------- kategori transaksi yang tidak dikenal ----------
   const unknown = new Set();
   transactions.forEach((tx) => {
@@ -361,7 +413,8 @@ function validateBackup(rawText) {
     ok: true,
     errors,
     warnings,
-    data: { transactions, budget: budgetResult.budget, settings },
+    // goals: array kalau file membawanya, null kalau tidak (key goals tidak disentuh).
+    data: { transactions, budget: budgetResult.budget, settings, goals },
     counts: { totalRows: rawRows.length, validRows: transactions.length, skippedRows },
     skipped,
     meta,
@@ -379,14 +432,17 @@ function snapshotStorage(keys = IMPORT_STORAGE_KEYS) {
   return snapshot;
 }
 
-/** Tulis data HASIL VALIDASI (bukan JSON mentah dari file) ke tiga key.
+/** Tulis data HASIL VALIDASI (bukan JSON mentah dari file) ke key targetnya.
  * Melempar kalau salah satu setItem gagal — pemanggil yang melakukan
- * rollback. Sengaja tidak memakai saveTransactions/saveBudget/saveSettings
- * yang menelan error di dalam try/catch-nya sendiri. */
+ * rollback. Sengaja tidak memakai saveTransactions/saveBudget/saveSettings/
+ * saveGoals: di sini kegagalan HARUS menghentikan proses, bukan dilaporkan
+ * lewat nilai kembalian. */
 function writeImportedData(data) {
   localStorage.setItem(TRANSACTIONS_STORAGE_KEY, JSON.stringify(data.transactions));
   localStorage.setItem(BUDGET_STORAGE_KEY, JSON.stringify({ monthly: data.budget.monthly, categories: data.budget.categories }));
   localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(data.settings));
+  // Hanya kalau file memang membawa target; file schema 1 tidak menyentuhnya.
+  if (Array.isArray(data.goals)) localStorage.setItem(GOALS_STORAGE_KEY, JSON.stringify(data.goals));
 }
 
 /** Kembalikan ketiga key ke kondisi snapshot. Key yang tadinya tidak ada
@@ -456,9 +512,11 @@ function applyPendingImport() {
     return { ok: false, code: "no-pending", message: "File backup sudah tidak tersedia. Pilih ulang filenya lalu coba lagi." };
   }
 
+  // Snapshot & rollback memakai PERSIS key yang akan ditulis file ini.
+  const keys = importTargetKeys(pending.data);
   let snapshot;
   try {
-    snapshot = snapshotStorage();
+    snapshot = snapshotStorage(keys);
   } catch (err) {
     return { ok: false, code: "storage-unavailable", message: "Penyimpanan browser tidak bisa diakses, jadi import dibatalkan. Data kamu tidak berubah." };
   }
@@ -466,16 +524,17 @@ function applyPendingImport() {
   try {
     writeImportedData(pending.data);
   } catch (err) {
-    const restored = rollbackStorage(snapshot);
+    const restored = rollbackStorage(snapshot, keys);
     return restored
       ? { ok: false, code: "write-failed", message: "Import gagal di tengah jalan (penyimpanan browser penuh atau tidak bisa ditulis). Data lama sudah dikembalikan seperti semula." }
       : { ok: false, code: "rollback-failed", message: "⚠️ Import gagal dan data lama belum bisa dikembalikan sepenuhnya. Jangan tutup atau menyegarkan halaman ini dulu — coba import ulang file backup kamu sekarang." };
   }
 
   const counts = pending.counts;
+  const goalsNote = pending.meta.goalsFound ? ` ${pending.meta.goals} target keuangan ikut dipulihkan.` : "";
   pendingImport = null; // sudah diterapkan; jangan bisa dipakai dua kali
-  setDataNotice(`Import berhasil: ${counts.validRows} transaksi dipulihkan dari file backup.`);
-  return { ok: true, code: "applied", message: `Import berhasil: ${counts.validRows} transaksi dipulihkan.` };
+  setDataNotice(`Import berhasil: ${counts.validRows} transaksi dipulihkan dari file backup.${goalsNote}`);
+  return { ok: true, code: "applied", message: `Import berhasil: ${counts.validRows} transaksi dipulihkan.${goalsNote}` };
 }
 
 /**
@@ -549,6 +608,9 @@ function renderImportSummary(result, target) {
     ["Kategori", `${result.meta.categories}${result.meta.budgetFallback ? " (default aplikasi)" : ""}`],
     ["Budget bulanan", formatRupiah(result.meta.monthly)],
     ["Pengaturan", result.meta.settingsFallback ? "default aplikasi" : "dari file"],
+    ["Target keuangan", result.meta.goalsFound
+      ? `${result.meta.goals} target akan menggantikan ${financeData.goals.length} target sekarang`
+      : "tidak ada di file — target sekarang tetap"],
     ["Data saat ini", `${financeData.transactions.length} transaksi akan diganti`],
   ]);
 }
@@ -713,6 +775,19 @@ function getResetPlan(target) {
       action: "Hapus Transaksi",
       rows: [
         ["Transaksi dihapus", `${txCount} transaksi`],
+        ["Budget & kategori", "tetap"],
+        ["Profil & preferensi", "tetap"],
+      ],
+    };
+  }
+  if (target === "goals") {
+    return {
+      title: "Hapus Semua Target Keuangan?",
+      sub: "Seluruh target di halaman Target Keuangan akan dihapus dari browser ini. Tindakan ini tidak bisa dibatalkan.",
+      action: "Hapus Target",
+      rows: [
+        ["Target dihapus", `${financeData.goals.length} target`],
+        ["Transaksi", `tetap (${txCount} transaksi)`],
         ["Budget & kategori", "tetap"],
         ["Profil & preferensi", "tetap"],
       ],
@@ -922,8 +997,16 @@ function setupSettingsProfile() {
       input.focus();
       return;
     }
+    const previousName = financeData.settings.name;
     financeData.settings.name = name;
-    saveSettings();
+    if (!saveSettings()) {
+      // Jangan pernah mengklaim tersimpan: kembalikan nilai lama di memori
+      // supaya tampilan dan data tetap sepakat.
+      financeData.settings.name = previousName;
+      renderPreview();
+      showFeedback("Nama tidak bisa disimpan — penyimpanan browser penuh atau tidak tersedia. Coba lagi.", "error");
+      return;
+    }
     input.value = name; // tampilkan versi yang sudah dipangkas
     renderPreview();
     renderGreeting(); // no-op di sini; dashboard membaca settings saat dibuka
@@ -947,21 +1030,37 @@ function setupSettingsPreferences() {
   hideBalance.checked = financeData.settings.hideBalanceOnOpen;
   showCheckin.checked = financeData.settings.showCheckin;
 
-  function saved(text) {
+  function saved(text, type = "success") {
     clearTimeout(feedbackTimer);
     feedback.textContent = text;
+    feedback.dataset.type = type;
     feedback.hidden = false;
-    feedbackTimer = setTimeout(() => { feedback.hidden = true; }, 2500);
+    // Pesan gagal dibiarkan tampil (tidak auto-hilang) supaya tidak terlewat.
+    if (type === "success") feedbackTimer = setTimeout(() => { feedback.hidden = true; }, 2500);
   }
 
+  const PREF_FAILED_MESSAGE = "Preferensi tidak bisa disimpan — penyimpanan browser penuh atau tidak tersedia. Coba lagi.";
+
   hideBalance.addEventListener("change", () => {
+    const previous = financeData.settings.hideBalanceOnOpen;
     financeData.settings.hideBalanceOnOpen = hideBalance.checked;
-    saveSettings();
+    if (!saveSettings()) {
+      financeData.settings.hideBalanceOnOpen = previous;
+      hideBalance.checked = previous; // switch kembali ke posisi semula
+      saved(PREF_FAILED_MESSAGE, "error");
+      return;
+    }
     saved(hideBalance.checked ? "Saldo akan disembunyikan saat dashboard dibuka." : "Saldo akan langsung tampil saat dashboard dibuka.");
   });
   showCheckin.addEventListener("change", () => {
+    const previous = financeData.settings.showCheckin;
     financeData.settings.showCheckin = showCheckin.checked;
-    saveSettings();
+    if (!saveSettings()) {
+      financeData.settings.showCheckin = previous;
+      showCheckin.checked = previous; // switch kembali ke posisi semula
+      saved(PREF_FAILED_MESSAGE, "error");
+      return;
+    }
     saved(showCheckin.checked ? "Check-in harian akan tampil saat membuka dashboard." : "Check-in harian tidak akan tampil otomatis.");
   });
 }

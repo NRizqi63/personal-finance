@@ -30,8 +30,8 @@ CHROME_FLAGS="--no-sandbox" ./tests/scripts/run-tests.sh
 ## Cara menjalankan
 
 ```bash
-./tests/scripts/run-tests.sh              # semua: 36 suite + console + overflow (~10-15 menit)
-./tests/scripts/run-tests.sh suites       # hanya 36 suite
+./tests/scripts/run-tests.sh              # semua: 37 suite + console + overflow (~10-15 menit)
+./tests/scripts/run-tests.sh suites       # hanya 37 suite
 ./tests/scripts/run-tests.sh console      # 6 halaman x 4 lebar, error konsol harus 0
 ./tests/scripts/run-tests.sh overflow     # 6 halaman x 6 lebar, tidak boleh scroll horizontal
 ./tests/scripts/run-tests.sh modalracetest jssettings    # suite tertentu saja
@@ -55,7 +55,7 @@ tests/
 ├── fixtures/
 │   ├── legacy/          app.js & style.css versi pra-refactor (BEKU — jangan diedit)
 │   └── pages/           halaman referensi: *_legacy.html, app_ref.html, jsf_page.html
-├── harness/             36 suite + 2 harness berparameter (consolecheck, harness)
+├── harness/             37 suite + 2 harness berparameter (consolecheck, harness)
 └── scripts/
     └── run-tests.sh     satu-satunya runner
 ```
@@ -77,17 +77,21 @@ karena yang di atas memberi diagnosis paling cepat saat ada yang rusak.
    byte-per-byte, DOM, localStorage, fokus, computed style).
 2. **Modal** — `modalracetest` (siklus hidup: timer hide, frame `.is-open`,
    fokus, scroll lock, buka-ulang < durasi animasi), `modaltest`.
-3. **Per fitur** — goals (`goalstest`, `goals2test`, `goals3atest`,
+3. **Data & penyimpanan (M1)** — `m1datatest`: Target Keuangan di
+   backup/import/reset, rollback empat key, kontrak boolean `saveTransactions`/
+   `saveBudget`/`saveSettings`/`saveGoals`, dan perilaku setiap pemanggilnya
+   saat localStorage menolak menulis.
+4. **Per fitur** — goals (`goalstest`, `goals2test`, `goals3atest`,
    `goals3btest`, `goals4test`), analytics (`analyticsperiodtest`,
    `analyticstest`, `charttest`), budget (`budgettest`), transaksi & dashboard
    (`calendartest`, `scrolltest`, `fixtest`, `functest`, `uxflowtest`,
    `v1fixtest`, `v21test`, `v22test`, `finalaudit`).
-4. **Settings & data** — `settingstest`, `settings2test`, `settings3test`,
+5. **Settings & data** — `settingstest`, `settings2test`, `settings3test`,
    `settings3b0test`, `settings3b1test`, `settings3b2test`, `settings3c1test`,
    `settingsuitest`. Mencakup export, validasi import, snapshot/rollback, reset.
-5. **Console** — tidak boleh ada `error`, `unhandledrejection`, `console.error`,
+6. **Console** — tidak boleh ada `error`, `unhandledrejection`, `console.error`,
    atau `console.warn` di 6 halaman × 4 lebar.
-6. **Overflow** — `scrollWidth` halaman harus sama dengan viewport di 6 halaman
+7. **Overflow** — `scrollWidth` halaman harus sama dengan viewport di 6 halaman
    × 6 lebar (320–430 px).
 
 ## Membaca hasil
@@ -108,7 +112,7 @@ functest               PASS=59   FAIL=1   (1 known artifact)
   sebagai kegagalan dan tidak membuat exit code merah.
 - Ringkasan terakhir: `TOTAL PASS=… FAIL(baru)=… known artifact=…`.
 
-Angka acuan saat milestone M0 (Chrome 141, Windows): 36 suite hijau, `functest`
+Angka acuan saat milestone M1 (Chrome 141, Windows): 37 suite hijau, `functest`
 59/1 (artefak di bawah), console 24/24 bersih, overflow 36/36 bersih.
 
 ## Known artifact: `functest` 59 PASS / 1 FAIL

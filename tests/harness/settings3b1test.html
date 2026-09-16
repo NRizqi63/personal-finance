@@ -80,7 +80,7 @@ async function pickFile(d, w, name, content, type = "application/json") {
   ok("1b1. perubahan hanya copy: struktur, selector, dan a11y baris Import tetap", importRow.querySelector(".settings-row-title").textContent.trim() === "Import Backup (JSON)" && importRow.querySelector(".settings-row-body") !== null && importRow.querySelector("[aria-hidden=\"true\"]") !== null && d.getElementById("import-file").hidden && d.getElementById("import-file").accept === ".json,application/json" && d.getElementById("settings-data-status").getAttribute("role") === "status" && d.getElementById("settings-data-status").getAttribute("aria-live") === "polite");
   ok("1b1b. sebelum ada file: status & ringkasan kosong (tidak ada klaim apa pun lebih dulu)", txt(d.getElementById("settings-data-status")) === "" && txt(d.getElementById("import-summary")) === "");
   ok("1c. area status & ringkasan ada dan tersembunyi sebelum ada file", d.getElementById("settings-data-status").hidden && d.getElementById("import-summary").hidden);
-  ok("1d. reset tersedia sebagai tiga aksi parsial di Zona Berbahaya (reset seluruh data belum ada)", d.querySelectorAll("#reset-actions [data-reset-target]").length === 3 && !d.querySelector('[data-reset-target="all"]') && d.querySelectorAll("#data .badge-soon").length === 0);
+  ok("1d. reset tersedia sebagai empat aksi parsial termasuk target keuangan (reset seluruh data belum ada)", d.querySelectorAll("#reset-actions [data-reset-target]").length === 4 && !!d.querySelector('[data-reset-target="goals"]') && !d.querySelector('[data-reset-target="all"]') && d.querySelectorAll("#data .badge-soon").length === 0);
   ok("1e. export JSON/CSV tidak terganggu", !!d.getElementById("btn-export-json") && !!d.getElementById("btn-export-csv"));
 
   // ================= 2. validator: root =================
@@ -89,7 +89,8 @@ async function pickFile(d, w, name, content, type = "application/json") {
   ok("2c. root null / string / angka ditolak", !V("null").ok && !V('"teks"').ok && !V("42").ok);
   ok("2d. app mismatch ditolak (backup aplikasi lain)", (() => { const r = V(backup({ transactions: [] }, { app: "other-app" })); return !r.ok && /aplikasi lain/.test(r.errors[0]); })());
   ok("2e. schema hilang / bukan angka ditolak", !V(backup({ transactions: [] }, { schema: undefined })).ok && !V(backup({ transactions: [] }, { schema: "1" })).ok);
-  ok("2f. schema lebih tinggi ditolak dengan pesan versi", (() => { const r = V(backup({ transactions: [] }, { schema: 2 })); return !r.ok && /versi aplikasi yang lebih baru \(format 2\)/.test(r.errors[0]); })());
+  ok("2f. schema lebih tinggi ditolak dengan pesan versi (sekarang batasnya 2)", (() => { const r = V(backup({ transactions: [] }, { schema: 3 })); return !r.ok && /versi aplikasi yang lebih baru \(format 3\)/.test(r.errors[0]); })());
+  ok("2f2. file schema 1 (sebelum fitur target) TETAP diterima", (() => { const r = V(backup({ transactions: [tx()] }, { schema: 1 })); return r.ok && r.meta.goalsFound === false && r.data.goals === null; })());
   ok("2g. data hilang / bukan object ditolak", !V(backup(undefined)).ok && !V(backup([])).ok);
   ok("2h. transactions hilang / bukan array ditolak", !V(backup({})).ok && !V(backup({ transactions: {} })).ok && /data transaksi tidak ditemukan/.test(V(backup({})).errors[0]));
 
@@ -190,7 +191,7 @@ async function pickFile(d, w, name, content, type = "application/json") {
   ok("9b. modal konfirmasi import tersedia di markup & tidak menulis apa pun sendiri", /id="import-modal-overlay"/.test(await (await fetch(BASE + "settings.html")).text()) && !!d.getElementById("import-modal-overlay") && snapshotLS(w) === before);
   ok("9c. tidak ada fetch/XHR/eval/new Function di jalur import", !/[^.\w]eval\s*\(|new Function|XMLHttpRequest|WebSocket|\bfetch\s*\(/.test([w.handleImportFile, w.readBackupFile, w.validateBackup, w.setupSettingsImport, w.renderImportSummary].map(String).join("\n")));
   ok("9d. checkinDismissed tidak disentuh", w.sessionStorage.getItem("checkinDismissed") === null);
-  ok("9e. export JSON masih menghasilkan format schema 1 yang sama", (() => { const b = w.buildBackup(); return b.app === "personal-finance" && b.schema === 1 && !!b.data.transactions && !!b.data.budget && !!b.data.settings; })());
+  ok("9e. export JSON: format schema 2 dengan empat bagian data (M1)", (() => { const b = w.buildBackup(); return b.app === "personal-finance" && b.schema === 2 && !!b.data.transactions && !!b.data.budget && !!b.data.settings && Array.isArray(b.data.goals) && Number.isInteger(b.counts.goals); })());
   ok("9f. round-trip: hasil export aplikasi sendiri lolos validasi", (() => { const r = V(JSON.stringify(w.buildBackup())); return r.ok && r.counts.validRows === 1 && r.data.transactions[0].title === "Kopi Aktif"; })());
 
   // ================= 10. responsif =================

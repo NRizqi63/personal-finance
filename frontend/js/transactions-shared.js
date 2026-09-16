@@ -13,7 +13,11 @@
  * no-op sendiri kalau elemen targetnya tidak ada di halaman ini.
  */
 function refreshDashboard() {
-  saveTransactions();
+  // Hasil penulisan diteruskan ke pemanggil: CRUD transaksi tidak boleh
+  // mengklaim "tersimpan" kalau localStorage menolak (private browsing /
+  // kuota penuh). Render tetap dijalankan supaya layar selalu memperlihatkan
+  // isi financeData yang sebenarnya — termasuk sesudah pemanggil rollback.
+  const stored = saveTransactions();
   recalcFromTransactions();
   // Guard `typeof`: render function halaman lain kini hidup di file halaman
   // masing-masing (dashboard.js / budget.js / transactions.js) dan tidak
@@ -24,6 +28,7 @@ function refreshDashboard() {
   if (typeof renderCategoryList === "function") renderCategoryList();
   if (typeof renderRecentTransactions === "function") renderRecentTransactions();
   if (typeof renderAllTransactionsList === "function") renderAllTransactionsList();
+  return stored;
 }
 
 // State halaman Semua Transaksi.
@@ -74,8 +79,18 @@ function handleTransactionListClick(e) {
     openTransactionModal("edit", tx);
   } else if (button.dataset.action === "delete") {
     const removeTransaction = () => {
-      financeData.transactions = financeData.transactions.filter((item) => item.id !== id);
-      refreshDashboard();
+      // Simpan posisi & objeknya dulu: kalau penulisan gagal, daftar
+      // dikembalikan persis seperti semula (pola yang sama dengan hapus
+      // target di goals.js).
+      const index = financeData.transactions.findIndex((item) => item.id === id);
+      if (index === -1) return;
+      const [removed] = financeData.transactions.splice(index, 1);
+      if (!refreshDashboard()) {
+        financeData.transactions.splice(index, 0, removed);
+        refreshDashboard();
+        showTransactionFeedback("Transaksi tidak bisa dihapus — penyimpanan browser penuh atau tidak tersedia. Coba lagi.", "error");
+        return;
+      }
       showTransactionFeedback("Transaksi dihapus.");
     };
     if (confirmDeleteTransaction) {
@@ -284,6 +299,22 @@ function setupTransactionModal() {
     positionIndicator(typeToggle.querySelector(".type-toggle-btn.is-active"), { animate: false });
   });
 
+  // Pesan gagal SIMPAN (bukan validasi field) ditampilkan di dalam popup
+  // supaya tidak tertutup overlay. Elemennya opsional: halaman tanpa markup
+  // ini tetap berjalan, pesannya jatuh ke area status halaman.
+  const modalStatus = document.getElementById("transaction-modal-status");
+  function setTransactionModalStatus(text) {
+    if (!modalStatus) {
+      if (text) showTransactionFeedback(text, "error");
+      return;
+    }
+    modalStatus.textContent = text;
+    // Atribut hanya dipasang saat ada pesan (lihat catatan di budget.js).
+    if (text) modalStatus.dataset.type = "error";
+    else delete modalStatus.dataset.type;
+    modalStatus.hidden = !text;
+  }
+
   function resetForm() {
     form.reset();
     fieldId.value = "";
@@ -297,6 +328,7 @@ function setupTransactionModal() {
   }
 
   function openModal(mode, tx) {
+    setTransactionModalStatus(""); // sisa pesan gagal dari percobaan sebelumnya
     if (!modalShowing) modalTrigger = document.activeElement;
     cancelModalPending();
     modalShowing = true;
@@ -349,6 +381,7 @@ function setupTransactionModal() {
 
   function closeModal() {
     if (!modalShowing) return; // close ganda: jangan jadwalkan timer kedua
+    setTransactionModalStatus("");
     cancelModalPending();
     modalShowing = false;
     popModal(modalEntry);
@@ -431,6 +464,9 @@ function setupTransactionModal() {
       time: formatDateID(fieldDate.value),
     };
 
+    // Cara mengembalikan keadaan kalau penulisan gagal (diisi di bawah).
+    let undoMemoryChange = null;
+
     if (editId) {
       const tx = financeData.transactions.find((item) => item.id === editId);
       if (!tx) {
@@ -441,10 +477,17 @@ function setupTransactionModal() {
         showTransactionFeedback("Transaksi tidak ditemukan, mungkin sudah dihapus.", "error");
         return;
       }
+      const before = { ...tx };
       Object.assign(tx, payload);
+      undoMemoryChange = () => Object.assign(tx, before);
     } else {
       financeData.transactions.unshift({ id: nextTransactionId++, ...payload });
+      undoMemoryChange = () => financeData.transactions.shift();
     }
+
+    // Posisi kalender/daftar juga dikembalikan kalau gagal, supaya layar
+    // tidak berpindah ke tanggal transaksi yang batal tersimpan.
+    const beforeView = { selected: transactionsPage.selected, year: transactionsPage.year, month: transactionsPage.month };
 
     // Halaman Semua Transaksi hanya menampilkan SATU tanggal terpilih. Tanpa
     // ini, transaksi yang baru disimpan untuk tanggal lain (termasuk hasil
@@ -458,7 +501,18 @@ function setupTransactionModal() {
       transactionsPage.month = savedDate.getMonth();
     }
 
-    refreshDashboard();
+    if (!refreshDashboard()) {
+      undoMemoryChange();
+      transactionsPage.selected = beforeView.selected;
+      transactionsPage.year = beforeView.year;
+      transactionsPage.month = beforeView.month;
+      refreshDashboard();
+      // Modal sengaja TIDAK ditutup: isian user tetap ada supaya bisa dicoba
+      // lagi tanpa mengetik ulang.
+      setTransactionModalStatus("Transaksi tidak bisa disimpan — penyimpanan browser penuh atau tidak tersedia. Coba lagi.");
+      return;
+    }
+
     closeModal();
     showTransactionFeedback(editId ? "Perubahan tersimpan." : "Transaksi tersimpan.");
   });

@@ -108,6 +108,9 @@
         <div class="quick-amounts" id="budget-quick-amounts" aria-label="Pilihan cepat">
           <!-- Diisi oleh app.js (renderQuickAmounts()) -->
         </div>
+        <!-- Kegagalan menyimpan (bukan validasi field) ditampilkan di sini,
+             di dalam popup, supaya user tidak kehilangan isian. -->
+        <p class="settings-feedback" id="budget-modal-status" role="status" aria-live="polite" hidden></p>
         <div class="modal-actions">
           <button type="button" class="btn btn--ghost" data-modal-close>Batal</button>
           <button type="submit" class="btn btn--primary">Simpan Budget</button>
@@ -148,6 +151,8 @@
             <!-- Diisi oleh app.js (renderEmojiPicker()) -->
           </div>
         </div>
+        <!-- Sama seperti popup budget bulanan: pesan gagal simpan di dalam popup. -->
+        <p class="settings-feedback" id="category-modal-status" role="status" aria-live="polite" hidden></p>
         <div class="modal-actions">
           <button type="button" class="btn btn--ghost" data-modal-close>Batal</button>
           <button type="submit" class="btn btn--primary" id="category-modal-submit">Simpan Perubahan</button>
@@ -175,6 +180,8 @@
         </button>
       </div>
       <p class="modal-sub" id="confirm-text">Transaksi yang sudah ada tidak akan ikut terhapus.</p>
+      <!-- Gagal menghapus (storage tidak bisa ditulis) -> konfirmasi tetap terbuka. -->
+      <p class="settings-feedback" id="budget-confirm-status" role="status" aria-live="polite" hidden></p>
       <div class="modal-actions">
         <button type="button" class="btn btn--ghost" data-modal-close>Batal</button>
         <button type="button" class="btn btn--danger" id="confirm-delete">Hapus Kategori</button>

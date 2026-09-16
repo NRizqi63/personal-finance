@@ -111,7 +111,7 @@ EOF
 }
 
 SUITES="jsfoundation jsdashboard jsgoals jsanalytics jsbudget jstransactions jssettings cssdiff
-modalracetest modaltest
+modalracetest modaltest m1datatest
 goalstest goals2test goals3atest goals3btest goals4test
 analyticsperiodtest analyticstest charttest budgettest
 calendartest scrolltest fixtest functest uxflowtest v1fixtest v21test v22test finalaudit

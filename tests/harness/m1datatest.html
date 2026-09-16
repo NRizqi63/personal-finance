@@ -1,0 +1,357 @@
+<!doctype html>
+<meta charset="utf-8">
+<pre id="r">running…</pre>
+<script>
+/* M1 — Target Keuangan di backup/import/reset + kontrak save yang konsisten.
+
+   Bagian:
+   1. export: data.goals + counts.goals (termasuk daftar kosong)
+   2. validator: file schema 1 tanpa goals, goals bukan array
+   3. validator: goal rusak, id duplikat, GOAL_LIMIT
+   4. import DENGAN goals -> key goals ditulis
+   5. import TANPA goals -> key goals tidak disentuh sama sekali
+   6. rollback 4 key saat penulisan key goals gagal
+   7. reset goals + rollback-nya
+   8. kontrak boolean saveTransactions/saveBudget/saveSettings/saveGoals
+   9. caller transaksi / budget / settings saat penyimpanan gagal
+  10. memori & localStorage tetap sepakat setelah import/reset gagal          */
+const out = []; const ok = (n, c, x = "") => out.push(`${c ? "PASS" : "FAIL"} ${n}${x ? "  (" + x + ")" : ""}`);
+const wait = (ms) => new Promise(r => setTimeout(r, ms));
+const BASE = new URL("../../frontend/", location.href).href;
+
+const pad = (n) => String(n).padStart(2, "0");
+const iso = (dt) => `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`;
+const T = iso(new Date());
+const KEYS = ["financeData.transactions", "financeData.budget", "financeData.settings", "financeData.goals"];
+const TX = [{ id: 2, title: "Gaji", category: "lainnya", type: "income", amount: 5000000, isoDate: T, time: "" },
+            { id: 1, title: "Makan", category: "makanan", type: "expense", amount: 25000, isoDate: T, time: "" }];
+const GOALS = [{ id: 3, name: "Dana Darurat", target: 10000000, saved: 3200000, deadline: "", createdAt: "2026-01-15" },
+               { id: 1, name: "Laptop", target: 8000000, saved: 500000, deadline: "", createdAt: "2026-02-01" }];
+const BUDGET = { monthly: 1234000, categories: { makanan: { name: "Makanan", emoji: "🍜", budget: 800000 } } };
+const SETTINGS = { name: "Rizqi Aktif", hideBalanceOnOpen: true, showCheckin: false };
+
+const backup = (data, over = {}) => JSON.stringify(Object.assign({
+  app: "personal-finance", appName: "Personal Finance", schema: 2, appVersion: "V2.2",
+  exportedAt: "2026-09-14T01:32:11.281Z", counts: { transactions: 1, categories: 1, goals: 0 }, data,
+}, over));
+const tx = (o = {}) => Object.assign({ id: 1, title: "Makan", category: "makanan", type: "expense", amount: 25000, isoDate: T, time: "" }, o);
+const goal = (o = {}) => Object.assign({ id: 1, name: "Target", target: 1000000, saved: 0, deadline: "", createdAt: "2026-01-01" }, o);
+
+let frame = null;
+async function load(page = "settings.html", seed = {}) {
+  if (!frame) {
+    frame = document.createElement("iframe"); frame.width = 390; frame.height = 1800;
+    frame.src = BASE + "index.html"; document.body.appendChild(frame);
+    await new Promise(r => frame.onload = r);
+  }
+  const w0 = frame.contentWindow;
+  try {
+    w0.localStorage.clear(); w0.sessionStorage.clear();
+    w0.sessionStorage.setItem("checkinDismissed", "true");
+    const s = Object.assign({ tx: TX, goals: GOALS, budget: BUDGET, settings: SETTINGS }, seed);
+    if (s.tx !== null) w0.localStorage.setItem("financeData.transactions", JSON.stringify(s.tx));
+    if (s.goals !== null) w0.localStorage.setItem("financeData.goals", JSON.stringify(s.goals));
+    if (s.budget !== null) w0.localStorage.setItem("financeData.budget", JSON.stringify(s.budget));
+    if (s.settings !== null) w0.localStorage.setItem("financeData.settings", JSON.stringify(s.settings));
+  } catch (e) {}
+  frame.remove();
+  frame = document.createElement("iframe"); frame.width = 390; frame.height = 1800; frame.src = BASE + page;
+  document.body.appendChild(frame);
+  await new Promise(r => frame.onload = r); await wait(350);
+  const r = { d: frame.contentDocument, w: frame.contentWindow, errors: [] };
+  r.w.addEventListener("error", e => r.errors.push(e.message));
+  r.w.console.error = (...a) => r.errors.push("console.error " + a.join(" "));
+  return r;
+}
+const $ = (d, id) => d.getElementById(id);
+const txt = (el) => (el ? el.textContent.replace(/\s+/g, " ").trim() : "");
+const snapAll = (w) => JSON.stringify(KEYS.map(k => w.localStorage.getItem(k)));
+const stored = (w, k) => { try { return JSON.parse(w.localStorage.getItem(k) || "null"); } catch (e) { return "PARSE-ERROR"; } };
+async function click(el) { el.focus(); el.click(); await wait(120); }
+const type = (d, id, v) => { const f = $(d, id); f.value = v; f.dispatchEvent(new Event("input", { bubbles: true })); f.dispatchEvent(new Event("change", { bubbles: true })); };
+/** Stub setItem: gagal HANYA untuk key tertentu (atau semua kalau null). */
+function failWrites(w, onlyKey = null, times = Infinity) {
+  const orig = w.Storage.prototype.setItem;
+  let left = times;
+  w.Storage.prototype.setItem = function (k, v) {
+    if (this === w.localStorage && (onlyKey === null || k === onlyKey) && left > 0) {
+      left -= 1;
+      throw new DOMException("QuotaExceededError", "QuotaExceededError");
+    }
+    return orig.call(this, k, v);
+  };
+  return () => { w.Storage.prototype.setItem = orig; };
+}
+async function pickFile(d, w, name, content) {
+  const input = $(d, "import-file"); const fb = $(d, "settings-data-status"); const before = fb.textContent;
+  const dt = new w.DataTransfer(); dt.items.add(new w.File([content], name, { type: "application/json" }));
+  input.files = dt.files;
+  input.dispatchEvent(new w.Event("change", { bubbles: true }));
+  for (let i = 0; i < 80; i++) { if (fb.textContent !== before) break; await wait(50); }
+  await wait(120);
+}
+
+(async () => {
+  /* ============ 1. EXPORT: goals ikut + counts.goals ============ */
+  let r = await load("settings.html"); let { d, w } = r;
+  let b = w.buildBackup();
+  ok("1a. schema file naik ke 2", b.schema === 2 && w.eval("BACKUP_SCHEMA_VERSION") === 2);
+  ok("1b. data.goals berisi seluruh target aktif", Array.isArray(b.data.goals) && b.data.goals.length === 2 && b.data.goals.map(g => g.name).join() === "Dana Darurat,Laptop");
+  ok("1c. counts.goals = jumlah target", b.counts.goals === 2);
+  ok("1d. bagian lain tidak berubah bentuknya", !!b.data.transactions && !!b.data.budget && !!b.data.settings && Object.keys(b.data).sort().join() === "budget,goals,settings,transactions");
+  ok("1e. tidak ada mock ikut (notifications / goal contoh)", !/notifications|"goal"/.test(JSON.stringify(b)));
+
+  r = await load("settings.html", { goals: [] }); ({ d, w } = r);
+  b = w.buildBackup();
+  ok("1f. goals kosong tetap diekspor sebagai array kosong (bukan field hilang)", Array.isArray(b.data.goals) && b.data.goals.length === 0 && b.counts.goals === 0 && "goals" in b.data);
+  ok("1g. export tidak mengubah data apa pun", snapAll(w) === JSON.stringify([JSON.stringify(TX), JSON.stringify(BUDGET), JSON.stringify(SETTINGS), JSON.stringify([])]));
+
+  /* ============ 2. VALIDATOR: file lama & goals bukan array ============ */
+  r = await load("settings.html"); ({ d, w } = r);
+  const V = w.validateBackup;
+  let res = V(backup({ transactions: [tx()], budget: BUDGET, settings: SETTINGS }, { schema: 1 }));
+  ok("2a. file schema 1 (tanpa goals) tetap VALID", res.ok === true);
+  ok("2b. meta.goalsFound = false & data.goals = null (key goals tidak akan ditulis)", res.meta.goalsFound === false && res.data.goals === null);
+  ok("2c. ada warning yang menjelaskan target lama tidak diubah", res.warnings.some(x => /sebelum fitur Target Keuangan/.test(x) && /tidak akan diubah/.test(x)), res.warnings.join(" | "));
+  ok("2d. validasi transaksi/budget/settings tidak berubah", res.data.transactions.length === 1 && res.data.budget.monthly === 1234000 && res.data.settings.name === "Rizqi Aktif");
+
+  res = V(backup({ transactions: [tx()], goals: "bukan-array" }));
+  ok("2e. goals bukan array -> tetap valid, diperlakukan seperti tidak ada", res.ok === true && res.meta.goalsFound === false && res.data.goals === null);
+  ok("2f. warning 'tidak terbaca' muncul untuk goals rusak", res.warnings.some(x => /target keuangan di file tidak terbaca/i.test(x)), res.warnings.join(" | "));
+  res = V(backup({ transactions: [tx()], goals: {} }));
+  ok("2g. goals berupa objek juga ditolak jadi 'tidak ada'", res.meta.goalsFound === false && res.data.goals === null);
+  res = V(backup({ transactions: [tx()], goals: [] }));
+  ok("2h. goals array kosong = ADA (target akan dikosongkan), bukan diabaikan", res.meta.goalsFound === true && Array.isArray(res.data.goals) && res.data.goals.length === 0);
+
+  /* ============ 3. VALIDATOR: baris rusak, id duplikat, GOAL_LIMIT ============ */
+  res = V(backup({ transactions: [tx()], goals: [
+    goal({ id: 1, name: "Bagus" }),
+    goal({ id: 2, name: "" }),                       // nama kosong
+    goal({ id: 3, target: 0 }),                       // target <= 0
+    goal({ id: 4, saved: -5 }),                       // saved negatif
+    goal({ id: 5, target: "1000000" }),               // nominal string
+    null, "x", [],                                    // bentuk salah
+  ] }));
+  ok("3a. import tetap berjalan walau sebagian goal rusak", res.ok === true && res.meta.goalsFound === true);
+  ok("3b. hanya goal valid yang lolos", res.data.goals.length === 1 && res.data.goals[0].name === "Bagus");
+  ok("3c. goal rusak dihitung di meta.goalsSkipped", res.meta.goalsSkipped === 7, String(res.meta.goalsSkipped));
+  ok("3d. ada warning jumlah target dilewati", res.warnings.some(x => /7 target keuangan dilewati/.test(x)), res.warnings.join(" | "));
+  ok("3e. meta.goals = jumlah target yang dipakai", res.meta.goals === 1);
+
+  res = V(backup({ transactions: [tx()], goals: [goal({ id: 7, name: "A" }), goal({ id: 7, name: "B" }), goal({ id: 7, name: "C" })] }));
+  ok("3f. id duplikat dinomori ulang, tidak ada target yang hilang", res.data.goals.length === 3 && new Set(res.data.goals.map(g => g.id)).size === 3, res.data.goals.map(g => g.id).join());
+  ok("3g. urutan & isi target dipertahankan", res.data.goals.map(g => g.name).join() === "A,B,C");
+
+  const LIMIT = w.eval("GOAL_LIMIT");
+  const many = Array.from({ length: LIMIT + 5 }, (_, i) => goal({ id: i + 1, name: `T${i + 1}` }));
+  res = V(backup({ transactions: [tx()], goals: many }));
+  ok(`3h. GOAL_LIMIT (${LIMIT}) dihormati`, res.data.goals.length === LIMIT);
+  ok("3i. kelebihan target dihitung sebagai dilewati + warning", res.meta.goalsSkipped === 5 && res.warnings.some(x => /melebihi batas/.test(x)));
+  ok("3j. normalizeGoal yang dipakai (deadline ngawur -> \"\", createdAt diisi)", (() => { const rr = V(backup({ transactions: [tx()], goals: [goal({ deadline: "32-13-2026", createdAt: "bukan tanggal" })] })); const g = rr.data.goals[0]; return g.deadline === "" && /^\d{4}-\d{2}-\d{2}$/.test(g.createdAt); })());
+
+  /* ============ 4. IMPORT DENGAN goals ============ */
+  r = await load("settings.html"); ({ d, w } = r);
+  await pickFile(d, w, "backup.json", backup({ transactions: [tx({ title: "Dari File" })], budget: BUDGET, settings: SETTINGS, goals: [goal({ id: 9, name: "Target Baru", target: 2000000, saved: 100000 })] }));
+  ok("4a. ringkasan memuat baris Target keuangan", /Target keuangan/.test(txt($(d, "import-modal-summary"))) && /1 target akan menggantikan 2 target sekarang/.test(txt($(d, "import-modal-summary"))), txt($(d, "import-modal-summary")).slice(0, 200));
+  ok("4b. belum ada yang ditulis sebelum konfirmasi", stored(w, "financeData.goals").length === 2);
+  const applied = w.applyPendingImport();
+  ok("4c. applyPendingImport berhasil", applied.ok === true && applied.code === "applied", applied.message);
+  ok("4d. key goals ditulis dari file", stored(w, "financeData.goals").length === 1 && stored(w, "financeData.goals")[0].name === "Target Baru");
+  ok("4e. tiga key lain ikut terpakai dari file", stored(w, "financeData.transactions")[0].title === "Dari File");
+  ok("4f. pesan sukses menyebut target yang dipulihkan", /1 target keuangan ikut dipulihkan/.test(applied.message), applied.message);
+
+  /* ============ 5. IMPORT TANPA goals: target lama utuh ============ */
+  r = await load("settings.html"); ({ d, w } = r);
+  const goalsBefore = w.localStorage.getItem("financeData.goals");
+  await pickFile(d, w, "lama.json", backup({ transactions: [tx({ title: "Backup Lama" })], budget: BUDGET, settings: SETTINGS }, { schema: 1 }));
+  ok("5a. ringkasan menyatakan target sekarang tetap", /tidak ada di file — target sekarang tetap/.test(txt($(d, "import-modal-summary"))));
+  const applied2 = w.applyPendingImport();
+  ok("5b. import berhasil", applied2.ok === true);
+  ok("5c. key goals TIDAK tersentuh (byte-identik)", w.localStorage.getItem("financeData.goals") === goalsBefore);
+  ok("5d. transaksi tetap diganti isi file", stored(w, "financeData.transactions")[0].title === "Backup Lama");
+  ok("5e. pesan sukses tidak mengklaim target dipulihkan", !/target keuangan ikut dipulihkan/.test(applied2.message), applied2.message);
+
+  /* ============ 6. ROLLBACK 4 KEY ============ */
+  r = await load("settings.html"); ({ d, w } = r);
+  const before6 = snapAll(w);
+  await pickFile(d, w, "backup.json", backup({ transactions: [tx({ title: "Gagal" })], budget: BUDGET, settings: SETTINGS, goals: [goal({ id: 4, name: "Target Gagal" })] }));
+  ok("6a. file valid & goals terbaca", w.getPendingImport() !== null && w.getPendingImport().meta.goalsFound === true);
+  // Kuota penuh saat menulis key ke-4; percobaan berikutnya (rollback) boleh berhasil.
+  let restore = failWrites(w, "financeData.goals", 1);
+  const failed = w.applyPendingImport();
+  restore();
+  ok("6b. import gagal dengan kode write-failed", failed.ok === false && failed.code === "write-failed", failed.code);
+  ok("6c. KEEMPAT key kembali persis seperti sebelum import", snapAll(w) === before6);
+  ok("6d. pesan menjelaskan data lama sudah dikembalikan", /dikembalikan/.test(failed.message), failed.message);
+  ok("6e. importTargetKeys menyertakan key goals hanya kalau file membawanya", (() => {
+    const withGoals = w.importTargetKeys({ goals: [] });
+    const without = w.importTargetKeys({});
+    return withGoals.length === 4 && withGoals.includes("financeData.goals") && without.length === 3 && !without.includes("financeData.goals");
+  })());
+
+  /* ============ 7. RESET GOALS ============ */
+  r = await load("settings.html"); ({ d, w } = r);
+  const resetBtn = d.querySelector('[data-reset-target="goals"]');
+  ok("7a. tombol reset target keuangan ada di Zona Berbahaya", !!resetBtn && resetBtn.classList.contains("btn--danger-ghost"));
+  await click(resetBtn);
+  ok("7b. modal konfirmasi memakai judul & ringkasan target", /Hapus Semua Target Keuangan/.test(txt($(d, "reset-modal-title"))) && /2 target/.test(txt($(d, "reset-modal-summary"))), txt($(d, "reset-modal-summary")).slice(0, 160));
+  const beforeReset = snapAll(w);
+  await click($(d, "btn-reset-cancel"));
+  ok("7c. batal -> tidak ada yang berubah", snapAll(w) === beforeReset);
+
+  const resetResult = w.applyDataReset("goals");
+  ok("7d. reset goals berhasil", resetResult.ok === true && resetResult.code === "reset-applied");
+  ok("7e. HANYA key goals yang hilang", w.localStorage.getItem("financeData.goals") === null
+    && w.localStorage.getItem("financeData.transactions") === JSON.stringify(TX)
+    && w.localStorage.getItem("financeData.budget") === JSON.stringify(BUDGET)
+    && w.localStorage.getItem("financeData.settings") === JSON.stringify(SETTINGS));
+  ok("7f. pesan reset menyebut data lain tidak berubah", /Transaksi, budget, dan pengaturan tidak berubah/.test(resetResult.message), resetResult.message);
+
+  r = await load("settings.html"); ({ d, w } = r);
+  const before7 = snapAll(w);
+  const origRemove = w.Storage.prototype.removeItem;
+  w.Storage.prototype.removeItem = function (k) { if (this === w.localStorage && k === "financeData.goals") throw new DOMException("SecurityError", "SecurityError"); return origRemove.call(this, k); };
+  const resetFailed = w.applyDataReset("goals");
+  w.Storage.prototype.removeItem = origRemove;
+  ok("7g. removeItem gagal -> hasil error, bukan sukses palsu", resetFailed.ok === false && /reset-failed|rollback-failed/.test(resetFailed.code), resetFailed.code);
+  ok("7h. data tetap utuh setelah kegagalan reset", snapAll(w) === before7);
+  ok("7i. pesan error menyebut aksi yang gagal", /target keuangan/i.test(resetFailed.message), resetFailed.message);
+
+  /* ============ 8. KONTRAK BOOLEAN save* ============ */
+  r = await load("index.html"); ({ d, w } = r);
+  ok("8a. keempat fungsi save mengembalikan true saat storage normal",
+    [w.saveTransactions, w.saveBudget, w.saveSettings, w.saveGoals].every(f => f() === true));
+  restore = failWrites(w);
+  ok("8b. keempatnya mengembalikan false saat setItem gagal",
+    [w.saveTransactions, w.saveBudget, w.saveSettings, w.saveGoals].every(f => f() === false));
+  ok("8c. tidak melempar ke pemanggil (kegagalan dilaporkan lewat nilai kembalian)", true);
+  restore();
+  ok("8d. kembali true setelah storage normal lagi", w.saveTransactions() === true);
+
+  /* ============ 9a. CALLER TRANSAKSI ============ */
+  r = await load("index.html"); ({ d, w } = r);
+  const before9 = snapAll(w);
+  restore = failWrites(w);
+  await click(d.querySelector('[data-action="add-transaction"]'));
+  type(d, "field-title", "Transaksi Gagal");
+  type(d, "field-amount", "50000");
+  $(d, "field-category").value = "makanan";
+  type(d, "field-date", T);
+  $(d, "transaction-form").requestSubmit();
+  await wait(200);
+  ok("9a1. modal TETAP terbuka saat simpan gagal", $(d, "transaction-modal-overlay").hidden === false);
+  ok("9a2. isian tidak hilang", $(d, "field-title").value === "Transaksi Gagal");
+  ok("9a3. pesan error tampil di dalam modal", !$(d, "transaction-modal-status").hidden && /tidak bisa disimpan/.test(txt($(d, "transaction-modal-status"))));
+  ok("9a4. TIDAK ada pesan sukses", $(d, "transaction-feedback").hidden || !/tersimpan/.test(txt($(d, "transaction-feedback"))));
+  ok("9a5. daftar di memori kembali seperti semula (rollback)", w.eval("financeData.transactions.length") === 2);
+  ok("9a6. storage tidak berubah", snapAll(w) === before9);
+  restore();
+  $(d, "transaction-form").requestSubmit();
+  await wait(250);
+  ok("9a7. setelah storage normal, simpan berhasil & modal tertutup", $(d, "transaction-modal-overlay").hidden === true && stored(w, "financeData.transactions").length === 3);
+  ok("9a8. pesan sukses muncul", /tersimpan/.test(txt($(d, "transaction-feedback"))));
+
+  // hapus transaksi saat storage gagal
+  r = await load("transactions.html"); ({ d, w } = r);
+  const before9b = snapAll(w);
+  restore = failWrites(w);
+  const delBtn = d.querySelector('#all-transaction-list [data-action="delete"]');
+  await click(delBtn);
+  await click($(d, "confirm-delete"));
+  await wait(150);
+  ok("9b1. hapus gagal -> daftar di memori utuh", w.eval("financeData.transactions.length") === 2);
+  ok("9b2. storage tidak berubah", snapAll(w) === before9b);
+  ok("9b3. pesan error tampil, bukan 'Transaksi dihapus.'", /tidak bisa dihapus/.test(txt($(d, "transaction-feedback"))), txt($(d, "transaction-feedback")));
+  restore();
+
+  /* ============ 9c. CALLER BUDGET ============ */
+  r = await load("budget.html"); ({ d, w } = r);
+  const before9c = snapAll(w);
+  restore = failWrites(w);
+  await click($(d, "btn-edit-budget"));
+  type(d, "field-budget-monthly", "9.000.000");
+  $(d, "budget-form").requestSubmit();
+  await wait(150);
+  ok("9c1. modal budget tetap terbuka saat gagal", $(d, "budget-modal-overlay").hidden === false);
+  ok("9c2. pesan error tampil di dalam modal", !$(d, "budget-modal-status").hidden && /tidak bisa disimpan/.test(txt($(d, "budget-modal-status"))));
+  ok("9c3. budget di memori kembali ke nilai lama", w.eval("financeData.budget.monthly") === 1234000);
+  ok("9c4. storage tidak berubah", snapAll(w) === before9c);
+  restore();
+  $(d, "budget-form").requestSubmit();
+  await wait(250);
+  ok("9c5. setelah normal: tersimpan & modal tertutup", $(d, "budget-modal-overlay").hidden === true && stored(w, "financeData.budget").monthly === 9000000);
+
+  // hapus kategori saat storage gagal
+  r = await load("budget.html"); ({ d, w } = r);
+  const before9d = snapAll(w);
+  restore = failWrites(w);
+  await click(d.querySelector('#category-list [data-action="edit-category"]'));
+  await wait(120);
+  if ($(d, "btn-delete-category") && !$(d, "btn-delete-category").hidden) {
+    await click($(d, "btn-delete-category"));
+    await click($(d, "confirm-delete"));
+    await wait(150);
+    ok("9d1. konfirmasi tetap terbuka saat hapus kategori gagal", $(d, "confirm-modal-overlay").hidden === false);
+    ok("9d2. pesan error tampil di konfirmasi", !$(d, "budget-confirm-status").hidden && /tidak bisa dihapus/.test(txt($(d, "budget-confirm-status"))));
+    ok("9d3. kategori kembali ada di memori", w.eval('hasCategory("makanan")') === true);
+    ok("9d4. storage tidak berubah", snapAll(w) === before9d);
+  } else {
+    ok("9d1. tombol hapus kategori ditemukan", false, "markup tidak sesuai dugaan");
+  }
+  restore();
+
+  /* ============ 9e. CALLER SETTINGS ============ */
+  r = await load("settings.html"); ({ d, w } = r);
+  const before9e = snapAll(w);
+  restore = failWrites(w);
+  type(d, "settings-name", "Nama Baru");
+  $(d, "settings-profile-form").requestSubmit();
+  await wait(150);
+  ok("9e1. nama: pesan error, bukan 'Nama tersimpan.'", $(d, "settings-name-feedback").dataset.type === "error" && /tidak bisa disimpan/.test(txt($(d, "settings-name-feedback"))), txt($(d, "settings-name-feedback")));
+  ok("9e2. nama di memori kembali ke nilai lama", w.eval("financeData.settings.name") === "Rizqi Aktif");
+  ok("9e3. storage tidak berubah", snapAll(w) === before9e);
+
+  const hide = $(d, "pref-hide-balance");
+  const hideBefore = hide.checked;
+  hide.checked = !hideBefore;
+  hide.dispatchEvent(new Event("change", { bubbles: true }));
+  await wait(120);
+  ok("9e4. switch kembali ke posisi semula saat gagal", hide.checked === hideBefore);
+  ok("9e5. preferensi di memori tidak berubah", w.eval("financeData.settings.hideBalanceOnOpen") === hideBefore);
+  ok("9e6. pesan error preferensi tampil", $(d, "settings-pref-feedback").dataset.type === "error" && /tidak bisa disimpan/.test(txt($(d, "settings-pref-feedback"))));
+  const checkin = $(d, "pref-show-checkin");
+  const checkinBefore = checkin.checked;
+  checkin.checked = !checkinBefore;
+  checkin.dispatchEvent(new Event("change", { bubbles: true }));
+  await wait(120);
+  ok("9e7. switch check-in juga dikembalikan", checkin.checked === checkinBefore && w.eval("financeData.settings.showCheckin") === checkinBefore);
+  ok("9e8. storage tetap utuh setelah semua kegagalan", snapAll(w) === before9e);
+  restore();
+
+  /* ============ 10. KONSISTENSI MEMORI vs STORAGE ============ */
+  r = await load("settings.html"); ({ d, w } = r);
+  const before10 = snapAll(w);
+  await pickFile(d, w, "backup.json", backup({ transactions: [tx({ title: "X" })], budget: BUDGET, settings: SETTINGS, goals: [goal({ id: 2, name: "Y" })] }));
+  restore = failWrites(w, "financeData.goals", 1);
+  w.applyPendingImport();
+  restore();
+  ok("10a. setelah import gagal, storage kembali seperti semula", snapAll(w) === before10);
+  ok("10b. memori tetap memegang data lama (tidak ikut berubah)", w.eval("financeData.transactions.length") === 2 && w.eval("financeData.goals.length") === 2);
+  ok("10c. memori == storage untuk keempat key", (() => {
+    const mem = [w.eval("JSON.stringify(financeData.transactions)"), w.eval("JSON.stringify({monthly: financeData.budget.monthly, categories: financeData.categories})"), w.eval("JSON.stringify(financeData.settings)"), w.eval("JSON.stringify(financeData.goals)")];
+    const disk = KEYS.map(k => w.localStorage.getItem(k));
+    return JSON.parse(mem[0]).length === JSON.parse(disk[0]).length && JSON.parse(mem[3]).length === JSON.parse(disk[3]).length && JSON.parse(mem[2]).name === JSON.parse(disk[2]).name;
+  })());
+
+  const before10b = snapAll(w);
+  const origRemove2 = w.Storage.prototype.removeItem;
+  w.Storage.prototype.removeItem = function () { throw new DOMException("SecurityError", "SecurityError"); };
+  const rr = w.applyDataReset("transactions");
+  w.Storage.prototype.removeItem = origRemove2;
+  ok("10d. reset gagal -> storage utuh", rr.ok === false && snapAll(w) === before10b);
+  ok("10e. memori tetap konsisten setelah reset gagal", w.eval("financeData.transactions.length") === 2);
+  ok("10f. tanpa error konsol sepanjang pengujian halaman ini", r.errors.length === 0, r.errors.join(" | "));
+
+  document.getElementById("r").textContent = out.join("\n") + `\n\nTOTAL PASS=${out.filter(l => l.startsWith("PASS")).length} FAIL=${out.filter(l => l.startsWith("FAIL")).length}`;
+})().catch(e => { document.getElementById("r").textContent = out.join("\n") + "\nEXCEPTION " + e.message + "\n" + e.stack; });
+</script>
