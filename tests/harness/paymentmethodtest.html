@@ -142,7 +142,7 @@ function call(w, fn, arg) {
 
   ok("4a. konstanta didefinisikan HANYA di core.js; P-2 memakainya di transactions-shared.js saja", /const PAYMENT_METHODS = \[/.test(srcOf["core.js"]) && FILES.filter(f => f !== "core.js" && f !== "transactions-shared.js").every(f => !/PAYMENT_METHODS|PAYMENT_UNSET|getPaymentLabel|normalizePaymentMethod/.test(srcOf[f])) && !/const PAYMENT_METHODS|const PAYMENT_UNSET|function getPaymentLabel|function normalizePaymentMethod/.test(srcOf["transactions-shared.js"]));
   ok("4b. P-2 ADA: markup form punya #field-method di kedua halaman", /id="field-method"/.test(html.index) && /id="field-method"/.test(html.transactions) && /name="method"/.test(html.index));
-  ok("4c. P-2 ADA: payload memuat method hasil normalizePaymentMethod (bukan nilai mentah <select>)", /method: normalizePaymentMethod\(fieldMethod\.value\),/.test(srcOf["transactions-shared.js"]));
+  ok("4c. payload memuat method hasil normalizePaymentMethod, dengan jaga-jaga metode lama saat tidak ada opsi terpilih", /method: fieldMethod\.selectedIndex === -1 \? editingMethod : normalizePaymentMethod\(fieldMethod\.value\),/.test(srcOf["transactions-shared.js"]));
   ok("4c2. P-2: loadTransactions TIDAK mengisi default method ke transaksi lama", !/method/.test((srcOf["core.js"].match(/function loadTransactions\(\)[\s\S]*?\n\}/) || [""])[0]));
   ok("4d. P-3 belum: renderTransactionItem belum menampilkan metode", !/transaction-method|getPaymentLabel/.test((srcOf["core.js"].match(/function renderTransactionItem\([\s\S]*?\n\}/) || [""])[0]));
   ok("4d2. P-3 belum: getPaymentLabel belum dipanggil di mana pun", FILES.every(f => !/getPaymentLabel\(/.test(srcOf[f].replace(/function getPaymentLabel\([\s\S]*?\n\}/, ""))));
@@ -187,11 +187,17 @@ function call(w, fn, arg) {
     const rp = await load(page); const dp = rp.d;
     const sel = dp.getElementById("field-method");
     ok(`6a. ${page}: #field-method ada, berupa <select name="method">`, !!sel && sel.tagName === "SELECT" && sel.name === "method");
-    // R-1 baru menyentuh fondasi data; markup form masih daftar P-2 dan akan
-    // disamakan pada R-2. Keadaan transisi itu dipatok di sini supaya tidak
-    // terlupakan, bukan dibiarkan longgar.
-    ok(`6b. ${page}: markup masih daftar P-2 (6 opsi) — R-2 yang menyamakannya dengan PAYMENT_METHODS`, optionsOf(dp).map(o => o.value).join() === "cash,mbanking,ewallet,debit,kredit,lainnya", optionsOf(dp).map(o => o.value).join());
-    ok(`6b2. ${page}: SETIAP opsi di markup masih bisa dibaca aplikasi (aktif atau legacy) — tidak ada pilihan yang menghasilkan data kosong`, optionsOf(dp).every(o => call(w, "normalizePaymentMethod", o.value).value === o.value && call(w, "getPaymentLabel", o.value).value !== ""));
+    ok(`6b. ${page}: R-2 — opsi form PERSIS 11 metode aktif, urutan sama dengan PAYMENT_METHODS`, optionsOf(dp).map(o => o.value).join() === list.map(m => m.key).join(), optionsOf(dp).map(o => o.value).join());
+    ok(`6b2. ${page}: tidak ada satu pun key legacy yang masih jadi pilihan aktif`, LEGACY.every(k => !optionsOf(dp).some(o => o.value === k)) && !optionsOf(dp).some(o => ["debit", "kredit", "lainnya", "paylater"].includes(o.value)));
+    ok(`6b3. ${page}: tiga optgroup (Cash, Mobile Banking, E-Wallet) dengan isi 1/5/5 sesuai group di konstanta`, (() => {
+      const groups = [...dp.querySelectorAll("#field-method optgroup")];
+      const labels = groups.map(g => g.label).join("|");
+      const counts = groups.map(g => g.querySelectorAll("option").length).join(",");
+      const byGroup = { cash: "cash", mbanking: "Mobile Banking", ewallet: "E-Wallet" };
+      const cocok = list.every(m => groups.find(g => [...g.querySelectorAll("option")].some(o => o.value === m.key)).label === (m.group === "cash" ? "Cash" : byGroup[m.group]));
+      return labels === "Cash|Mobile Banking|E-Wallet" && counts === "1,5,5" && cocok;
+    })());
+    ok(`6b4. ${page}: setiap opsi bisa dibaca aplikasi (normalize & label tidak kosong)`, optionsOf(dp).every(o => call(w, "normalizePaymentMethod", o.value).value === o.value && call(w, "getPaymentLabel", o.value).value !== ""));
     ok(`6c. ${page}: teks opsi = label aplikasi untuk key itu (emoji + nama)`, optionsOf(dp).every(o => o.text === call(w, "getPaymentLabel", o.value).value), optionsOf(dp).map(o => o.text).join("|"));
     ok(`6d. ${page}: field metode berada SEBELUM field tanggal`, (() => {
       const fields = [...dp.querySelectorAll("#transaction-form .form-field")];
@@ -217,11 +223,11 @@ function call(w, fn, arg) {
   // pilih metode lain
   await tap(dd.querySelector('[data-action="add-transaction"]'));
   fill(dd, { title: "Transfer", amount: "50000" });
-  pickMethod(dd, "mbanking");
+  pickMethod(dd, "gopay");
   dd.getElementById("transaction-form").requestSubmit();
   await wait(300);
   saved = storedTx(ww)[0];
-  ok("6j. metode pilihan user tersimpan apa adanya", saved.title === "Transfer" && saved.method === "mbanking", String(saved.method));
+  ok("6j. metode pilihan user tersimpan apa adanya (key canonical dari daftar aktif)", saved.title === "Transfer" && saved.method === "gopay", String(saved.method));
 
   // --- 6C. reset form kembali ke cash ---
   await tap(dd.querySelector('[data-action="add-transaction"]'));
@@ -235,28 +241,45 @@ function call(w, fn, arg) {
   ok("6l. edit transaksi LAMA (tanpa method): tidak ada opsi terpilih (tidak diisi 'cash' diam-diam)", dd.getElementById("field-method").selectedIndex === -1 && dd.getElementById("field-method").value === "");
   ok("6m. membuka modal edit TIDAK mengubah data tersimpan", ww.localStorage.getItem("financeData.transactions") === beforeEdit);
   ok("6n. transaksi lama tetap tampil normal saat modal edit terbuka", dd.querySelectorAll("#all-transaction-list .transaction-item").length >= 1 && rr.errors.length === 0, rr.errors.join(" | "));
-  pickMethod(dd, "ewallet");
+  pickMethod(dd, "dana");
   dd.getElementById("transaction-form").requestSubmit();
   await wait(300);
-  ok("6o. edit menyimpan metode yang dipilih", storedTx(ww).find(t => t.id === 1).method === "ewallet");
+  ok("6o. edit menyimpan metode yang dipilih", storedTx(ww).find(t => t.id === 1).method === "dana");
 
   // edit transaksi yang SUDAH punya method -> preselect benar
-  try { ww.localStorage.setItem("financeData.transactions", JSON.stringify([{ id: 5, title: "Listrik", category: "tagihan", type: "expense", amount: 150000, isoDate: T, time: "", method: "debit" }])); } catch (e) {}
+  const seedOne = (method) => JSON.stringify([{ id: 5, title: "Listrik", category: "tagihan", type: "expense", amount: 150000, isoDate: T, time: "", method }]);
   rr = await load("transactions.html"); dd = rr.d; ww = rr.w;
   // load() menulis ulang seed; tulis lagi lalu muat ulang halaman saja
-  try { ww.localStorage.setItem("financeData.transactions", JSON.stringify([{ id: 5, title: "Listrik", category: "tagihan", type: "expense", amount: 150000, isoDate: T, time: "", method: "debit" }])); } catch (e) {}
+  try { ww.localStorage.setItem("financeData.transactions", seedOne("shopeepay")); } catch (e) {}
   ww.location.reload(); await wait(500);
   dd = frame.contentDocument; ww = frame.contentWindow;
   await tap(dd.querySelector('#all-transaction-list [data-action="edit"]'));
-  ok("6p. edit transaksi dengan method valid: preselect tepat", dd.getElementById("field-method").value === "debit");
+  ok("6p. edit transaksi dengan metode aktif: preselect tepat", dd.getElementById("field-method").value === "shopeepay");
   dd.getElementById("modal-close").click(); await wait(400);
+
+  // Metode LEGACY: tidak ada di daftar aktif, jadi tidak bisa ditampilkan —
+  // tapi menyimpan ulang transaksinya TIDAK boleh menghapusnya.
+  try { ww.localStorage.setItem("financeData.transactions", seedOne("debit")); } catch (e) {}
+  ww.location.reload(); await wait(500);
+  dd = frame.contentDocument; ww = frame.contentWindow;
+  await tap(dd.querySelector('#all-transaction-list [data-action="edit"]'));
+  ok("6p2. metode legacy tidak ditawarkan sebagai pilihan (select kosong)", dd.getElementById("field-method").selectedIndex === -1 && dd.querySelectorAll("#field-method option").length === 11);
+  ok("6p3. label metode legacy tetap dikenali aplikasi (data tidak kehilangan arti)", call(ww, "getPaymentLabel", "debit").value === "💳 Debit");
+  dd.getElementById("transaction-form").requestSubmit();
+  await wait(300);
+  ok("6p4. menyimpan ulang transaksi lama MEMPERTAHANKAN metode legacy-nya", storedTx(ww)[0].method === "debit", String(storedTx(ww)[0].method));
+  await tap(dd.querySelector('#all-transaction-list [data-action="edit"]'));
+  pickMethod(dd, "brimo");
+  dd.getElementById("transaction-form").requestSubmit();
+  await wait(300);
+  ok("6p5. user tetap bisa menggantinya ke metode aktif", storedTx(ww)[0].method === "brimo");
 
   // nilai rusak di storage
   try { ww.localStorage.setItem("financeData.transactions", JSON.stringify([{ id: 6, title: "Rusak", category: "makanan", type: "expense", amount: 1000, isoDate: T, time: "", method: "<img src=x onerror=alert(1)>" }])); } catch (e) {}
   ww.location.reload(); await wait(500);
   dd = frame.contentDocument; ww = frame.contentWindow;
   await tap(dd.querySelector('#all-transaction-list [data-action="edit"]'));
-  ok("6r. method tidak valid di storage: select kosong, tidak ada elemen baru di DOM", dd.getElementById("field-method").selectedIndex === -1 && dd.querySelectorAll("#field-method option").length === 6 && !dd.querySelector("#transaction-form img"));
+  ok("6r. method tidak valid di storage: select kosong, daftar opsi tetap 11, tidak ada elemen baru di DOM", dd.getElementById("field-method").selectedIndex === -1 && dd.querySelectorAll("#field-method option").length === 11 && !dd.querySelector("#transaction-form img"));
   dd.getElementById("transaction-form").requestSubmit();
   await wait(300);
   ok("6s. menyimpan ulang membersihkan nilai rusak jadi \"\" (bukan menyimpan markup)", storedTx(ww)[0].method === "");

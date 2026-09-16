@@ -136,6 +136,11 @@ function setupTransactionModal() {
   // Metode pembayaran: opsional. Nilai yang dipakai selalu key canonical dari
   // PAYMENT_METHODS (core.js), tidak pernah label yang tampil di <option>.
   const fieldMethod = document.getElementById("field-method");
+  // Metode yang SUDAH tersimpan pada transaksi yang sedang diedit. Dipakai
+  // kalau key-nya tidak ada di daftar aktif (mis. key generik versi pertama):
+  // <select> tidak bisa menampilkannya, tapi menyimpan ulang transaksi TIDAK
+  // boleh menghapus metode yang dulu dipilih user.
+  let editingMethod = PAYMENT_UNSET;
   const fieldDate = document.getElementById("field-date");
 
   // Opsi kategori mengikuti financeData.categories (bisa diubah user di
@@ -330,6 +335,7 @@ function setupTransactionModal() {
   function openModal(mode, tx) {
     resetForm();
     typeToSelect = "expense";
+    editingMethod = PAYMENT_UNSET;
 
     if (mode === "edit" && tx) {
       modalTitle.textContent = "Edit Transaksi";
@@ -341,9 +347,11 @@ function setupTransactionModal() {
       // Transaksi lama belum punya metode: JANGAN diisi "cash" diam-diam —
       // pilihan dikosongkan (selectedIndex -1) supaya menyimpan ulang tanpa
       // menyentuh field ini tidak mengarang data yang tidak pernah dipilih user.
-      const method = normalizePaymentMethod(tx.method);
-      fieldMethod.value = method;
-      if (!method) fieldMethod.selectedIndex = -1;
+      // Hal yang sama terjadi untuk key yang tidak ada di daftar aktif: tidak
+      // ditampilkan, tapi tetap disimpan lewat editingMethod di bawah.
+      editingMethod = normalizePaymentMethod(tx.method);
+      fieldMethod.value = editingMethod;
+      if (fieldMethod.value !== editingMethod) fieldMethod.selectedIndex = -1;
       fieldDate.value = tx.isoDate || toIsoDate(new Date());
       typeToSelect = tx.type;
     } else {
@@ -422,7 +430,9 @@ function setupTransactionModal() {
       amount,
       // Dinormalisasi lagi di sini: apa pun isi <select> (termasuk kalau DOM
       // diubah dari luar), yang tersimpan hanya key yang dikenal atau "".
-      method: normalizePaymentMethod(fieldMethod.value),
+      // selectedIndex -1 = tidak ada opsi yang terpilih (transaksi lama tanpa
+      // metode, atau metodenya di luar daftar aktif) -> pertahankan nilai lama.
+      method: fieldMethod.selectedIndex === -1 ? editingMethod : normalizePaymentMethod(fieldMethod.value),
       isoDate: fieldDate.value,
       time: formatDateID(fieldDate.value),
     };

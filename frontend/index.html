@@ -248,12 +248,23 @@
         <div class="form-field">
           <label for="field-method">Metode Pembayaran</label>
           <select id="field-method" name="method">
-            <option value="cash" selected>💵 Cash</option>
-            <option value="mbanking">🏦 M-Banking</option>
-            <option value="ewallet">📱 E-Wallet</option>
-            <option value="debit">💳 Debit</option>
-            <option value="kredit">🪙 Kredit</option>
-            <option value="lainnya">🧾 Lainnya</option>
+            <optgroup label="Cash">
+              <option value="cash" selected>💵 Cash</option>
+            </optgroup>
+            <optgroup label="Mobile Banking">
+              <option value="bca-mobile">🏦 BCA Mobile</option>
+              <option value="brimo">🏦 BRImo</option>
+              <option value="livin">🏦 Livin' by Mandiri</option>
+              <option value="mybca">🏦 myBCA</option>
+              <option value="wondr">🏦 wondr by BNI</option>
+            </optgroup>
+            <optgroup label="E-Wallet">
+              <option value="gopay">📱 GoPay</option>
+              <option value="dana">📱 DANA</option>
+              <option value="ovo">📱 OVO</option>
+              <option value="shopeepay">📱 ShopeePay</option>
+              <option value="linkaja">📱 LinkAja</option>
+            </optgroup>
           </select>
         </div>
 
