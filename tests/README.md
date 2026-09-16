@@ -30,8 +30,8 @@ CHROME_FLAGS="--no-sandbox" ./tests/scripts/run-tests.sh
 ## Cara menjalankan
 
 ```bash
-./tests/scripts/run-tests.sh              # semua: 37 suite + console + overflow (~10-15 menit)
-./tests/scripts/run-tests.sh suites       # hanya 37 suite
+./tests/scripts/run-tests.sh              # semua: 38 suite + console + overflow (~10-15 menit)
+./tests/scripts/run-tests.sh suites       # hanya 38 suite
 ./tests/scripts/run-tests.sh console      # 6 halaman x 4 lebar, error konsol harus 0
 ./tests/scripts/run-tests.sh overflow     # 6 halaman x 6 lebar, tidak boleh scroll horizontal
 ./tests/scripts/run-tests.sh modalracetest jssettings    # suite tertentu saja
@@ -55,7 +55,7 @@ tests/
 ├── fixtures/
 │   ├── legacy/          app.js & style.css versi pra-refactor (BEKU — jangan diedit)
 │   └── pages/           halaman referensi: *_legacy.html, app_ref.html, jsf_page.html
-├── harness/             37 suite + 2 harness berparameter (consolecheck, harness)
+├── harness/             38 suite + 2 harness berparameter (consolecheck, harness)
 └── scripts/
     └── run-tests.sh     satu-satunya runner
 ```
@@ -76,7 +76,11 @@ karena yang di atas memberi diagnosis paling cepat saat ada yang rusak.
    Membuktikan file hasil pemecahan == `app.js`/`style.css` lama (fungsi
    byte-per-byte, DOM, localStorage, fokus, computed style).
 2. **Modal** — `modalracetest` (siklus hidup: timer hide, frame `.is-open`,
-   fokus, scroll lock, buka-ulang < durasi animasi), `modaltest`.
+   fokus, scroll lock, buka-ulang < durasi animasi), `modaltest`, dan
+   `modallifecycletest` (M2): kontrak `createModalController`
+   (`duration`, `onOpenFrame`, `onClose` untuk kelima jalur tutup) plus
+   matriks 10 modal x jalur tutup — tombol X, Batal/CTA, klik latar, Escape,
+   `close()` programatik — berikut focus restore dan kunci scroll.
 3. **Data & penyimpanan (M1)** — `m1datatest`: Target Keuangan di
    backup/import/reset, rollback empat key, kontrak boolean `saveTransactions`/
    `saveBudget`/`saveSettings`/`saveGoals`, dan perilaku setiap pemanggilnya
@@ -112,7 +116,7 @@ functest               PASS=59   FAIL=1   (1 known artifact)
   sebagai kegagalan dan tidak membuat exit code merah.
 - Ringkasan terakhir: `TOTAL PASS=… FAIL(baru)=… known artifact=…`.
 
-Angka acuan saat milestone M1 (Chrome 141, Windows): 37 suite hijau, `functest`
+Angka acuan saat milestone M2 (Chrome 141, Windows): 38 suite hijau, `functest`
 59/1 (artefak di bawah), console 24/24 bersih, overflow 36/36 bersih.
 
 ## Known artifact: `functest` 59 PASS / 1 FAIL
@@ -127,6 +131,10 @@ sehingga callback rAF tidak dijalankan dan kelas belum terpasang saat diperiksa.
 Di browser sungguhan assertion ini lulus. Bukti bahwa ini artefak lingkungan dan
 bukan regresi: hasilnya identik (59/1) ketika dijalankan pada commit sebelum dan
 sesudah perbaikan modal.
+
+Alasan yang sama dipakai `modallifecycletest`: kontrak controller (durasi,
+urutan frame) diuji lewat antrean palsu, sedangkan matriks jalur tutup diuji
+dengan waktu nyata memakai `hidden`/scroll lock sebagai penanda.
 
 Karena alasan itu, `modalracetest` tidak menjadikan `.is-open` sebagai syarat
 lulus di lapisan waktu-nyata; bagian A-nya mengganti `setTimeout`/

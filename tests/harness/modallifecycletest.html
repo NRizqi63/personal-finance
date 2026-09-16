@@ -1,0 +1,350 @@
+<!doctype html>
+<meta charset="utf-8">
+<pre id="r">running…</pre>
+<script>
+/* M2 — lifecycle modal bersama (createModalController satu-satunya pemilik).
+
+   A. Kontrak controller generik: duration default/custom, onOpenFrame,
+      onClose untuk KELIMA jalur tutup, tidak dobel, tidak terpanggil untuk
+      close yang tidak melakukan apa-apa.
+   B. Matriks 10 modal x 5 jalur tutup (X, Batal/CTA, latar, Escape,
+      programatik) + fokus kembali ke pemicu + kunci scroll.
+   C. Modal transaksi & check-in lewat controller bersama (isi form, status
+      error, checkinDismissed, race buka-tutup-buka).
+   D. Tidak ada listener ganda: satu klik = satu aksi.                       */
+const out = []; const ok = (n, c, x = "") => out.push(`${c ? "PASS" : "FAIL"} ${n}${x ? "  (" + x + ")" : ""}`);
+const wait = (ms) => new Promise(r => setTimeout(r, ms));
+const BASE = new URL("../../frontend/", location.href).href;
+
+const pad = (n) => String(n).padStart(2, "0");
+const iso = (dt) => `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`;
+const T = iso(new Date());
+const TX = [{ id: 2, title: "Gaji", category: "lainnya", type: "income", amount: 5000000, isoDate: T, time: "" },
+            { id: 1, title: "Makan", category: "makanan", type: "expense", amount: 25000, isoDate: T, time: "" }];
+const GOALS = [{ id: 1, name: "Dana Darurat", target: 10000000, saved: 3200000, deadline: "", createdAt: "2026-01-15" }];
+const BUDGET = { monthly: 1234000, categories: { makanan: { name: "Makanan", emoji: "🍜", budget: 800000 } } };
+const KEYS = ["financeData.transactions", "financeData.budget", "financeData.settings", "financeData.goals"];
+
+let frame = null;
+async function load(page, { dismissCheckin = true } = {}) {
+  if (!frame) {
+    frame = document.createElement("iframe"); frame.width = 390; frame.height = 1800;
+    frame.src = BASE + "index.html"; document.body.appendChild(frame);
+    await new Promise(r => frame.onload = r);
+  }
+  const w0 = frame.contentWindow;
+  try {
+    w0.localStorage.clear(); w0.sessionStorage.clear();
+    w0.localStorage.setItem("financeData.transactions", JSON.stringify(TX));
+    w0.localStorage.setItem("financeData.goals", JSON.stringify(GOALS));
+    w0.localStorage.setItem("financeData.budget", JSON.stringify(BUDGET));
+    if (dismissCheckin) w0.sessionStorage.setItem("checkinDismissed", "true");
+  } catch (e) {}
+  frame.remove();
+  frame = document.createElement("iframe"); frame.width = 390; frame.height = 1800; frame.src = BASE + page;
+  document.body.appendChild(frame);
+  await new Promise(r => frame.onload = r); await wait(350);
+  const r = { d: frame.contentDocument, w: frame.contentWindow, errors: [] };
+  r.w.addEventListener("error", e => r.errors.push(e.message));
+  r.w.console.error = (...a) => r.errors.push("console.error " + a.join(" "));
+  return r;
+}
+const $ = (d, id) => d.getElementById(id);
+const txt = (el) => (el ? el.textContent.replace(/\s+/g, " ").trim() : "");
+const locked = (d) => d.body.classList.contains("is-modal-open");
+const snapAll = (w) => JSON.stringify(KEYS.map(k => w.localStorage.getItem(k)));
+const activeId = (d) => { const e = d.activeElement; return e ? (e.id || e.className || e.tagName) : "none"; };
+async function tap(el) { el.focus(); el.click(); await wait(60); }
+const esc = (d) => d.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+const backdrop = (ov) => ov.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+const SETTLE = 420; // > durasi animasi terpanjang (220ms)
+
+/* Antrean palsu supaya urutan frame & timer bisa diperiksa deterministik
+   (rAF iframe praktis tidak pernah jalan di headless — lihat tests/README.md). */
+function fakeClock(w) {
+  const timers = new Map(); let tid = 1;
+  const frames = new Map(); let fid = 1;
+  const real = { st: w.setTimeout, ct: w.clearTimeout, raf: w.requestAnimationFrame, caf: w.cancelAnimationFrame };
+  w.setTimeout = (fn, ms) => { const id = tid++; timers.set(id, { fn, ms }); return id; };
+  w.clearTimeout = (id) => { timers.delete(id); };
+  w.requestAnimationFrame = (fn) => { const id = fid++; frames.set(id, fn); return id; };
+  w.cancelAnimationFrame = (id) => { frames.delete(id); };
+  return {
+    delays: () => [...timers.values()].map(t => t.ms),
+    pendingTimers: () => timers.size,
+    pendingFrames: () => frames.size,
+    flushTimers() { const fns = [...timers.values()]; timers.clear(); fns.forEach(t => t.fn()); },
+    flushFrames(times = 1) { for (let i = 0; i < times; i++) { const fns = [...frames.values()]; frames.clear(); fns.forEach(fn => fn(0)); } },
+    restore() { w.setTimeout = real.st; w.clearTimeout = real.ct; w.requestAnimationFrame = real.raf; w.cancelAnimationFrame = real.caf; }
+  };
+}
+
+/** Overlay sementara untuk menguji controller tanpa menyentuh modal produk. */
+function makeOverlay(d, id) {
+  const el = d.createElement("div");
+  el.className = "modal-overlay"; el.id = id; el.hidden = true;
+  el.innerHTML = '<div class="modal" role="dialog" aria-modal="true">'
+    + '<button type="button" class="modal-close" data-modal-close aria-label="Tutup">x</button>'
+    + '<button type="button" id="' + id + '-cancel" data-modal-close>Batal</button>'
+    + '</div>';
+  d.body.appendChild(el);
+  return el;
+}
+
+(async () => {
+  /* ================= A. KONTRAK CONTROLLER ================= */
+  let r = await load("goals.html"); let { d, w } = r;
+  {
+    const clock = fakeClock(w);
+    const el = makeOverlay(d, "probe-a");
+    let closes = 0, frames = 0;
+    const ctl = w.createModalController(el, { onClose: () => closes++, onOpenFrame: () => frames++ });
+
+    ctl.open();
+    ok("A1. open(): overlay tampil, satu frame dijadwalkan, belum ada timer", el.hidden === false && clock.pendingFrames() === 1 && clock.pendingTimers() === 0);
+    ok("A2. onOpenFrame BELUM dipanggil sebelum frame jalan", frames === 0);
+    clock.flushFrames(2);
+    ok("A3. onOpenFrame dipanggil TEPAT SEKALI per pembukaan, setelah .is-open", frames === 1 && el.classList.contains("is-open"));
+    ctl.close();
+    ok("A4. duration default = 180ms", JSON.stringify(clock.delays()) === "[180]", JSON.stringify(clock.delays()));
+    ok("A5. onClose dipanggil tepat sekali", closes === 1);
+    ctl.close();
+    ok("A6. close() kedua tidak memanggil onClose lagi & tidak menjadwalkan timer kedua", closes === 1 && clock.pendingTimers() === 1);
+    clock.flushTimers();
+    ok("A7. setelah timer: hidden, tanpa .is-open, scroll lock lepas", el.hidden === true && !el.classList.contains("is-open") && !locked(d));
+
+    // duration custom
+    const el2 = makeOverlay(d, "probe-b");
+    let closes2 = 0;
+    const ctl2 = w.createModalController(el2, { duration: 220, onClose: () => closes2++ });
+    ctl2.open(); ctl2.close();
+    ok("A8. options.duration dihormati (220ms)", JSON.stringify(clock.delays()) === "[220]", JSON.stringify(clock.delays()));
+    clock.flushTimers();
+
+    // controller tanpa options sama sekali
+    const el3 = makeOverlay(d, "probe-c");
+    const ctl3 = w.createModalController(el3);
+    ctl3.open();
+    clock.flushFrames(2);
+    ok("A9. controller tanpa options tetap bekerja (tidak melempar)", el3.hidden === false && el3.classList.contains("is-open"));
+    ctl3.close(); clock.flushTimers();
+    ok("A10. API publik tetap { open, close, isOpen }", typeof ctl3.open === "function" && typeof ctl3.close === "function" && typeof ctl3.isOpen === "function" && Object.keys(ctl3).sort().join() === "close,isOpen,open");
+    clock.restore();
+
+    // onClose untuk KELIMA jalur tutup (waktu nyata, jalur user asli)
+    const paths = [
+      ["tombol X", (ov) => ov.querySelector(".modal-close").click()],
+      ["tombol Batal", (ov) => ov.querySelectorAll("[data-modal-close]")[1].click()],
+      ["klik latar", (ov) => backdrop(ov)],
+      ["Escape", () => esc(d)],
+      ["close() programatik", (ov, c) => c.close()],
+    ];
+    for (const [label, act] of paths) {
+      const ov = makeOverlay(d, "probe-" + label.replace(/\W+/g, ""));
+      let n = 0;
+      const c = w.createModalController(ov, { onClose: () => n++ });
+      const trigger = $(d, "btn-add-goal");
+      trigger.focus();
+      c.open(); await wait(40);
+      act(ov, c); await wait(SETTLE);
+      ok(`A11. onClose dipanggil sekali lewat ${label}`, n === 1 && ov.hidden === true, `n=${n} hidden=${ov.hidden}`);
+      ok(`A12. fokus kembali ke pemicu setelah ${label}`, d.activeElement === trigger, activeId(d));
+      ok(`A13. scroll lock lepas setelah ${label}`, !locked(d));
+      ov.remove();
+    }
+    ok("A14. klik DI DALAM kotak modal tidak menutup", await (async () => {
+      const ov = makeOverlay(d, "probe-inside");
+      let n = 0; const c = w.createModalController(ov, { onClose: () => n++ });
+      c.open(); await wait(40);
+      ov.querySelector(".modal").dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await wait(200);
+      const still = ov.hidden === false && n === 0;
+      c.close(); await wait(SETTLE); ov.remove();
+      return still;
+    })());
+  }
+
+  /* ================= B. MATRIKS 10 MODAL x 5 JALUR ================= */
+  // [halaman, id overlay, cara membuka, id/selector tombol X, tombol batal/CTA]
+  const MODALS = [
+    ["index.html", "transaction-modal-overlay", (d) => d.querySelector('[data-action="add-transaction"]'), "#modal-close", "#modal-cancel"],
+    ["index.html", "checkin-overlay", null, "#checkin-close", "#checkin-cta"],
+    ["transactions.html", "transaction-modal-overlay", (d) => d.querySelector('#all-transaction-list [data-action="edit"]'), "#modal-close", "#modal-cancel"],
+    ["transactions.html", "confirm-modal-overlay", (d) => d.querySelector('#all-transaction-list [data-action="delete"]'), "[data-modal-close].modal-close", "[data-modal-close]:not(.modal-close)"],
+    ["budget.html", "budget-modal-overlay", (d) => $(d, "btn-edit-budget"), "[data-modal-close].modal-close", "[data-modal-close]:not(.modal-close)"],
+    ["budget.html", "category-modal-overlay", (d) => $(d, "btn-add-category"), "[data-modal-close].modal-close", "[data-modal-close]:not(.modal-close)"],
+    ["goals.html", "goal-modal-overlay", (d) => $(d, "btn-add-goal"), "[data-modal-close].modal-close", "[data-modal-close]:not(.modal-close)"],
+    ["goals.html", "goal-confirm-overlay", (d) => d.querySelector('[data-action="delete-goal"]'), "[data-modal-close].modal-close", "[data-modal-close]:not(.modal-close)"],
+    ["settings.html", "reset-modal-overlay", (d) => d.querySelector('[data-reset-target="transactions"]'), "#reset-modal-close", "#btn-reset-cancel"],
+  ];
+
+  for (const [page, ovId, openFn, closeSel, cancelSel] of MODALS) {
+    const auto = openFn === null; // check-in terbuka sendiri
+    r = await load(page, { dismissCheckin: !auto }); ({ d, w } = r);
+    const ov = $(d, ovId);
+    const label = `${page.replace(".html", "")}/${ovId}`;
+    const before = snapAll(w);
+
+    const openIt = async () => {
+      if (auto) return; // sudah terbuka saat halaman dimuat
+      const t = openFn(d);
+      await tap(t);
+      return t;
+    };
+
+    // jalur 1: tombol X
+    let trigger = await openIt();
+    ok(`B. ${label} — terbuka`, ov.hidden === false && locked(d));
+    ov.querySelector(closeSel).click(); await wait(SETTLE);
+    ok(`B. ${label} — tombol X menutup & melepas scroll lock`, ov.hidden === true && !locked(d));
+    if (trigger) ok(`B. ${label} — fokus kembali ke pemicu (X)`, d.activeElement === trigger, activeId(d));
+
+    if (auto) continue; // check-in hanya muncul sekali per sesi; jalur lain diuji di bagian C
+
+    // jalur 2: tombol Batal
+    trigger = await openIt();
+    ov.querySelector(cancelSel).click(); await wait(SETTLE);
+    ok(`B. ${label} — tombol Batal menutup`, ov.hidden === true && !locked(d));
+
+    // jalur 3: klik latar
+    await openIt();
+    backdrop(ov); await wait(SETTLE);
+    ok(`B. ${label} — klik latar menutup`, ov.hidden === true && !locked(d));
+
+    // jalur 4: Escape
+    await openIt();
+    esc(d); await wait(SETTLE);
+    ok(`B. ${label} — Escape menutup`, ov.hidden === true && !locked(d));
+
+    // jalur 5: klik di dalam kotak tidak menutup
+    await openIt();
+    ov.querySelector(".modal").dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await wait(250);
+    ok(`B. ${label} — klik di dalam kotak TIDAK menutup`, ov.hidden === false);
+    esc(d); await wait(SETTLE);
+
+    ok(`B. ${label} — membuka/menutup tidak mengubah data`, snapAll(w) === before);
+    ok(`B. ${label} — tanpa error konsol`, r.errors.length === 0, r.errors.join(" | "));
+  }
+
+  // modal import (perlu memilih file dulu) — jalur X, latar, Escape
+  r = await load("settings.html"); ({ d, w } = r);
+  {
+    const ov = $(d, "import-modal-overlay");
+    const file = JSON.stringify({ app: "personal-finance", appName: "Personal Finance", schema: 2, appVersion: "V2.2", exportedAt: new Date().toISOString(), counts: { transactions: 1, categories: 0, goals: 0 }, data: { transactions: [{ id: 1, title: "Dari Backup", category: "makanan", type: "expense", amount: 12000, isoDate: T, time: "" }], budget: null, settings: null, goals: [] } });
+    const pick = async () => {
+      const input = $(d, "import-file");
+      const dt = new w.DataTransfer(); dt.items.add(new w.File([file], "backup.json", { type: "application/json" }));
+      input.files = dt.files;
+      input.dispatchEvent(new w.Event("change", { bubbles: true }));
+      for (let i = 0; i < 100 && ov.hidden; i++) await wait(50);
+      await wait(80);
+    };
+    const before = snapAll(w);
+    await pick();
+    ok("B. settings/import-modal-overlay — terbuka setelah file valid", ov.hidden === false && locked(d));
+    $(d, "import-modal-close").click(); await wait(SETTLE);
+    ok("B. settings/import-modal-overlay — tombol X menutup", ov.hidden === true && !locked(d));
+    await pick(); backdrop(ov); await wait(SETTLE);
+    ok("B. settings/import-modal-overlay — klik latar menutup", ov.hidden === true);
+    await pick(); esc(d); await wait(SETTLE);
+    ok("B. settings/import-modal-overlay — Escape menutup", ov.hidden === true);
+    ok("B. settings/import-modal-overlay — data tidak berubah", snapAll(w) === before);
+  }
+
+  /* ================= C. TRANSAKSI & CHECK-IN LEWAT CONTROLLER ================= */
+  r = await load("index.html"); ({ d, w } = r);
+  {
+    const ov = $(d, "transaction-modal-overlay");
+    const addBtn = d.querySelector('[data-action="add-transaction"]');
+    await tap(addBtn);
+    ok("C1. modal transaksi: terbuka, fokus di tombol tutup, scroll terkunci", ov.hidden === false && d.activeElement === ov.querySelector(".modal-close") && locked(d));
+    ok("C2. form disiapkan sebelum modal tampil (judul & tanggal hari ini)", txt($(d, "modal-title")) === "Tambah Transaksi" && $(d, "field-date").value === T);
+    ok("C3. jenis default pengeluaran aktif", ov.querySelector(".type-toggle-btn.is-active").dataset.type === "expense");
+    $(d, "field-title").value = "Draft";
+    esc(d); await wait(SETTLE);
+    ok("C4. Escape menutup & fokus kembali ke pemicu", ov.hidden === true && d.activeElement === addBtn, activeId(d));
+
+    // race buka -> tutup -> buka ulang < durasi animasi
+    await tap(addBtn);
+    $(d, "modal-close").click();
+    await wait(60);
+    await tap(addBtn);
+    await wait(SETTLE);
+    ok("C5. buka ulang < 180ms: modal tetap terbuka (timer lama tidak menutupnya)", ov.hidden === false);
+    ok("C6. form di-reset saat dibuka ulang", $(d, "field-title").value === "");
+    ok("C7. scroll lock benar setelah race", locked(d));
+    esc(d); await wait(SETTLE);
+
+    // status error dibersihkan lewat onClose
+    const origSet = w.Storage.prototype.setItem;
+    w.Storage.prototype.setItem = function (k, v) { if (this === w.localStorage) throw new DOMException("QuotaExceededError", "QuotaExceededError"); return origSet.call(this, k, v); };
+    await tap(addBtn);
+    $(d, "field-title").value = "Gagal"; $(d, "field-title").dispatchEvent(new Event("input", { bubbles: true }));
+    $(d, "field-amount").value = "10000"; $(d, "field-amount").dispatchEvent(new Event("input", { bubbles: true }));
+    $(d, "field-category").value = "makanan";
+    $(d, "field-date").value = T;
+    $(d, "transaction-form").requestSubmit();
+    await wait(200);
+    w.Storage.prototype.setItem = origSet;
+    ok("C8. simpan gagal: modal tetap terbuka + pesan error di dalam modal", ov.hidden === false && !$(d, "transaction-modal-status").hidden && /tidak bisa disimpan/.test(txt($(d, "transaction-modal-status"))));
+    esc(d); await wait(SETTLE);
+    ok("C9. onClose membersihkan pesan error", $(d, "transaction-modal-status").hidden && txt($(d, "transaction-modal-status")) === "");
+    await tap(addBtn);
+    ok("C10. dibuka lagi: tidak ada sisa pesan error", $(d, "transaction-modal-status").hidden);
+    esc(d); await wait(SETTLE);
+    ok("C11. tanpa error konsol", r.errors.length === 0, r.errors.join(" | "));
+  }
+
+  // check-in: setiap jalur tutup menandai sesi
+  for (const [label, act] of [
+    ["tombol tutup", (d) => $(d, "checkin-close").click()],
+    ["tombol CTA", (d) => $(d, "checkin-cta").click()],
+    ["klik latar", (d) => backdrop($(d, "checkin-overlay"))],
+    ["Escape", (d) => esc(d)],
+  ]) {
+    r = await load("index.html", { dismissCheckin: false }); ({ d, w } = r);
+    const ov = $(d, "checkin-overlay");
+    ok(`C12. check-in tampil otomatis (${label})`, ov.hidden === false && locked(d));
+    ok(`C13. checkinDismissed belum ditulis sebelum ditutup (${label})`, w.sessionStorage.getItem("checkinDismissed") === null);
+    act(d); await wait(500);
+    ok(`C14. ${label}: tertutup, scroll lock lepas`, ov.hidden === true && !locked(d));
+    ok(`C15. ${label}: checkinDismissed ditulis lewat onClose`, w.sessionStorage.getItem("checkinDismissed") === "true");
+  }
+  // durasi 220ms check-in
+  r = await load("index.html", { dismissCheckin: false }); ({ d, w } = r);
+  {
+    const ov = $(d, "checkin-overlay");
+    const clock = fakeClock(w);
+    $(d, "checkin-close").click();
+    ok("C16. check-in memakai durasi 220ms (options.duration)", JSON.stringify(clock.delays()) === "[220]", JSON.stringify(clock.delays()));
+    clock.flushTimers();
+    ok("C17. setelah timer: overlay hidden", ov.hidden === true);
+    clock.restore();
+  }
+
+  /* ================= D. TIDAK ADA LISTENER GANDA ================= */
+  r = await load("goals.html"); ({ d, w } = r);
+  {
+    // setup dipanggil ulang -> kalau listener menumpuk, satu klik akan
+    // memanggil close() dua kali; onClose dijaga guard `showing`, jadi yang
+    // diperiksa: perilaku tetap benar & tidak ada error.
+    const ov = $(d, "goal-modal-overlay");
+    const before = snapAll(w);
+    await tap($(d, "btn-add-goal"));
+    ok("D1. modal goals terbuka", ov.hidden === false);
+    ov.querySelector("[data-modal-close]").click();
+    ov.querySelector("[data-modal-close]").click(); // klik kedua saat animasi tutup
+    await wait(SETTLE);
+    ok("D2. klik tutup dua kali cepat: state tetap benar", ov.hidden === true && !locked(d) && !ov.classList.contains("is-open"));
+    ok("D3. data tidak berubah", snapAll(w) === before);
+    // pemicu tunggal -> satu modal terbuka, bukan dua entri tumpukan
+    await tap($(d, "btn-add-goal"));
+    esc(d); await wait(SETTLE);
+    ok("D4. satu Escape cukup menutup (tidak ada entri tumpukan ganda)", ov.hidden === true && !locked(d));
+    ok("D5. tanpa error konsol", r.errors.length === 0, r.errors.join(" | "));
+  }
+
+  document.getElementById("r").textContent = out.join("\n") + `\n\nTOTAL PASS=${out.filter(l => l.startsWith("PASS")).length} FAIL=${out.filter(l => l.startsWith("FAIL")).length}`;
+})().catch(e => { document.getElementById("r").textContent = out.join("\n") + "\nEXCEPTION " + e.message + "\n" + e.stack; });
+</script>

@@ -532,67 +532,30 @@ function shouldShowCheckin() {
 function setupCheckin() {
   const overlay = document.getElementById("checkin-overlay");
   if (!overlay) return; // bukan di dashboard
-  const checkinEntry = { close: () => closeCheckin(), overlay };
-  let checkinTrigger = null;
-  // Pola yang sama dengan createModalController() di core.js — lihat catatan
-  // di sana. Durasi animasi check-in 220ms (bukan 180ms), sisanya identik.
-  let checkinShowing = false;
-  let checkinHideTimer = null;
-  let checkinOpenFrame = null;
-  function cancelCheckinPending() {
-    if (checkinHideTimer !== null) {
-      clearTimeout(checkinHideTimer);
-      checkinHideTimer = null;
-    }
-    if (checkinOpenFrame !== null) {
-      cancelAnimationFrame(checkinOpenFrame);
-      checkinOpenFrame = null;
-    }
-  }
-
-  function closeCheckin() {
-    if (!checkinShowing) return; // close ganda: jangan jadwalkan timer kedua
-    cancelCheckinPending();
-    checkinShowing = false;
-    popModal(checkinEntry);
-    overlay.classList.remove("is-open");
-    checkinHideTimer = setTimeout(() => {
-      checkinHideTimer = null;
-      overlay.hidden = true;
-    }, 220);
-    unlockBodyScroll();
-    restoreFocus(checkinTrigger);
-    checkinTrigger = null;
-    try {
-      sessionStorage.setItem("checkinDismissed", "true");
-    } catch (err) {
-      // sessionStorage tidak tersedia — abaikan; popup cukup tidak muncul
-      // lagi selama tab ini masih terbuka.
-    }
-  }
+  // Lifecycle (timer hide, frame animasi, tumpukan modal, kunci scroll, fokus
+  // awal & focus restore) dipegang createModalController() di core.js.
+  // Check-in hanya beda dua hal: animasi keluarnya 220ms, dan setiap kali
+  // benar-benar tertutup — lewat tombol, CTA, klik latar, atau Escape —
+  // sesi ini ditandai supaya popup tidak muncul lagi.
+  const modal = createModalController(overlay, {
+    duration: 220,
+    onClose: () => {
+      try {
+        sessionStorage.setItem("checkinDismissed", "true");
+      } catch (err) {
+        // sessionStorage tidak tersedia — abaikan; popup cukup tidak muncul
+        // lagi selama tab ini masih terbuka.
+      }
+    },
+  });
 
   function openCheckin() {
-    if (!checkinShowing) checkinTrigger = document.activeElement;
-    cancelCheckinPending();
-    checkinShowing = true;
-    renderCheckin();
-    overlay.hidden = false;
-    pushModal(checkinEntry);
-    lockBodyScroll();
-    focusModal(overlay);
-    checkinOpenFrame = requestAnimationFrame(() => {
-      checkinOpenFrame = requestAnimationFrame(() => {
-        checkinOpenFrame = null;
-        overlay.classList.add("is-open");
-      });
-    });
+    renderCheckin(); // isi dulu, baru ditampilkan
+    modal.open();
   }
 
-  document.getElementById("checkin-close").addEventListener("click", closeCheckin);
-  document.getElementById("checkin-cta").addEventListener("click", closeCheckin);
-  overlay.addEventListener("click", (e) => {
-    if (e.target === overlay) closeCheckin();
-  });
+  document.getElementById("checkin-close").addEventListener("click", () => modal.close());
+  document.getElementById("checkin-cta").addEventListener("click", () => modal.close());
 
   if (shouldShowCheckin()) openCheckin();
 }

@@ -102,10 +102,23 @@ async function raceCase(label, { d, overlay, openFn, closeFn, gap = 60, settle =
   /* ===== 0. Kode: timer & frame memang dibatalkan ===== */
   ok("0a. core.js: timer hide disimpan & di-clearTimeout", /hideTimer = setTimeout/.test(appJs) && /clearTimeout\(hideTimer\)/.test(appJs));
   ok("0b. core.js: rAF pembuka disimpan & di-cancelAnimationFrame", /openFrame = requestAnimationFrame/.test(appJs) && /cancelAnimationFrame\(openFrame\)/.test(appJs));
-  ok("0c. modal transaksi punya pembatalan sendiri", /modalHideTimer = setTimeout/.test(appJs) && /clearTimeout\(modalHideTimer\)/.test(appJs) && /cancelAnimationFrame\(modalOpenFrame\)/.test(appJs));
-  ok("0d. modal check-in punya pembatalan sendiri", /checkinHideTimer = setTimeout/.test(appJs) && /clearTimeout\(checkinHideTimer\)/.test(appJs) && /cancelAnimationFrame\(checkinOpenFrame\)/.test(appJs));
+  ok("0c. M2: HANYA ada satu implementasi lifecycle — tepat 1 setTimeout(hidden), 1 clearTimeout, 1 cancelAnimationFrame di seluruh kode", (appJs.match(/hideTimer = setTimeout/g) || []).length === 1 && (appJs.match(/clearTimeout\(hideTimer\)/g) || []).length === 1 && (appJs.match(/cancelAnimationFrame\(/g) || []).length === 1);
+  ok("0d. M2: modal transaksi & check-in memakai controller bersama, bukan salinan lifecycle", /setupTransactionModal[\s\S]*?createModalController\(overlay/.test(appJs) && /setupCheckin[\s\S]*?createModalController\(overlay/.test(appJs) && !/modalHideTimer|checkinHideTimer|modalOpenFrame|checkinOpenFrame|modalShowing|checkinShowing/.test(appJs));
+  ok("0d2. M2: pushModal/popModal, lockBodyScroll/unlockBodyScroll & restoreFocus hanya dipanggil dari core.js", (() => {
+    // Komentar dibuang dulu: penyebutan nama fungsi di dalam komentar (mis.
+    // goals.js yang menjelaskan restoreFocus) bukan pemanggilan.
+    const codeOnly = (s) => s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|\s)\/\/.*$/gm, "$1");
+    const core = codeOnly(appJs.split("/* ==== transactions-shared.js ==== */")[0]);
+    const rest = codeOnly(appJs.slice(appJs.indexOf("/* ==== transactions-shared.js ==== */")));
+    const countIn = (src, re) => (src.match(re) || []).length;
+    return countIn(core, /pushModal\(/g) === 2 && countIn(rest, /pushModal\(/g) === 0
+      && countIn(core, /popModal\(/g) === 3 && countIn(rest, /popModal\(/g) === 0
+      && countIn(rest, /lockBodyScroll\(\)/g) === 0 && countIn(rest, /unlockBodyScroll\(\)/g) === 0
+      && countIn(rest, /restoreFocus\(/g) === 0 && countIn(rest, /focusModal\(/g) === 0;
+  })());
   ok("0e. tidak ada lagi setTimeout(hidden = true) tanpa penampung timer", !/\n\s*setTimeout\(\(\) => \{\s*\n\s*overlay\.hidden = true;/.test(appJs));
-  ok("0f. durasi animasi tidak diubah (2x 180ms + 1x 220ms)", (appJs.match(/\}, 180\);/g) || []).length === 2 && (appJs.match(/\}, 220\);/g) || []).length === 1);
+  ok("0f. durasi animasi tetap: default 180ms di controller, 220ms untuk check-in lewat options.duration", /const duration = Number\.isFinite\(options\.duration\) \? options\.duration : 180;/.test(appJs) && /\}, duration\);/.test(appJs) && /duration: 220,/.test(appJs) && !/\}, 180\);/.test(appJs) && !/\}, 220\);/.test(appJs));
+  ok("0f2. hook onOpenFrame dipasang di dalam rAF bersarang, setelah .is-open", /overlay\.classList\.add\("is-open"\);\s*\n\s*if \(typeof options\.onOpenFrame === "function"\) options\.onOpenFrame\(\);/.test(appJs));
   ok("0g. TEPAT 2 listener keydown global (tidak ada listener baru)", appJs.split('addEventListener("keydown"').length - 1 === 2);
   ok("0h. API publik controller tetap { open, close, isOpen }", /return \{ open, close, isOpen: \(\) => !overlay\.hidden \};/.test(appJs));
 

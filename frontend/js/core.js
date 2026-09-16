@@ -1124,15 +1124,25 @@ document.addEventListener("keydown", (e) => {
 });
 
 /**
- * Kontrol buka/tutup generik untuk overlay modal (pola yang sama dengan modal
- * transaksi & check-in: hidden -> is-open lewat rAF bersarang, tutup lewat
- * [data-modal-close], klik latar, atau Escape lewat tumpukan modal di atas).
- * options.onClose (opsional) dipanggil setiap modal benar-benar tertutup —
- * lewat jalur mana pun — supaya pemanggil tidak perlu memasang listener
- * Escape sendiri (tumpukan modal global tetap satu-satunya penangan Escape).
+ * Kontrol buka/tutup generik untuk SEMUA overlay modal: hidden -> is-open
+ * lewat rAF bersarang, tutup lewat [data-modal-close], klik latar, atau
+ * Escape lewat tumpukan modal di atas. Sejak M2 ini satu-satunya pemilik
+ * lifecycle modal (timer hide, frame animasi, tumpukan, kunci scroll, fokus).
+ *
+ * options.duration    lama animasi tutup dalam ms sebelum hidden dipasang
+ *                     kembali (default 180; check-in memakai 220).
+ * options.onOpenFrame dipanggil di dalam rAF bersarang tepat setelah .is-open
+ *                     terpasang — untuk pekerjaan yang butuh modal sudah
+ *                     benar-benar dirender (mis. offsetLeft/offsetWidth).
+ * options.onClose     dipanggil setiap modal benar-benar tertutup lewat jalur
+ *                     mana pun (tombol, latar, Escape, close programatik),
+ *                     tepat satu kali per siklus buka — guard `showing` di
+ *                     close() yang menjaga close ganda tidak memanggilnya dua
+ *                     kali. Pemanggil jadi tidak perlu listener Escape sendiri.
  */
 function createModalController(overlay, options = {}) {
   const entry = { close: () => close(), overlay };
+  const duration = Number.isFinite(options.duration) ? options.duration : 180;
   let lastTrigger = null;
   // State buka/tutup yang sebenarnya. TIDAK boleh disimpulkan dari
   // overlay.hidden: selama animasi tutup (180ms) hidden masih false padahal
@@ -1168,11 +1178,18 @@ function createModalController(overlay, options = {}) {
     overlay.hidden = false;
     pushModal(entry);
     lockBodyScroll();
+    // Fokus ke tombol tutup, BUKAN ke field: di HP, fokus ke input langsung
+    // memunculkan keyboard tanpa diminta.
     focusModal(overlay);
+    // Satu requestAnimationFrame kadang tidak cukup: browser bisa
+    // menggabungkan state "hidden baru dilepas" dengan state "is-open" jadi
+    // satu frame yang sama sehingga transisi terlewat (lebih sering di
+    // Safari/iOS). rAF bersarang memastikan frame awal sempat digambar dulu.
     openFrame = requestAnimationFrame(() => {
       openFrame = requestAnimationFrame(() => {
         openFrame = null;
         overlay.classList.add("is-open");
+        if (typeof options.onOpenFrame === "function") options.onOpenFrame();
       });
     });
   }
@@ -1185,9 +1202,9 @@ function createModalController(overlay, options = {}) {
     hideTimer = setTimeout(() => {
       hideTimer = null;
       overlay.hidden = true;
-    }, 180);
+    }, duration);
     unlockBodyScroll();
-    restoreFocus(lastTrigger); // segera, bukan setelah animasi 180ms
+    restoreFocus(lastTrigger); // segera, bukan setelah animasi selesai
     lastTrigger = null;
     if (typeof options.onClose === "function") options.onClose();
   }

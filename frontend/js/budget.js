@@ -203,11 +203,13 @@ function setupBudgetEditor() {
   const budgetOverlay = document.getElementById("budget-modal-overlay");
   if (!budgetOverlay) return; // bukan di halaman analytics
 
-  const budgetModal = createModalController(budgetOverlay);
+  // onClose: pesan gagal simpan tidak tertinggal di DOM saat popup ditutup
+  // (pola yang sama dengan goals.js & settings.js).
+  const budgetModal = createModalController(budgetOverlay, { onClose: () => setStatus("budget-modal-status", "") });
   const categoryOverlay = document.getElementById("category-modal-overlay");
-  const categoryModal = createModalController(categoryOverlay);
+  const categoryModal = createModalController(categoryOverlay, { onClose: () => setStatus("category-modal-status", "") });
   const confirmOverlay = document.getElementById("confirm-modal-overlay");
-  const confirmModal = createModalController(confirmOverlay);
+  const confirmModal = createModalController(confirmOverlay, { onClose: () => setStatus("budget-confirm-status", "") });
 
   function rerender() {
     renderBudgetPage(); // ikut bulan yang sedang dilihat (budgetViewDate)
@@ -226,12 +228,6 @@ function setupBudgetEditor() {
     else delete el.dataset.type;
     el.hidden = !text;
   }
-  function clearStatuses() {
-    setStatus("budget-modal-status", "");
-    setStatus("category-modal-status", "");
-    setStatus("budget-confirm-status", "");
-  }
-
   const SAVE_FAILED_MESSAGE = "Perubahan tidak bisa disimpan — penyimpanan browser penuh atau tidak tersedia. Coba lagi.";
 
   /** true = benar-benar tersimpan. false = storage menolak; pemanggil yang
@@ -299,7 +295,6 @@ function setupBudgetEditor() {
     fieldMonthly.value = formatAmountDigits(String(financeData.budget.monthly));
     fieldMonthly.setCustomValidity("");
     renderQuickAmounts();
-    clearStatuses();
     budgetModal.open();
   });
 
@@ -395,7 +390,6 @@ function setupBudgetEditor() {
       clearBudgetBtn.hidden = true;
       deleteBtn.hidden = true;
     }
-    clearStatuses();
     categoryModal.open();
   }
 
@@ -481,7 +475,6 @@ function setupBudgetEditor() {
     confirmText.textContent = count
       ? `${count} transaksi yang memakai kategori ini tidak akan ikut terhapus — semuanya tetap tersimpan dan akan tampil sebagai "Lainnya".`
       : "Transaksi yang sudah ada tidak akan ikut terhapus.";
-    clearStatuses();
     confirmModal.open();
   });
 
