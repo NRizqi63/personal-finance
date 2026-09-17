@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24"
+     data-placeholder="true">
+  <!-- PLACEHOLDER. Ini BUKAN logo resmi BCA Mobile: gambar ini dibuat sendiri
+       (kotak + monogram), tanpa memakai atau meniru aset merek mana pun.
+       Warna dihitung dari rumus hue = (150 + 1 * 360/11) mod 360.
+       Ganti berkas ini bila nanti tersedia logo resmi yang jelas lisensinya. -->
+  <title>BCA Mobile (placeholder, bukan logo resmi)</title>
+  <rect width="24" height="24" rx="6" fill="#227d81" />
+  <text x="12" y="12.4" text-anchor="middle" dominant-baseline="middle"
+        font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif" font-size="13" font-weight="700"
+        letter-spacing="-0.3" fill="#ffffff">B</text>
+</svg>

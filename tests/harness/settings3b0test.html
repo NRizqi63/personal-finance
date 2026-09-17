@@ -61,9 +61,18 @@ async function seed(w) {
   } catch (e) {}
 }
 const txt = (el) => (el ? el.textContent : "");
-/** Tidak ada markup dari payload yang jadi DOM aktif. */
+/** Tidak ada markup dari payload yang jadi DOM aktif.
+ * UI-2: slot logo metode pembayaran sekarang sah berisi <img> lokal. Yang
+ * dikecualikan HANYA itu — <img> di dalam #method-grid .method-logo yang
+ * src-nya cocok pola aset lokal, alt-nya kosong, dan tanpa handler inline.
+ * <img> lain tetap dihitung kotor, jadi cek ini tidak melemah. */
+const METHOD_LOGO_SRC = /^assets\/payment-methods\/[a-z0-9-]+\.svg$/;
+const isMethodLogo = (img) => !!img.closest("#method-grid .method-logo")
+  && METHOD_LOGO_SRC.test(img.getAttribute("src") || "")
+  && img.getAttribute("alt") === ""
+  && !img.hasAttribute("onerror") && !img.hasAttribute("onload");
 function domClean(d, w) {
-  const imgs = d.querySelectorAll("img").length;
+  const imgs = [...d.querySelectorAll("img")].filter((img) => !isMethodLogo(img)).length;
   const handlers = d.querySelectorAll("[onerror],[onload],[onmouseover],[onclick],[onfocus],[onmouseenter]").length;
   const strayB = [...d.querySelectorAll("b")].filter(b => /key/i.test(b.textContent)).length;
   return { imgs, handlers, strayB, pwned: w.__pwned, clean: imgs === 0 && handlers === 0 && strayB === 0 && w.__pwned === undefined };

@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24"
+     data-placeholder="true">
+  <!-- PLACEHOLDER. Ini BUKAN logo resmi Cash: gambar ini dibuat sendiri
+       (kotak + monogram), tanpa memakai atau meniru aset merek mana pun.
+       Warna dihitung dari rumus hue = (150 + 0 * 360/11) mod 360.
+       Ganti berkas ini bila nanti tersedia logo resmi yang jelas lisensinya. -->
+  <title>Cash (placeholder, bukan logo resmi)</title>
+  <rect width="24" height="24" rx="6" fill="#228152" />
+  <rect x="3.5" y="7" width="17" height="10" rx="2" fill="#ffffff" />
+  <circle cx="12" cy="12" r="2.6" fill="none" stroke="#228152" stroke-width="1.5" />
+  <path d="M6.2 9.4v5.2M17.8 9.4v5.2" stroke="#228152" stroke-width="1.5" stroke-linecap="round" />
+</svg>

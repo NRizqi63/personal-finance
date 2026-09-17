@@ -141,6 +141,126 @@ function setupTransactionModal() {
   // <select> tidak bisa menampilkannya, tapi menyimpan ulang transaksi TIDAK
   // boleh menghapus metode yang dulu dipilih user.
   let editingMethod = PAYMENT_UNSET;
+  // Grid tombol metode: lapisan TAMPILAN di atas <select>. Nilai sebenarnya
+  // tetap hidup di fieldMethod — grid hanya menulis ke sana lalu menyesuaikan
+  // penanda aktifnya, jadi submit/edit/rollback tidak berubah sama sekali.
+  const methodGrid = document.getElementById("method-grid");
+  const methodButtons = () => (methodGrid ? [...methodGrid.querySelectorAll(".method-option[data-method]")] : []);
+
+  /** Samakan tampilan grid dengan nilai <select>. Roving tabindex: hanya satu
+   * tombol yang bisa dicapai lewat Tab supaya jumlah tab stop tidak bertambah
+   * (fokus antar tombol dipindah dengan panah — lihat UI-1c). */
+  function syncMethodGrid() {
+    const buttons = methodButtons();
+    if (!buttons.length) return;
+    const value = fieldMethod.value;
+    let hasActive = false;
+    buttons.forEach((btn) => {
+      const active = btn.dataset.method === value;
+      if (active) hasActive = true;
+      btn.classList.toggle("is-active", active);
+      btn.setAttribute("aria-checked", active ? "true" : "false");
+      btn.tabIndex = active ? 0 : -1;
+    });
+    // Tidak ada yang aktif (transaksi lama tanpa metode / metode di luar
+    // daftar aktif): grid tetap harus bisa dimasuki lewat Tab.
+    if (!hasActive) buttons[0].tabIndex = 0;
+  }
+
+  /** Metode lama (key generik versi pertama) tidak ada di daftar aktif, jadi
+   * tidak punya tombol. Supaya user tahu apa yang dulu dipilih — dan tidak
+   * mengira datanya hilang — tombol non-aktif ditampilkan di depan grid.
+   * Labelnya diambil dari konstanta (PAYMENT_LEGACY_METHODS), tidak pernah
+   * dari isi data, dan ditulis lewat textContent. Tombol ini sengaja TANPA
+   * data-method supaya tidak ikut sinkronisasi maupun navigasi panah. */
+  function renderLegacyMethod(key) {
+    if (!methodGrid) return;
+    const existing = methodGrid.querySelector(".method-option.is-legacy");
+    if (existing) existing.remove();
+    if (!key || PAYMENT_METHOD_KEYS.includes(key)) return;
+    const meta = PAYMENT_LEGACY_METHODS.find((item) => item.key === key);
+    if (!meta) return;
+
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "method-option is-legacy is-active";
+    btn.disabled = true;
+    btn.setAttribute("role", "radio");
+    btn.setAttribute("aria-checked", "true");
+    btn.setAttribute("aria-disabled", "true");
+    btn.tabIndex = -1;
+
+    const logo = document.createElement("span");
+    logo.className = "method-logo";
+    logo.setAttribute("aria-hidden", "true");
+    logo.textContent = meta.emoji;
+
+    const name = document.createElement("span");
+    name.className = "method-name";
+    name.textContent = `${meta.name} — tidak lagi tersedia`;
+
+    btn.append(logo, name);
+    methodGrid.prepend(btn);
+  }
+
+  /** Satu-satunya jalan grid mengubah nilai. Lewat normalizePaymentMethod
+   * supaya data-method yang diutak-atik dari luar tidak bisa masuk. */
+  function setMethod(key) {
+    const value = normalizePaymentMethod(key);
+    fieldMethod.value = value;
+    if (fieldMethod.value !== value) fieldMethod.selectedIndex = -1;
+    editingMethod = value; // pilihan baru menggantikan metode lama
+    renderLegacyMethod(value);
+    syncMethodGrid();
+  }
+
+  /** UI-2: isi slot logo dengan berkas dari metadata (PAYMENT_METHODS[].logo).
+   * Emoji yang sudah ada di markup dipakai sebagai CADANGAN: kalau berkasnya
+   * gagal dimuat, isi slot dikembalikan ke emoji itu, jadi tombol tidak pernah
+   * tampil kosong. Ukuran slot tetap (.method-logo 18x18), jadi pergantian ini
+   * tidak menggeser tata letak. Key legacy tidak punya logo -> tetap emoji. */
+  function upgradeMethodLogo(btn) {
+    const slot = btn.querySelector(".method-logo");
+    const meta = findPaymentMethod(btn.dataset.method);
+    if (!slot || !meta || !meta.logo) return;
+    const fallback = slot.textContent;
+    const img = document.createElement("img");
+    img.alt = ""; // slot sudah aria-hidden; namanya dibaca dari .method-name
+    // Listener dipasang SEBELUM src supaya kegagalan pasti tertangkap.
+    img.addEventListener("error", () => { slot.textContent = fallback; }, { once: true });
+    img.src = meta.logo;
+    slot.textContent = "";
+    slot.appendChild(img);
+  }
+
+  if (methodGrid) {
+    methodButtons().forEach(upgradeMethodLogo);
+
+    methodGrid.addEventListener("click", (e) => {
+      const btn = e.target.closest(".method-option");
+      if (!btn || btn.disabled || !btn.dataset.method) return;
+      setMethod(btn.dataset.method);
+    });
+
+    // Pola radiogroup: panah memindah pilihan SEKALIGUS fokus, Home/End ke
+    // ujung. Space/Enter tidak perlu ditangani — elemennya <button>, jadi
+    // browser sudah memicu click. Listener sengaja dipasang di grid (bukan
+    // document) supaya Escape & Tab tetap milik tumpukan modal di core.js.
+    methodGrid.addEventListener("keydown", (e) => {
+      const buttons = methodButtons().filter((btn) => !btn.disabled);
+      const current = buttons.indexOf(document.activeElement);
+      if (current === -1 || !buttons.length) return;
+      let next = -1;
+      if (e.key === "ArrowRight" || e.key === "ArrowDown") next = (current + 1) % buttons.length;
+      else if (e.key === "ArrowLeft" || e.key === "ArrowUp") next = (current - 1 + buttons.length) % buttons.length;
+      else if (e.key === "Home") next = 0;
+      else if (e.key === "End") next = buttons.length - 1;
+      else return;
+      e.preventDefault(); // panah tidak ikut menggulir modal
+      setMethod(buttons[next].dataset.method);
+      buttons[next].focus();
+    });
+  }
   const fieldDate = document.getElementById("field-date");
 
   // Opsi kategori mengikuti financeData.categories (bisa diubah user di
@@ -324,6 +444,8 @@ function setupTransactionModal() {
     // bisa menggantinya sebelum menyimpan. form.reset() sudah mengembalikan
     // <option selected>, ini hanya menegaskannya kalau markup berubah.
     fieldMethod.value = PAYMENT_METHODS[0].key;
+    renderLegacyMethod(PAYMENT_UNSET);
+    syncMethodGrid();
     populateCategoryOptions();
     setSelectedType("expense", { animate: false });
     // Tanggal LOKAL (toIsoDate), bukan toISOString() yang berbasis UTC: di
@@ -352,6 +474,8 @@ function setupTransactionModal() {
       editingMethod = normalizePaymentMethod(tx.method);
       fieldMethod.value = editingMethod;
       if (fieldMethod.value !== editingMethod) fieldMethod.selectedIndex = -1;
+      renderLegacyMethod(editingMethod);
+      syncMethodGrid();
       fieldDate.value = tx.isoDate || toIsoDate(new Date());
       typeToSelect = tx.type;
     } else {

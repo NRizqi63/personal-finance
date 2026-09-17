@@ -80,7 +80,7 @@ const key = (d, k, extra = {}) => d.dispatchEvent(new KeyboardEvent("keydown", O
   const appCode = appJs.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|\s)\/\/.*$/gm, "$1");
   ok("1i. tidak ada inline onclick / alert / confirm / prompt", !/\son[a-z]+=/i.test(html) && !/\balert\(|\bconfirm\(|\bprompt\(|window\.confirm|window\.prompt/.test(appCode));
   ok("1j. modal dibuat lewat createModalController (bukan sistem baru)", /function setupGoalEditor[\s\S]*?createModalController\(overlay/.test(appJs));
-  ok("1k. TEPAT 2 listener keydown global (Escape & Tab tidak ditambah listener baru)", appJs.split('addEventListener("keydown"').length - 1 === 2);
+  ok("1k. TEPAT 2 listener keydown GLOBAL (Escape & Tab tidak ditambah); keydown lain hanya di grid metode (elemen)", (appJs.match(/(?:document|window)\.addEventListener\("keydown"/g) || []).length === 2 && (appJs.match(/addEventListener\("keydown"/g) || []).length === 3 && /methodGrid\.addEventListener\("keydown"/.test(appJs));
 
   /* ===================== 2. Fokus awal ===================== */
   ok("2a. fokus awal masuk ke dalam modal", overlay(d).contains(d.activeElement));

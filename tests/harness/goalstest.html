@@ -242,7 +242,7 @@ function loadRaw(w, raw) {
   ok("K5. tidak memakai crypto.randomUUID di app.js", !/crypto\.randomUUID|randomUUID/.test(appJs));
 
   /* ===================== L. Aturan & pagar G-1 ===================== */
-  ok("L1. TEPAT 2 listener keydown global", appJs.split('addEventListener("keydown"').length - 1 === 2, String(appJs.split('addEventListener("keydown"').length - 1));
+  ok("L1. TEPAT 2 listener keydown GLOBAL (document/window); keydown lain hanya di grid metode (elemen)", (appJs.match(/(?:document|window)\.addEventListener\("keydown"/g) || []).length === 2 && (appJs.match(/addEventListener\("keydown"/g) || []).length === 3 && /methodGrid\.addEventListener\("keydown"/.test(appJs), String((appJs.match(/addEventListener\("keydown"/g) || []).length));
   ok("L2. tidak ada localStorage.clear() sebagai kode (hanya di komentar)", !appJs.split(/\r?\n/).some(l => l.includes("localStorage.clear()") && !/^\s*(\/\/|\*|\/\*)/.test(l)));
   ok("L3. hanya 1 pemanggilan toISOString di KODE (metadata exportedAt)", (appCode.match(/toISOString/g) || []).length === 1 && /exportedAt: now\.toISOString\(\)/.test(appCode), String((appCode.match(/toISOString/g) || []).length));
   ok("L4. blok goals tidak memanggil toISOString (tanggal selalu lokal)", !goalsBlock.includes("toISOString") && goalsBlock.includes("toIsoDate(new Date())"));

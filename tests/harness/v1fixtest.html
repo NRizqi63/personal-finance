@@ -111,7 +111,7 @@ const SEED_AMOUNTS = ["4.945.000", "5.000.000", "55.000", "25.000", "30.000"];
   ok("5b. Escape #1 menutup konfirmasi saja, modal edit tetap terbuka", d.getElementById("confirm-modal-overlay").hidden && !d.getElementById("category-modal-overlay").hidden);
   d.dispatchEvent(new w.KeyboardEvent("keydown", { key: "Escape", bubbles: true })); await wait(300);
   ok("5c. Escape #2 menutup modal edit", d.getElementById("category-modal-overlay").hidden);
-  ok("5d. hanya 2 listener keydown di seluruh app (dropdown + tumpukan modal)", (await fetchAppJs(BASE)).split('addEventListener("keydown"').length - 1 === 2);
+  ok("5d. hanya 2 listener keydown GLOBAL di seluruh app (dropdown + tumpukan modal); keydown grid metode di elemen", await (async () => { const appJs = await fetchAppJs(BASE); return (appJs.match(/(?:document|window)\.addEventListener\("keydown"/g) || []).length === 2 && (appJs.match(/addEventListener\("keydown"/g) || []).length === 3 && /methodGrid\.addEventListener\("keydown"/.test(appJs); })());
   // stack juga bekerja untuk modal transaksi
   ({ d, w } = await load("transactions.html"));
   d.querySelector('[data-action="add-transaction"]') || null;

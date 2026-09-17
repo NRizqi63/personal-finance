@@ -238,7 +238,7 @@ const widest = (d) => { let m = 0, who = ""; d.querySelectorAll("body *").forEac
   // G-4 ada: dashboard punya card ringkasan target; settings belum (G-5).
   ok("11x. index.html punya card target (G-4); settings belum menyebut goals (G-5 belum)", /id="goals-card"/.test(await (await fetch(BASE + "index.html")).text()) && !/goals\.html/.test(await (await fetch(BASE + "settings.html")).text()));
   ok("11y. settings.html tidak menyebut goals (G-5 belum)", !/goals\.html/.test(await (await fetch(BASE + "settings.html")).text()));
-  ok("11z. TEPAT 2 listener keydown global", appJs.split('addEventListener("keydown"').length - 1 === 2);
+  ok("11z. TEPAT 2 listener keydown GLOBAL (document/window); keydown lain hanya di grid metode (elemen)", (appJs.match(/(?:document|window)\.addEventListener\("keydown"/g) || []).length === 2 && (appJs.match(/addEventListener\("keydown"/g) || []).length === 3 && /methodGrid\.addEventListener\("keydown"/.test(appJs));
 
   /* ===================== 12. Responsif & overflow ===================== */
   const longSet = [

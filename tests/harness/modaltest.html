@@ -77,7 +77,7 @@ async function checkModal(d, w, { label, overlayId, openFn, expectRestoreSel }) 
     return list.length > 0 && !list.includes(d.getElementById("field-id")) && list.every(el => el.getClientRects().length > 0);
   })());
   esc(d, w); await wait(350);
-  ok("1c. hanya 2 listener keydown global (dropdown + tumpukan modal)", (await fetchAppJs(BASE)).split('addEventListener("keydown"').length - 1 === 2);
+  ok("1c. hanya 2 listener keydown GLOBAL (dropdown + tumpukan modal); keydown grid metode terpasang di elemen", await (async () => { const appJs = await fetchAppJs(BASE); return (appJs.match(/(?:document|window)\.addEventListener\("keydown"/g) || []).length === 2 && (appJs.match(/addEventListener\("keydown"/g) || []).length === 3 && /methodGrid\.addEventListener\("keydown"/.test(appJs); })());
 
   // ---------- 2. modal transaksi (edit dari daftar) ----------
   await checkModal(d, w, {

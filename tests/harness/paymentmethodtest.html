@@ -9,6 +9,7 @@
    5   : P-1 tanpa efek samping
    6   : P-2 form transaksi (opsi, default, tambah, edit, reset, nilai canonical)
    7   : P-3/P-4/P-5 belum tersentuh
+   8   : UI-2 aset logo — cadangan saat berkas gagal dimuat
 
    Renderer, backup/import/CSV, dan filter sengaja belum berubah; bagian 7
    mematoknya supaya tahap berikutnya tidak ter-merge tanpa test-nya sendiri. */
@@ -134,6 +135,7 @@ function call(w, fn, arg) {
   /* ============ 4. PAGAR TAHAP: P-2..P-5 belum dikerjakan ============ */
   const FILES = ["core.js", "transactions-shared.js", "dashboard.js", "goals.js", "analytics.js", "budget.js", "transactions.js", "settings.js"];
   const srcOf = {};
+  let assetText = []; // isi berkas SVG, diisi 4L2 lalu dipakai 4L3
   for (const f of FILES) srcOf[f] = await (await fetch(BASE + "js/" + f)).text();
   const allJs = FILES.map(f => srcOf[f]).join("\n");
   const html = { index: await (await fetch(BASE + "index.html")).text(), transactions: await (await fetch(BASE + "transactions.html")).text() };
@@ -154,14 +156,24 @@ function call(w, fn, arg) {
     const added = names.filter(n => /payment/i.test(n));
     return added.sort().join() === "PAYMENT_LEGACY_METHODS,PAYMENT_LOGO_DIR,PAYMENT_METHODS,PAYMENT_METHOD_KEYS,PAYMENT_UNSET,findPaymentMethod,getPaymentLabel,normalizePaymentMethod";
   })(), "");
-  ok("4L. R-1: metadata logo ADA di data, tapi belum dipakai UI mana pun", /const PAYMENT_LOGO_DIR = "assets\/payment-methods\/";/.test(srcOf["core.js"]) && FILES.every(f => !/<img|\.logo\b/.test(codeOnly(srcOf[f]))) && !/payment-methods\//.test(html.index + html.transactions));
-  ok("4L2. R-1: tidak ada aset logo yang di-load (file belum ada, jadi tidak ada request gagal)", await (async () => {
-    // Kalau nanti ada kode yang memuat logo sebelum asetnya disiapkan, request
-    // ini akan gagal dan halaman mencatat error — cek konsol di 5a menangkapnya.
-    try { const res = await fetch(BASE + "assets/payment-methods/gopay.svg"); return !res.ok || (await res.text()).length === 0; }
-    catch (e) { return true; } // file:// menolak file yang tidak ada -> memang belum ada
+  ok("4L. UI-2: metadata logo DIPAKAI UI — path ditulis SEKALI di core.js, pemakaiannya hanya di transactions-shared.js, markup halaman tetap tidak menyebut nama berkas", /const PAYMENT_LOGO_DIR = "assets\/payment-methods\/";/.test(srcOf["core.js"]) && /img\.src = meta\.logo;/.test(srcOf["transactions-shared.js"]) && FILES.filter(f => f !== "core.js" && f !== "transactions-shared.js").every(f => !/\.logo\b|payment-methods\//.test(codeOnly(srcOf[f]))) && !/payment-methods\//.test(html.index + html.transactions));
+  ok("4L2. UI-2: kesebelas aset ADA, berupa SVG lokal yang valid, tanpa rujukan/permintaan ke luar", await (async () => {
+    assetText = await Promise.all(list.map(async (m) => {
+      try { return await (await fetch(BASE + m.logo)).text(); } catch (e) { return ""; }
+    }));
+    return assetText.length === 11 && assetText.every((t) => /^<svg[\s\S]*<\/svg>$/.test(t.trim())
+      && !/https?:\/\//.test(t.replace(/xmlns="[^"]*"/g, "")) // xmlns bukan permintaan jaringan
+      && !/<script|<image|xlink:href|@font-face|url\(/i.test(t));
+  })(), "");
+  ok("4L3. UI-2: setiap aset MENANDAI DIRINYA placeholder (bukan logo resmi) lewat <title> dan data-placeholder", assetText.length === 11 && assetText.every((t) => /data-placeholder="true"/.test(t) && /bukan logo resmi/.test(t)));
+  ok("4L4. UI-2: key legacy tetap TIDAK punya berkas aset (tampilannya memang emoji)", await (async () => {
+    const hasil = await Promise.all(LEGACY.map(async (k) => {
+      try { const res = await fetch(BASE + "assets/payment-methods/" + k + ".svg"); return !res.ok; }
+      catch (e) { return true; } // file:// menolak berkas yang tidak ada
+    }));
+    return hasil.every(Boolean);
   })());
-  ok("4i. R-1: katalog lengkap & metode custom BELUM dikerjakan", !/PAYMENT_CATALOG|financeData\.paymentMethods|"user:/.test(allJs) && !/Tambah metode pembayaran/.test(html.index + html.transactions));
+  ok("4i. R-1: katalog lengkap & metode custom BELUM dikerjakan", !/PAYMENT_CATALOG|financeData\.paymentMethods|"user:/.test(allJs) && !/Tambah metode pembayaran/.test((html.index + html.transactions).replace(/<!--[\s\S]*?-->/g, "")) && /id="method-more"[^>]*hidden/.test(html.index));
 
   /* ============ 5. TIDAK ADA EFEK SAMPING ============ */
   ok("5a. halaman tetap dimuat tanpa error konsol", r.errors.length === 0, r.errors.join(" | "));
@@ -174,19 +186,48 @@ function call(w, fn, arg) {
 
   /* ============ 6. P-2 — FORM & SIMPAN ============ */
   const optionsOf = (doc) => [...doc.getElementById("field-method").options].map(o => ({ value: o.value, text: o.textContent.trim() }));
+  const tilesOf = (doc) => [...doc.querySelectorAll("#method-grid .method-option[data-method]")];
+  const tileOf = (doc, key) => doc.querySelector(`#method-grid .method-option[data-method="${key}"]`);
+  const activeTile = (doc) => doc.querySelector("#method-grid .method-option.is-active");
   const storedTx = (w) => JSON.parse(w.localStorage.getItem("financeData.transactions") || "[]");
   const fill = (doc, { title, amount, category = "makanan", date = T }) => {
     const set = (id, v) => { const f = doc.getElementById(id); f.value = v; f.dispatchEvent(new Event("input", { bubbles: true })); f.dispatchEvent(new Event("change", { bubbles: true })); };
     set("field-title", title); set("field-amount", amount); set("field-date", date);
     doc.getElementById("field-category").value = category;
   };
-  const pickMethod = (doc, key) => { const f = doc.getElementById("field-method"); f.value = key; f.dispatchEvent(new Event("change", { bubbles: true })); };
+  const pickMethod = (doc, key) => { const t = tileOf(doc, key); t.focus(); t.click(); };
+  // UI-2: slot logo memang berisi <img> lokal. Yang dianggap SAH hanya itu —
+  // di dalam .method-logo, src persis salah satu path metadata, alt kosong,
+  // tanpa handler inline. <img> lain (mis. dari payload) tetap terhitung asing.
+  const strayImgs = (doc) => [...doc.querySelectorAll("#transaction-form img")].filter((img) => !(
+    img.parentElement && img.parentElement.classList.contains("method-logo")
+    && list.some((m) => m.logo === img.getAttribute("src"))
+    && img.getAttribute("alt") === "" && !img.hasAttribute("onerror") && !img.hasAttribute("onload")));
+  const settledLogos = (doc) => Promise.all([...doc.querySelectorAll("#method-grid .method-logo img")].map((img) =>
+    img.complete ? null : new Promise((res) => { img.addEventListener("load", res, { once: true }); img.addEventListener("error", res, { once: true }); })));
 
   // --- 6A. field & opsi di KEDUA halaman ---
   for (const page of ["index.html", "transactions.html"]) {
     const rp = await load(page); const dp = rp.d;
     const sel = dp.getElementById("field-method");
-    ok(`6a. ${page}: #field-method ada, berupa <select name="method">`, !!sel && sel.tagName === "SELECT" && sel.name === "method");
+    ok(`6a. ${page}: #field-method tetap <select name="method"> sebagai sumber nilai form`, !!sel && sel.tagName === "SELECT" && sel.name === "method");
+    ok(`6a2. ${page}: <select> disembunyikan tanpa display:none, tidak bisa di-Tab, tidak dibaca ganda`, sel.classList.contains("visually-hidden") && sel.tabIndex === -1 && sel.getAttribute("aria-hidden") === "true" && rp.w.getComputedStyle(sel).display !== "none");
+    ok(`6a3. ${page}: grid tombol ada, role=radiogroup, berlabel`, (() => { const g = dp.getElementById("method-grid"); return !!g && g.getAttribute("role") === "radiogroup" && dp.getElementById(g.getAttribute("aria-labelledby")) !== null; })());
+    ok(`6a4. ${page}: 11 tombol metode, urutan & data-method sama dengan PAYMENT_METHODS`, tilesOf(dp).map(t => t.dataset.method).join() === list.map(m => m.key).join(), tilesOf(dp).map(t => t.dataset.method).join());
+    ok(`6a5. ${page}: tiap tombol = slot logo (ukuran tetap) + nama metode saja, tanpa teks grup`, tilesOf(dp).every((t, i) => { const logo = t.querySelector(".method-logo"); const name = t.querySelector(".method-name"); return logo && name && logo.getAttribute("aria-hidden") === "true" && name.textContent.trim() === list[i].name; }));
+    await settledLogos(dp);
+    ok(`6a5b. ${page}: UI-2 — slot logo berisi <img> dari metadata (src PERSIS PAYMENT_METHODS[].logo, alt kosong, tanpa handler inline)`, tilesOf(dp).every((t, i) => {
+      const img = t.querySelector(".method-logo img");
+      return !!img && img.getAttribute("src") === list[i].logo && img.getAttribute("alt") === "" && !img.hasAttribute("onerror") && !img.hasAttribute("onload");
+    }), tilesOf(dp).map(t => { const im = t.querySelector(".method-logo img"); return im ? im.getAttribute("src") : "-"; }).join(" | "));
+    ok(`6a5c. ${page}: kesebelas berkas logo benar-benar termuat (bukan gambar rusak)`, tilesOf(dp).every((t) => {
+      const img = t.querySelector(".method-logo img");
+      return !!img && img.complete && img.naturalWidth > 0;
+    }), tilesOf(dp).map(t => { const im = t.querySelector(".method-logo img"); return `${t.dataset.method}=${im ? im.naturalWidth : "?"}`; }).join(" "));
+    ok(`6a5d. ${page}: tidak ada <img> lain di form selain slot logo yang sah`, strayImgs(dp).length === 0);
+    ok(`6a6. ${page}: grup dipakai sebagai data (data-group), bukan teks di tombol`, tilesOf(dp).every((t, i) => t.dataset.group === list[i].group) && !/Mobile Banking|E-Wallet/.test(dp.getElementById("method-grid").textContent));
+    ok(`6a7. ${page}: roving tabindex — hanya SATU tombol yang bisa dicapai Tab`, tilesOf(dp).filter(t => t.tabIndex === 0).length === 1);
+    ok(`6a8. ${page}: slot "Tambah metode pembayaran" disiapkan & masih tersembunyi`, (() => { const more = dp.getElementById("method-more"); return !!more && more.hidden && more.children.length === 0; })());
     ok(`6b. ${page}: R-2 — opsi form PERSIS 11 metode aktif, urutan sama dengan PAYMENT_METHODS`, optionsOf(dp).map(o => o.value).join() === list.map(m => m.key).join(), optionsOf(dp).map(o => o.value).join());
     ok(`6b2. ${page}: tidak ada satu pun key legacy yang masih jadi pilihan aktif`, LEGACY.every(k => !optionsOf(dp).some(o => o.value === k)) && !optionsOf(dp).some(o => ["debit", "kredit", "lainnya", "paylater"].includes(o.value)));
     ok(`6b3. ${page}: tiga optgroup (Cash, Mobile Banking, E-Wallet) dengan isi 1/5/5 sesuai group di konstanta`, (() => {
@@ -199,9 +240,9 @@ function call(w, fn, arg) {
     })());
     ok(`6b4. ${page}: setiap opsi bisa dibaca aplikasi (normalize & label tidak kosong)`, optionsOf(dp).every(o => call(w, "normalizePaymentMethod", o.value).value === o.value && call(w, "getPaymentLabel", o.value).value !== ""));
     ok(`6c. ${page}: teks opsi = label aplikasi untuk key itu (emoji + nama)`, optionsOf(dp).every(o => o.text === call(w, "getPaymentLabel", o.value).value), optionsOf(dp).map(o => o.text).join("|"));
-    ok(`6d. ${page}: field metode berada SEBELUM field tanggal`, (() => {
+    ok(`6d. ${page}: blok metode berada SEBELUM field tanggal`, (() => {
       const fields = [...dp.querySelectorAll("#transaction-form .form-field")];
-      const iM = fields.findIndex(f => f.querySelector("#field-method"));
+      const iM = fields.findIndex(f => f.querySelector("#method-grid"));
       const iD = fields.findIndex(f => f.querySelector("#field-date"));
       return iM > -1 && iD > -1 && iM < iD;
     })());
@@ -211,7 +252,7 @@ function call(w, fn, arg) {
   // --- 6B. tambah transaksi: default cash & tersimpan canonical ---
   let rr = await load("index.html"); let dd = rr.d, ww = rr.w;
   await tap(dd.querySelector('[data-action="add-transaction"]'));
-  ok("6f. modal tambah: metode default 'cash'", dd.getElementById("field-method").value === "cash");
+  ok("6f. modal tambah: metode default 'cash' (nilai + tombol aktif + aria-checked)", dd.getElementById("field-method").value === "cash" && activeTile(dd) === tileOf(dd, "cash") && tileOf(dd, "cash").getAttribute("aria-checked") === "true");
   fill(dd, { title: "Kopi", amount: "20000" });
   dd.getElementById("transaction-form").requestSubmit();
   await wait(300);
@@ -231,14 +272,15 @@ function call(w, fn, arg) {
 
   // --- 6C. reset form kembali ke cash ---
   await tap(dd.querySelector('[data-action="add-transaction"]'));
-  ok("6k. modal dibuka lagi: metode kembali ke 'cash' (tidak mewarisi pilihan sebelumnya)", dd.getElementById("field-method").value === "cash");
+  ok("6k. modal dibuka lagi: metode kembali ke 'cash' (nilai & tombol aktif)", dd.getElementById("field-method").value === "cash" && activeTile(dd) === tileOf(dd, "cash"));
   dd.getElementById("modal-close").click(); await wait(400);
 
   // --- 6D. edit transaksi ---
   rr = await load("transactions.html"); dd = rr.d; ww = rr.w;
   const beforeEdit = ww.localStorage.getItem("financeData.transactions");
   await tap(dd.querySelector('#all-transaction-list [data-action="edit"]'));
-  ok("6l. edit transaksi LAMA (tanpa method): tidak ada opsi terpilih (tidak diisi 'cash' diam-diam)", dd.getElementById("field-method").selectedIndex === -1 && dd.getElementById("field-method").value === "");
+  ok("6l. edit transaksi LAMA (tanpa method): tidak ada tombol aktif (tidak diisi 'cash' diam-diam)", dd.getElementById("field-method").value === "" && activeTile(dd) === null && tilesOf(dd).every(t => t.getAttribute("aria-checked") === "false"));
+  ok("6l2. grid tetap bisa dimasuki Tab walau belum ada pilihan", tilesOf(dd).filter(t => t.tabIndex === 0).length === 1);
   ok("6m. membuka modal edit TIDAK mengubah data tersimpan", ww.localStorage.getItem("financeData.transactions") === beforeEdit);
   ok("6n. transaksi lama tetap tampil normal saat modal edit terbuka", dd.querySelectorAll("#all-transaction-list .transaction-item").length >= 1 && rr.errors.length === 0, rr.errors.join(" | "));
   pickMethod(dd, "dana");
@@ -254,7 +296,7 @@ function call(w, fn, arg) {
   ww.location.reload(); await wait(500);
   dd = frame.contentDocument; ww = frame.contentWindow;
   await tap(dd.querySelector('#all-transaction-list [data-action="edit"]'));
-  ok("6p. edit transaksi dengan metode aktif: preselect tepat", dd.getElementById("field-method").value === "shopeepay");
+  ok("6p. edit transaksi dengan metode aktif: preselect tepat (nilai + tombol aktif)", dd.getElementById("field-method").value === "shopeepay" && activeTile(dd) === tileOf(dd, "shopeepay"));
   dd.getElementById("modal-close").click(); await wait(400);
 
   // Metode LEGACY: tidak ada di daftar aktif, jadi tidak bisa ditampilkan —
@@ -263,7 +305,14 @@ function call(w, fn, arg) {
   ww.location.reload(); await wait(500);
   dd = frame.contentDocument; ww = frame.contentWindow;
   await tap(dd.querySelector('#all-transaction-list [data-action="edit"]'));
-  ok("6p2. metode legacy tidak ditawarkan sebagai pilihan (select kosong)", dd.getElementById("field-method").selectedIndex === -1 && dd.querySelectorAll("#field-method option").length === 11);
+  ok("6p2. metode legacy tidak ditawarkan sebagai pilihan aktif", dd.getElementById("field-method").value === "" && tilesOf(dd).length === 11 && !tileOf(dd, "debit"));
+  ok("6p2b. UI-1d: metode lama DITAMPILKAN sebagai tombol non-aktif dengan penjelasan", (() => {
+    const legacy = dd.querySelector("#method-grid .method-option.is-legacy");
+    return !!legacy && legacy.disabled && legacy.getAttribute("aria-disabled") === "true" && legacy.tabIndex === -1
+      && legacy.querySelector(".method-name").textContent.trim() === "Debit — tidak lagi tersedia"
+      && legacy.querySelector(".method-logo").textContent === "💳";
+  })(), (dd.querySelector("#method-grid .method-option.is-legacy") || {}).textContent);
+  ok("6p2c. tombol legacy tidak ikut navigasi/sinkronisasi (tanpa data-method)", !dd.querySelector("#method-grid .method-option.is-legacy").dataset.method);
   ok("6p3. label metode legacy tetap dikenali aplikasi (data tidak kehilangan arti)", call(ww, "getPaymentLabel", "debit").value === "💳 Debit");
   dd.getElementById("transaction-form").requestSubmit();
   await wait(300);
@@ -279,20 +328,78 @@ function call(w, fn, arg) {
   ww.location.reload(); await wait(500);
   dd = frame.contentDocument; ww = frame.contentWindow;
   await tap(dd.querySelector('#all-transaction-list [data-action="edit"]'));
-  ok("6r. method tidak valid di storage: select kosong, daftar opsi tetap 11, tidak ada elemen baru di DOM", dd.getElementById("field-method").selectedIndex === -1 && dd.querySelectorAll("#field-method option").length === 11 && !dd.querySelector("#transaction-form img"));
+  ok("6r. method tidak valid di storage: tidak ada tombol aktif, grid tetap 11, tanpa tombol legacy & tanpa elemen baru", dd.getElementById("field-method").value === "" && tilesOf(dd).length === 11 && !dd.querySelector("#method-grid .method-option.is-legacy") && strayImgs(dd).length === 0);
   dd.getElementById("transaction-form").requestSubmit();
   await wait(300);
   ok("6s. menyimpan ulang membersihkan nilai rusak jadi \"\" (bukan menyimpan markup)", storedTx(ww)[0].method === "");
 
+  /* ============ 6U. UI-1: INTERAKSI GRID ============ */
+  rr = await load("index.html"); dd = rr.d; ww = rr.w;
+  await tap(dd.querySelector('[data-action="add-transaction"]'));
+  // klik memilih
+  pickMethod(dd, "dana");
+  await wait(60);
+  ok("6u1. klik tombol: hanya satu yang aktif & <select> ikut berubah", activeTile(dd) === tileOf(dd, "dana") && dd.getElementById("field-method").value === "dana" && dd.querySelectorAll("#method-grid .method-option.is-active").length === 1);
+  ok("6u2. aria-checked mengikuti pilihan", tileOf(dd, "dana").getAttribute("aria-checked") === "true" && tileOf(dd, "cash").getAttribute("aria-checked") === "false");
+  ok("6u3. roving tabindex ikut berpindah", tileOf(dd, "dana").tabIndex === 0 && tilesOf(dd).filter(t => t.tabIndex === 0).length === 1);
+
+  // keyboard: panah, Home, End
+  const press = (el, key) => { const ev = new ww.KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }); el.dispatchEvent(ev); return ev; };
+  tileOf(dd, "cash").focus();
+  let ev = press(dd.activeElement, "ArrowRight"); await wait(40);
+  ok("6u4. ArrowRight memindah pilihan & fokus ke tombol berikutnya", dd.activeElement === tileOf(dd, "bca-mobile") && dd.getElementById("field-method").value === "bca-mobile" && ev.defaultPrevented);
+  press(dd.activeElement, "ArrowLeft"); await wait(40);
+  ok("6u5. ArrowLeft kembali ke tombol sebelumnya", dd.activeElement === tileOf(dd, "cash") && dd.getElementById("field-method").value === "cash");
+  press(dd.activeElement, "End"); await wait(40);
+  ok("6u6. End ke tombol terakhir", dd.activeElement === tileOf(dd, "linkaja") && dd.getElementById("field-method").value === "linkaja");
+  press(dd.activeElement, "Home"); await wait(40);
+  ok("6u7. Home ke tombol pertama", dd.activeElement === tileOf(dd, "cash") && dd.getElementById("field-method").value === "cash");
+  press(dd.activeElement, "ArrowLeft"); await wait(40);
+  ok("6u8. panah berputar di ujung (wrap)", dd.activeElement === tileOf(dd, "linkaja"));
+  const evTab = press(dd.activeElement, "Tab");
+  ok("6u9. Tab TIDAK ditangani grid (tetap milik focus trap modal)", !evTab.defaultPrevented);
+  const evEsc = new ww.KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+  dd.activeElement.dispatchEvent(evEsc);
+  await wait(450);
+  ok("6u10. Escape dari dalam grid tetap menutup modal", dd.getElementById("transaction-modal-overlay").hidden === true);
+
+  // simpan lewat pilihan keyboard
+  await tap(dd.querySelector('[data-action="add-transaction"]'));
+  tileOf(dd, "cash").focus();
+  press(dd.activeElement, "ArrowDown"); await wait(40);
+  fill(dd, { title: "Lewat keyboard", amount: "12000" });
+  dd.getElementById("transaction-form").requestSubmit();
+  await wait(300);
+  ok("6u11. metode pilihan keyboard ikut tersimpan", storedTx(ww)[0].method === "bca-mobile", String(storedTx(ww)[0].method));
+  ok("6u12. tanpa error konsol di alur grid", rr.errors.length === 0, rr.errors.join(" | "));
+
   /* ============ 7. P-2 TIDAK MENYENTUH TAHAP LAIN ============ */
   ok("7a. renderer belum berubah: baris transaksi tanpa label metode", (() => {
-    const meta = dd.querySelector("#all-transaction-list .transaction-meta");
+    // halaman terakhir yang dibuka bisa dashboard (#transaction-list) atau
+    // Semua Transaksi (#all-transaction-list) — keduanya memakai renderer yang sama.
+    const meta = dd.querySelector("#all-transaction-list .transaction-meta, #transaction-list .transaction-meta");
     return !!meta && !/💵|🏦|📱|💳|🪙|Cash|M-Banking|E-Wallet/.test(meta.textContent);
   })());
   const settingsSrc = await (await fetch(BASE + "js/settings.js")).text();
   ok("7b. backup/import/CSV belum berubah (schema 2, tanpa method, CSV 7 kolom)", /const BACKUP_SCHEMA_VERSION = 2;/.test(settingsSrc) && !/method/.test(settingsSrc) && /const CSV_HEADER = \["tanggal", "jenis", "judul", "kategori", "kategori_nama", "jumlah", "waktu"\];/.test(settingsSrc));
   ok("7c. filter/analitik belum mengenal metode", !/method/.test(await (await fetch(BASE + "js/transactions.js")).text()) && !/method/.test(await (await fetch(BASE + "js/analytics.js")).text()));
   ok("7d. tanpa error konsol sepanjang alur P-2", rr.errors.length === 0, rr.errors.join(" | "));
+
+  /* ============ 8. UI-2 — CADANGAN SAAT LOGO GAGAL DIMUAT ============ */
+  // Ditaruh paling akhir: 8b sengaja memuat berkas yang tidak ada, jadi tidak
+  // boleh mencemari pemeriksaan konsol di 6u12/7d.
+  const rl = await load("index.html"); const dl = rl.d;
+  await tap(dl.querySelector('[data-action="add-transaction"]'));
+  await settledLogos(dl);
+  const tileGo = tileOf(dl, "gopay");
+  ok("8a. keadaan awal: slot logo berisi <img>, emoji sudah digantikan", !!tileGo.querySelector(".method-logo img") && tileGo.querySelector(".method-logo").textContent === "");
+  tileGo.querySelector(".method-logo img").src = "assets/payment-methods/berkas-sengaja-tidak-ada.svg";
+  await wait(500);
+  ok("8b. CADANGAN: berkas gagal dimuat -> slot kembali ke EMOJI metode dan <img>-nya dilepas (tombol tidak pernah kosong)", tileGo.querySelector(".method-logo").textContent === "\u{1F4F1}" && !tileGo.querySelector(".method-logo img"), JSON.stringify(tileGo.querySelector(".method-logo").innerHTML));
+  ok("8c. kegagalan logo tidak mengubah identitas/aksesibilitas tombol", tileGo.dataset.method === "gopay" && tileGo.getAttribute("role") === "radio" && tileGo.querySelector(".method-name").textContent.trim() === "GoPay");
+  pickMethod(dl, "gopay"); await wait(80);
+  ok("8d. tombol yang logonya gagal tetap bisa dipilih & tetap menulis ke <select>", dl.getElementById("field-method").value === "gopay" && activeTile(dl) === tileGo && tileGo.getAttribute("aria-checked") === "true");
+  ok("8e. tombol lain tidak ikut terpengaruh (logonya tetap <img>)", tilesOf(dl).filter(t => t.querySelector(".method-logo img")).length === 10);
 
   document.getElementById("r").textContent = out.join("\n") + `\n\nTOTAL PASS=${out.filter(l => l.startsWith("PASS")).length} FAIL=${out.filter(l => l.startsWith("FAIL")).length}`;
 })().catch(e => { document.getElementById("r").textContent = out.join("\n") + "\nEXCEPTION " + e.message + "\n" + e.stack; });

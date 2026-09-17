@@ -44,20 +44,41 @@ async function seed(empty, dismissCheckin, extra = {}) {
 }
 // Snapshot computed style semua elemen + pseudo ::before/::after + rect.
 const SKIP = new Set(["transition", "transition-property", "transition-duration", "transition-timing-function", "transition-delay", "animation", "animation-name", "animation-duration"]);
+// Komponen yang ditambahkan SETELAH pemecahan CSS: style.css beku tidak
+// pernah punya aturannya, jadi elemen di dalamnya tidak dibandingkan.
+// (Isinya diuji tersendiri di paymentmethodtest.) Tinggi modal ikut berubah
+// karena komponen ini, jadi .modal pada halaman bermodal transaksi juga
+// dikecualikan dari perbandingan RECT — computed style-nya tetap dibandingkan.
+const POST_SPLIT_SELECTOR = ".form-field--method, .form-field--method *";
+const HEIGHT_PROPS = new Set(["block-size", "height", "perspective-origin", "transform-origin"]);
 function snapshot(w, d) {
   const els = [...d.querySelectorAll("html, body, body *")];
+  const postSplit = new Set(d.querySelectorAll(POST_SPLIT_SELECTOR));
   const rows = [];
   for (const el of els) {
     if (el.tagName === "SCRIPT" || el.tagName === "LINK" || el.tagName === "STYLE") continue;
+    if (postSplit.has(el)) continue;
+    // Modal transaksi jadi lebih tinggi karena grid metode (komponen
+    // pasca-pemecahan) menggantikan <select>. Properti yang MEMANG turunan
+    // tinggi dikecualikan khusus di dalam modal itu; properti lain — termasuk
+    // warna, border, font, spacing, dan seluruh dimensi horizontal — tetap
+    // dibandingkan ketat.
+    const inTxModal = !!el.closest("#transaction-modal-overlay");
     const parts = [];
     for (const pseudo of [null, "::before", "::after"]) {
       const cs = w.getComputedStyle(el, pseudo);
       const props = [];
-      for (let i = 0; i < cs.length; i++) { const p = cs[i]; if (!SKIP.has(p)) props.push(p + ":" + cs.getPropertyValue(p)); }
+      for (let i = 0; i < cs.length; i++) { const p = cs[i]; if (!SKIP.has(p) && !(inTxModal && HEIGHT_PROPS.has(p))) props.push(p + ":" + cs.getPropertyValue(p)); }
       parts.push(props.join(";"));
     }
     const r = el.getBoundingClientRect();
-    rows.push({ path: pathOf(el), style: parts.join("|"), rect: [r.x, r.y, r.width, r.height].map(v => Math.round(v * 10) / 10).join(",") });
+    // Tinggi & posisi vertikal di dalam modal transaksi bergeser karena grid
+    // metode (komponen pasca-pemecahan) lebih tinggi dari <select> lama.
+    // Lebar/posisi horizontal tetap dibandingkan. (inTxModal dihitung di atas.)
+    const rect = inTxModal
+      ? [r.x, r.width].map(v => Math.round(v * 10) / 10).join(",")
+      : [r.x, r.y, r.width, r.height].map(v => Math.round(v * 10) / 10).join(",");
+    rows.push({ path: pathOf(el), style: parts.join("|"), rect });
   }
   return rows;
 }

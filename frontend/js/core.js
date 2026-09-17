@@ -1344,7 +1344,7 @@ document.addEventListener("touchstart", () => {}, { passive: true });
  * Murni visual: tidak mencegah default, tidak menyentuh handler klik.
  */
 (function setupPressFeedback() {
-  const PRESSABLE = ".btn, .icon-btn, .icon-btn-sm, .modal-close, .type-toggle-btn, .filter-chip, .settings-row-link, .link-see-all, .balance-toggle, .quick-amount, .emoji-option, .calendar-nav, .calendar-day, .bar-col";
+  const PRESSABLE = ".btn, .icon-btn, .icon-btn-sm, .modal-close, .type-toggle-btn, .filter-chip, .method-option, .settings-row-link, .link-see-all, .balance-toggle, .quick-amount, .emoji-option, .calendar-nav, .calendar-day, .bar-col";
   const MIN_HOLD_MS = 120;
   let pressed = null;
   let pressedAt = 0;

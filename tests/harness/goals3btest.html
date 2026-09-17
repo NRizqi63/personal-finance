@@ -70,7 +70,7 @@ const focusables = (ov) => [...ov.querySelectorAll("button:not([disabled]), inpu
   ok("1f. Hapus bergaya bahaya (danger-ghost), Edit ghost biasa", delBtn(d, 7).classList.contains("btn--danger-ghost") && editBtn(d, 7).classList.contains("btn--ghost") && !editBtn(d, 7).classList.contains("btn--danger-ghost"));
   ok("1g. tanpa inline handler; delegasi klik di #goal-list", !/\son[a-z]+=/i.test(html) && /getElementById\("goal-list"\)\.addEventListener\("click"/.test(appCode));
   ok("1h. tidak ada window.confirm/alert/prompt di kode", !/window\.confirm|\bconfirm\(|\balert\(|\bprompt\(/.test(appCode));
-  ok("1i. TEPAT 2 listener keydown global", appJs.split('addEventListener("keydown"').length - 1 === 2);
+  ok("1i. TEPAT 2 listener keydown GLOBAL (document/window); keydown lain hanya di grid metode (elemen)", (appJs.match(/(?:document|window)\.addEventListener\("keydown"/g) || []).length === 2 && (appJs.match(/addEventListener\("keydown"/g) || []).length === 3 && /methodGrid\.addEventListener\("keydown"/.test(appJs));
   ok("1j. tombol Edit/Hapus >= 36px tinggi (btn--xs + halo)", editBtn(d, 7).getBoundingClientRect().height >= 36 && delBtn(d, 7).getBoundingClientRect().height >= 36);
 
   /* ===================== 2-3. Modal edit terbuka & terisi ===================== */

@@ -163,7 +163,7 @@ const items = (d) => [...d.querySelectorAll("#goals-card .goals-card-item")];
   ok("11f. dropdown notifikasi masih ada", $(d, "btn-notification") !== null && $(d, "notification-panel") !== null);
   ok("11g. link Budget 'Lihat Detail' masih ada & tidak diduplikasi", d.querySelectorAll('.budget a[href="budget.html"]').length === 1);
   ok("11h. check-in masih memakai blok goal contoh (G-8 belum)", /demo-tag/.test(appCode) && /financeData\.goal\b/.test((appCode.match(/function renderCheckin\(\)[\s\S]*?\n\}/) || [""])[0]));
-  ok("11i. TEPAT 2 listener keydown global", appJs.split('addEventListener("keydown"').length - 1 === 2);
+  ok("11i. TEPAT 2 listener keydown GLOBAL (document/window); keydown lain hanya di grid metode (elemen)", (appJs.match(/(?:document|window)\.addEventListener\("keydown"/g) || []).length === 2 && (appJs.match(/addEventListener\("keydown"/g) || []).length === 3 && /methodGrid\.addEventListener\("keydown"/.test(appJs));
   ok("11j. refreshDashboard tidak menyentuh goals (goals tidak dihitung dari transaksi)", !/Goal/.test((appCode.match(/function refreshDashboard\(\)[\s\S]*?\n\}/) || [""])[0]));
 
   /* ===================== 13. Responsif ===================== */

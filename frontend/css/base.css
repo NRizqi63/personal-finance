@@ -1601,6 +1601,109 @@ a:focus-visible {
   color: var(--color-text-muted);
 }
 
+/* Disembunyikan dari mata, TETAP ada untuk form & (kalau perlu) teknologi
+   bantu. Bukan display:none supaya nilainya tetap ikut terkirim dan bisa
+   difokus secara programatik. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* Pemilih metode pembayaran: grid tombol, 1 pilihan aktif. Lebar kolom
+   minimum dipilih supaya tetap 2 kolom di 320-390px dan 3 kolom di modal
+   desktop. Kartu sengaja padat (tinggi ~46px) supaya 11 metode tidak membuat
+   modal terlalu panjang — tetap di atas ambang area sentuh 44px. */
+.method-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+  gap: 6px;
+}
+
+.method-option {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 46px;
+  padding: 6px 6px;
+  text-align: left;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text);
+  font-family: var(--font-body);
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+}
+
+/* Kotak logo berukuran TETAP: emoji sekarang, <img> saat aset tersedia —
+   pergantiannya tidak menggeser tata letak. */
+.method-logo {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  font-size: 14px;
+  line-height: 1;
+}
+
+.method-logo img {
+  width: 18px;
+  height: 18px;
+  object-fit: contain;
+}
+
+/* Nama panjang ("Livin' by Mandiri") TURUN BARIS, bukan dipotong elipsis —
+   nama penyedia yang terpotong sulit dikenali. Tinggi baris grid mengikuti
+   tombol tertinggi, jadi seluruh kartu tetap sejajar. */
+.method-name {
+  min-width: 0;
+  line-height: 1.2;
+  /* Pemutusan di tengah kata hanya jaring pengaman; lebar logo dan padding
+     sudah dipilih supaya kata terpanjang ("ShopeePay") muat utuh bahkan di
+     kolom tersempit (320px). */
+  overflow-wrap: break-word;
+}
+
+.method-option.is-active {
+  background: var(--color-primary-soft);
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 2px rgba(20, 83, 45, 0.12);
+}
+
+/* Metode lama yang tidak ada lagi di daftar aktif: tetap diperlihatkan saat
+   mengedit transaksi lama supaya user tahu, tapi tidak bisa dipilih. */
+.method-option.is-legacy {
+  cursor: default;
+  color: var(--color-text-muted);
+  background: var(--color-bg);
+  border-style: dashed;
+}
+
+@media (hover: hover) {
+  .method-option:not(:disabled):hover {
+    border-color: var(--color-primary);
+    background: var(--color-primary-soft);
+  }
+}
+
+/* Slot aksi di bawah grid (tahap custom: "Tambah metode pembayaran").
+   Kosong & hidden sampai tahap itu dikerjakan. */
+.method-more {
+  display: flex;
+  justify-content: flex-start;
+}
+
 /* Pilihan cepat nominal budget bulanan: chip pil 36px, aktif = hijau lembut. */
 .quick-amounts {
   display: flex;

@@ -48,6 +48,9 @@ async function open(url, { tx = TX, width = 390 } = {}) {
 // app.js beku tidak mengenalnya, jadi field itu — dan HANYA field itu —
 // dilepas dari kedua sisi sebelum perbandingan storage. Isinya sendiri diuji
 // di paymentmethodtest.
+// UI-1: isi #method-grid dilepas dari perbandingan (komponen pasca-refactor;
+// app.js beku tidak mengatur state aktifnya). Wadahnya tetap dibandingkan.
+const stripMethodGrid = (h) => h.replace(/(<div class="method-grid"[^>]*>)[\s\S]*?(<\/div>)/g, "$1[grid metode]$2");
 const stripMethod = (raw) => {
   if (raw === null) return raw;
   try {
@@ -65,7 +68,7 @@ const items = (d) => [...d.querySelectorAll("#all-transaction-list .transaction-
 const editOf = (d, id) => d.querySelector(`#all-transaction-list [data-action="edit"][data-id="${id}"]`);
 const delOf = (d, id) => d.querySelector(`#all-transaction-list [data-action="delete"][data-id="${id}"]`);
 const activeOf = (d) => { const e = d.activeElement; if (!e || e === d.body || e.disabled) return "body"; return e.id || e.dataset.id || e.dataset.date || e.getAttribute("aria-label") || e.className; };
-const norm = (h) => h.replace(/\s+/g, " ").replace(/<script src="[^"]*"><\/script>/g, "").replace(/<!--[\s\S]*?-->/g, "").replace(/ is-open"/g, '"').replace(/ no-transition"/g, '"').replace(/style="left: [\d.]+px; width: [\d.]+px;"/g, "").trim(); // .is-open/.no-transition/inline indikator = rAF (artefak timing headless)
+const norm = (h) => stripMethodGrid(h.replace(/\s+/g, " ").replace(/<script src="[^"]*"><\/script>/g, "").replace(/<!--[\s\S]*?-->/g, "").replace(/ is-open"/g, '"').replace(/ no-transition"/g, '"').replace(/style="left: [\d.]+px; width: [\d.]+px;"/g, "").trim()); // .is-open/.no-transition/inline indikator = rAF (artefak timing headless)
 
 (async () => {
   const coreSrc = await (await fetch(FRONT + "js/core.js")).text();
@@ -91,7 +94,7 @@ const norm = (h) => h.replace(/\s+/g, " ").replace(/<script src="[^"]*"><\/scrip
   ok("1g. transactions.js tidak menyalin fungsi core/shared", !/^function (setupTransactionModal|handleTransactionListClick|refreshDashboard|renderTransactionItem|renderTransactionListItems|showTransactionFeedback|formatDateID|groupTransactionsByDay|getSortedTransactions|escapeHtml|createModalController|recalcFromTransactions|saveTransactions)\b/m.test(txSrc) && !/^(const|let) (transactionsPage|openTransactionModal|confirmDeleteTransaction|financeData|nextTransactionId|openModals)\b/m.test(txSrc));
   ok("1h. 11 fungsi identik byte-per-byte dengan app.js", fnNames.every(n => { const m = new RegExp(`^function ${n}\\([\\s\\S]*?\\n\\}`, "m"); const a = m.exec(appSrc), b = m.exec(txSrc); return a && b && a[0] === b[0]; }));
   ok("1i. tidak ada DOMContentLoaded / keydown / document|window listener di transactions.js", !txSrc.includes('addEventListener("DOMContentLoaded"') && !txSrc.includes('addEventListener("keydown"') && !/(document|window)\.addEventListener\(/.test(txSrc));
-  ok("1j. listener global halaman ini = core (7) + shared (1: resize) = 8; keydown global tepat 1 (modal) — dropdown dashboard tidak dimuat", (coreSrc.match(/(document|window)\.addEventListener\(/g) || []).length === 7 && (sharedSrc.match(/(document|window)\.addEventListener\(/g) || []).length === 1 && (coreSrc + sharedSrc + txSrc).split('addEventListener("keydown"').length - 1 === 1);
+  ok("1j. listener global halaman ini = core (7) + shared (1: resize) = 8; keydown global tepat 1 (modal) — dropdown dashboard tidak dimuat", (coreSrc.match(/(document|window)\.addEventListener\(/g) || []).length === 7 && (sharedSrc.match(/(document|window)\.addEventListener\(/g) || []).length === 1 && ((coreSrc + sharedSrc + txSrc).match(/(?:document|window)\.addEventListener\("keydown"/g) || []).length === 1 && ((coreSrc + sharedSrc + txSrc).match(/addEventListener\("keydown"/g) || []).length === 2 && /methodGrid\.addEventListener\("keydown"/.test(sharedSrc));
   ok("1k. fungsi dashboard/goals/analytics/budget/settings memang absen (isolasi)", ["initDashboard", "renderSummary", "renderRecentTransactions", "setupHeaderActions", "renderGoalList", "renderAnalytics", "setupBudgetEditor", "renderCategoryList", "validateBackup"].every(n => typeof w[n] === "undefined"));
   ok("1l. transactions.html vs transactions_legacy.html identik selain tag script & tag <link> CSS (JS-6: legacy = style.css tunggal, sekarang base.css + transactions.css)", (() => { const strip = (h) => h.replace(/<!--[\s\S]*?-->/g, "").replace(/\s*<script src="[^"]*"><\/script>/g, "").replace(/\s*<link rel="stylesheet" href="[^"]*\.css" \/>/g, "").replace(/\s+/g, " "); return strip(html) === strip(legacyHtml) && strip(html).length > 5000; })());
   ok("1m. dashboard.js & shared tidak berubah (fungsi yang dipakai dashboard tetap di shared)", ["setupTransactionModal", "handleTransactionListClick", "refreshDashboard", "transactionsPage", "openTransactionModal", "confirmDeleteTransaction"].every(n => new RegExp(`^(?:function|const|let)\\s+${n}\\b`, "m").test(sharedSrc)) && /^function initDashboard\(/m.test(dashSrc));

@@ -193,9 +193,74 @@
           </div>
         </div>
 
-        <div class="form-field">
-          <label for="field-method">Metode Pembayaran</label>
-          <select id="field-method" name="method">
+        <!-- Metode pembayaran: grid tombol (pilihan terlihat langsung + slot
+             logo) DI ATAS <select> yang menjadi sumber nilai form. <select>
+             disembunyikan secara visual, bukan display:none, dan ditandai
+             aria-hidden + tabindex="-1" supaya tidak ada tab stop ganda dan
+             pembaca layar hanya mengumumkan radiogroup di bawah ini. -->
+        <div class="form-field form-field--method">
+          <span class="form-field-label" id="method-label">Metode Pembayaran</span>
+          <div class="method-grid" id="method-grid" role="radiogroup" aria-labelledby="method-label">
+            <button type="button" class="method-option is-active" data-method="cash" data-group="cash"
+                    role="radio" aria-checked="true" tabindex="0">
+              <span class="method-logo" aria-hidden="true">💵</span>
+              <span class="method-name">Cash</span>
+            </button>
+            <button type="button" class="method-option" data-method="bca-mobile" data-group="mbanking"
+                    role="radio" aria-checked="false" tabindex="-1">
+              <span class="method-logo" aria-hidden="true">🏦</span>
+              <span class="method-name">BCA Mobile</span>
+            </button>
+            <button type="button" class="method-option" data-method="brimo" data-group="mbanking"
+                    role="radio" aria-checked="false" tabindex="-1">
+              <span class="method-logo" aria-hidden="true">🏦</span>
+              <span class="method-name">BRImo</span>
+            </button>
+            <button type="button" class="method-option" data-method="livin" data-group="mbanking"
+                    role="radio" aria-checked="false" tabindex="-1">
+              <span class="method-logo" aria-hidden="true">🏦</span>
+              <span class="method-name">Livin' by Mandiri</span>
+            </button>
+            <button type="button" class="method-option" data-method="mybca" data-group="mbanking"
+                    role="radio" aria-checked="false" tabindex="-1">
+              <span class="method-logo" aria-hidden="true">🏦</span>
+              <span class="method-name">myBCA</span>
+            </button>
+            <button type="button" class="method-option" data-method="wondr" data-group="mbanking"
+                    role="radio" aria-checked="false" tabindex="-1">
+              <span class="method-logo" aria-hidden="true">🏦</span>
+              <span class="method-name">wondr by BNI</span>
+            </button>
+            <button type="button" class="method-option" data-method="gopay" data-group="ewallet"
+                    role="radio" aria-checked="false" tabindex="-1">
+              <span class="method-logo" aria-hidden="true">📱</span>
+              <span class="method-name">GoPay</span>
+            </button>
+            <button type="button" class="method-option" data-method="dana" data-group="ewallet"
+                    role="radio" aria-checked="false" tabindex="-1">
+              <span class="method-logo" aria-hidden="true">📱</span>
+              <span class="method-name">DANA</span>
+            </button>
+            <button type="button" class="method-option" data-method="ovo" data-group="ewallet"
+                    role="radio" aria-checked="false" tabindex="-1">
+              <span class="method-logo" aria-hidden="true">📱</span>
+              <span class="method-name">OVO</span>
+            </button>
+            <button type="button" class="method-option" data-method="shopeepay" data-group="ewallet"
+                    role="radio" aria-checked="false" tabindex="-1">
+              <span class="method-logo" aria-hidden="true">📱</span>
+              <span class="method-name">ShopeePay</span>
+            </button>
+            <button type="button" class="method-option" data-method="linkaja" data-group="ewallet"
+                    role="radio" aria-checked="false" tabindex="-1">
+              <span class="method-logo" aria-hidden="true">📱</span>
+              <span class="method-name">LinkAja</span>
+            </button>
+          </div>
+          <!-- Slot tombol "Tambah metode pembayaran" (tahap custom). Sengaja
+               kosong & hidden: belum ada UI-nya, tapi tempatnya sudah pasti. -->
+          <div class="method-more" id="method-more" hidden></div>
+          <select id="field-method" name="method" class="visually-hidden" tabindex="-1" aria-hidden="true">
             <optgroup label="Cash">
               <option value="cash" selected>💵 Cash</option>
             </optgroup>

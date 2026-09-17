@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24"
+     data-placeholder="true">
+  <!-- PLACEHOLDER. Ini BUKAN logo resmi myBCA: gambar ini dibuat sendiri
+       (kotak + monogram), tanpa memakai atau meniru aset merek mana pun.
+       Warna dihitung dari rumus hue = (150 + 4 * 360/11) mod 360.
+       Ganti berkas ini bila nanti tersedia logo resmi yang jelas lisensinya. -->
+  <title>myBCA (placeholder, bukan logo resmi)</title>
+  <rect width="24" height="24" rx="6" fill="#822da9" />
+  <text x="12" y="12.4" text-anchor="middle" dominant-baseline="middle"
+        font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif" font-size="10.5" font-weight="700"
+        letter-spacing="-0.3" fill="#ffffff">mB</text>
+</svg>
