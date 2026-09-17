@@ -144,8 +144,18 @@ function setupTransactionModal() {
   // Grid tombol metode: lapisan TAMPILAN di atas <select>. Nilai sebenarnya
   // tetap hidup di fieldMethod — grid hanya menulis ke sana lalu menyesuaikan
   // penanda aktifnya, jadi submit/edit/rollback tidak berubah sama sekali.
+  // Peta <option> bawaan, diambil SEBELUM ada yang dilepas — elemen yang sama
+  // dipasang kembali saat metodenya diaktifkan lagi, jadi label & optgroup-nya
+  // tidak pernah dibangun ulang dari tebakan.
+  const methodOptions = new Map();
+  [...fieldMethod.querySelectorAll("option")].forEach((el) => {
+    methodOptions.set(el.value, { el, group: el.parentElement });
+  });
   const methodGrid = document.getElementById("method-grid");
-  const methodButtons = () => (methodGrid ? [...methodGrid.querySelectorAll(".method-option[data-method]")] : []);
+  // :not([hidden]) — metode yang dimatikan user tetap ada di markup tapi
+  // tidak boleh ikut apa pun: tidak disorot, tidak jadi tab stop, dan tidak
+  // dilewati panah. Satu filter di sini menutup ketiganya sekaligus.
+  const methodButtons = () => (methodGrid ? [...methodGrid.querySelectorAll(".method-option[data-method]:not([hidden])")] : []);
 
   /** Samakan tampilan grid dengan nilai <select>. Roving tabindex: hanya satu
    * tombol yang bisa dicapai lewat Tab supaya jumlah tab stop tidak bertambah
@@ -177,9 +187,14 @@ function setupTransactionModal() {
     if (!methodGrid) return;
     const existing = methodGrid.querySelector(".method-option.is-legacy");
     if (existing) existing.remove();
-    if (!key || PAYMENT_METHOD_KEYS.includes(key)) return;
-    const meta = PAYMENT_LEGACY_METHODS.find((item) => item.key === key);
+    if (!key || isPaymentMethodActive(key)) return;
+    const meta = findPaymentMethod(key);
     if (!meta) return;
+    // Dua sebab sebuah metode tidak bisa dipilih lagi, dan user berhak tahu
+    // bedanya: key generik versi pertama (tidak akan pernah kembali) vs metode
+    // bawaan yang SEDANG dimatikan user (bisa dinyalakan lagi di Pengaturan).
+    // Kelasnya tetap .is-legacy — satu gaya untuk "tidak bisa dipilih".
+    const reason = PAYMENT_METHOD_KEYS.includes(key) ? "nonaktif" : "tidak lagi tersedia";
 
     const btn = document.createElement("button");
     btn.type = "button";
@@ -194,10 +209,11 @@ function setupTransactionModal() {
     logo.className = "method-logo";
     logo.setAttribute("aria-hidden", "true");
     logo.textContent = meta.emoji;
+    fillMethodLogo(logo, meta); // metode bawaan punya logo; key legacy tetap emoji
 
     const name = document.createElement("span");
     name.className = "method-name";
-    name.textContent = `${meta.name} — tidak lagi tersedia`;
+    name.textContent = `${meta.name} — ${reason}`;
 
     btn.append(logo, name);
     methodGrid.prepend(btn);
@@ -219,9 +235,7 @@ function setupTransactionModal() {
    * gagal dimuat, isi slot dikembalikan ke emoji itu, jadi tombol tidak pernah
    * tampil kosong. Ukuran slot tetap (.method-logo 18x18), jadi pergantian ini
    * tidak menggeser tata letak. Key legacy tidak punya logo -> tetap emoji. */
-  function upgradeMethodLogo(btn) {
-    const slot = btn.querySelector(".method-logo");
-    const meta = findPaymentMethod(btn.dataset.method);
+  function fillMethodLogo(slot, meta) {
     if (!slot || !meta || !meta.logo) return;
     const fallback = slot.textContent;
     const img = document.createElement("img");
@@ -233,7 +247,48 @@ function setupTransactionModal() {
     slot.appendChild(img);
   }
 
+  function upgradeMethodLogo(btn) {
+    fillMethodLogo(btn.querySelector(".method-logo"), findPaymentMethod(btn.dataset.method));
+  }
+
+  /** UI-2a: samakan isi selector dengan daftar metode aktif. Grid dan <select>
+   * dibangun dari SATU sumber (getActivePaymentMethods()), jadi tidak mungkin
+   * keduanya berbeda isi. <option> metode nonaktif benar-benar DILEPAS, bukan
+   * disembunyikan: dengan begitu menyunting transaksi bermetode nonaktif jatuh
+   * ke jalur selectedIndex === -1 yang sudah ada sejak P-2 — nilai lamanya
+   * dipertahankan tanpa mekanisme baru. */
+  function applyActiveMethods() {
+    const active = new Set(getActivePaymentMethods().map((method) => method.key));
+    if (methodGrid) {
+      methodGrid.querySelectorAll(".method-option[data-method]").forEach((btn) => {
+        const on = active.has(btn.dataset.method);
+        btn.hidden = !on;
+        if (on) return;
+        btn.classList.remove("is-active"); // jangan tinggalkan sisa state
+        btn.setAttribute("aria-checked", "false");
+        btn.tabIndex = -1;
+      });
+    }
+    PAYMENT_METHOD_KEYS.forEach((key, index) => {
+      const option = methodOptions.get(key);
+      if (!option) return;
+      const wanted = active.has(key);
+      if (wanted === option.el.isConnected) return; // sudah sesuai: JANGAN disentuh
+      if (!wanted) {
+        option.el.remove();
+        return;
+      }
+      // Dipasang kembali tepat sebelum opsi aktif berikutnya di grup yang sama,
+      // supaya urutannya tetap urutan kanonik PAYMENT_METHODS.
+      const next = PAYMENT_METHOD_KEYS.slice(index + 1)
+        .map((k) => methodOptions.get(k))
+        .find((rec) => rec && rec.el.isConnected && rec.group === option.group);
+      option.group.insertBefore(option.el, next ? next.el : null);
+    });
+  }
+
   if (methodGrid) {
+    applyActiveMethods();
     methodButtons().forEach(upgradeMethodLogo);
 
     methodGrid.addEventListener("click", (e) => {
@@ -440,10 +495,12 @@ function setupTransactionModal() {
     form.reset();
     fieldId.value = "";
     [fieldTitle, fieldCategory, fieldAmount, fieldMethod, fieldDate].forEach((field) => field.setCustomValidity(""));
-    // Transaksi baru dimulai dari Cash (pilihan paling umum) — user tetap
-    // bisa menggantinya sebelum menyimpan. form.reset() sudah mengembalikan
-    // <option selected>, ini hanya menegaskannya kalau markup berubah.
-    fieldMethod.value = PAYMENT_METHODS[0].key;
+    // Transaksi baru dimulai dari metode AKTIF pertama — biasanya Cash, tapi
+    // kalau user mematikan Cash form tidak boleh default ke metode yang
+    // tombolnya tidak ada. form.reset() mengembalikan <option selected> bawaan
+    // markup, jadi baris ini yang menentukan.
+    const firstActive = getActivePaymentMethods()[0];
+    fieldMethod.value = firstActive ? firstActive.key : PAYMENT_UNSET;
     renderLegacyMethod(PAYMENT_UNSET);
     syncMethodGrid();
     populateCategoryOptions();

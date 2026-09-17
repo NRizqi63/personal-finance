@@ -1645,6 +1645,15 @@ a:focus-visible {
   transition: background-color 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
 }
 
+/* display:flex di atas mengalahkan [hidden] bawaan browser (author style
+   selalu menang atas UA style), jadi aturannya ditulis eksplisit — tanpa ini
+   metode yang dimatikan user tetap kelihatan. Pola yang sama dipakai komponen
+   lain di file ini (.btn[hidden], .modal-overlay[hidden], …). */
+.method-option[hidden],
+.method-more[hidden] {
+  display: none;
+}
+
 /* Kotak logo berukuran TETAP: emoji sekarang, <img> saat aset tersedia —
    pergantiannya tidak menggeser tata letak. */
 .method-logo {

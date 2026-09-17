@@ -142,7 +142,8 @@ function call(w, fn, arg) {
   // Komentar dibuang saat memeriksa "apakah dipakai di KODE".
   const codeOnly = (s) => s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|\s)\/\/.*$/gm, "$1");
 
-  ok("4a. konstanta didefinisikan HANYA di core.js; P-2 memakainya di transactions-shared.js saja", /const PAYMENT_METHODS = \[/.test(srcOf["core.js"]) && FILES.filter(f => f !== "core.js" && f !== "transactions-shared.js").every(f => !/PAYMENT_METHODS|PAYMENT_UNSET|getPaymentLabel|normalizePaymentMethod/.test(srcOf[f])) && !/const PAYMENT_METHODS|const PAYMENT_UNSET|function getPaymentLabel|function normalizePaymentMethod/.test(srcOf["transactions-shared.js"]));
+  ok("4a. konstanta didefinisikan HANYA di core.js; pemakainya TEPAT dua file (transactions-shared.js untuk form, settings.js untuk layar kelola)", /const PAYMENT_METHODS = \[/.test(srcOf["core.js"]) && FILES.filter(f => !["core.js", "transactions-shared.js", "settings.js"].includes(f)).every(f => !/PAYMENT_METHODS|PAYMENT_UNSET|getPaymentLabel|normalizePaymentMethod|PaymentMethodActive|getActivePaymentMethods/.test(srcOf[f])) && ["transactions-shared.js", "settings.js"].every(f => !/const PAYMENT_METHODS|const PAYMENT_UNSET|function getPaymentLabel|function normalizePaymentMethod|function setPaymentMethodActive|function savePaymentMethods/.test(srcOf[f])));
+  ok("4a2. UI-2a: settings.js hanya MEMBACA daftar & memakai helper, tidak pernah menulis financeData.paymentMethods.disabled sendiri", !/financeData\.paymentMethods\.disabled\s*(?:\.push|\.splice|=(?!=))/.test(srcOf["settings.js"].replace(/financeData\.paymentMethods\.disabled = before;/, "")) && /setPaymentMethodActive\(/.test(srcOf["settings.js"]) && /savePaymentMethods\(\)/.test(srcOf["settings.js"]));
   ok("4b. P-2 ADA: markup form punya #field-method di kedua halaman", /id="field-method"/.test(html.index) && /id="field-method"/.test(html.transactions) && /name="method"/.test(html.index));
   ok("4c. payload memuat method hasil normalizePaymentMethod, dengan jaga-jaga metode lama saat tidak ada opsi terpilih", /method: fieldMethod\.selectedIndex === -1 \? editingMethod : normalizePaymentMethod\(fieldMethod\.value\),/.test(srcOf["transactions-shared.js"]));
   ok("4c2. P-2: loadTransactions TIDAK mengisi default method ke transaksi lama", !/method/.test((srcOf["core.js"].match(/function loadTransactions\(\)[\s\S]*?\n\}/) || [""])[0]));
@@ -151,10 +152,10 @@ function call(w, fn, arg) {
   ok("4e. P-4 belum: backup masih schema 2 & validator belum membaca method", /const BACKUP_SCHEMA_VERSION = 2;/.test(srcOf["settings.js"]) && !/raw\.method|normalizePaymentMethod/.test(srcOf["settings.js"]));
   ok("4f. P-4 belum: header CSV belum punya kolom metode", /const CSV_HEADER = \["tanggal", "jenis", "judul", "kategori", "kategori_nama", "jumlah", "waktu"\];/.test(srcOf["settings.js"]));
   ok("4g. P-5 belum: filter transaksi belum mengenal metode", !/method/.test(srcOf["transactions.js"]));
-  ok("4h. nama global fitur ini TEPAT delapan (5 konstanta/daftar + 2 helper publik + 1 pencari internal)", (() => {
+  ok("4h. nama global fitur ini TEPAT lima belas (fondasi P-1/R-1 + lapisan aktif/nonaktif UI-2a + satu setup di settings.js)", (() => {
     const names = allJs.split("\n").map(l => (l.match(/^(?:async function|function|const|let)\s+([A-Za-z_$][\w$]*)/) || [])[1]).filter(Boolean);
     const added = names.filter(n => /payment/i.test(n));
-    return added.sort().join() === "PAYMENT_LEGACY_METHODS,PAYMENT_LOGO_DIR,PAYMENT_METHODS,PAYMENT_METHOD_KEYS,PAYMENT_UNSET,findPaymentMethod,getPaymentLabel,normalizePaymentMethod";
+    return added.sort().join() === "PAYMENT_LEGACY_METHODS,PAYMENT_LOGO_DIR,PAYMENT_METHODS,PAYMENT_METHODS_STORAGE_KEY,PAYMENT_METHOD_KEYS,PAYMENT_UNSET,findPaymentMethod,getActivePaymentMethods,getPaymentLabel,isPaymentMethodActive,loadPaymentMethods,normalizePaymentMethod,savePaymentMethods,setPaymentMethodActive,setupPaymentMethodManager";
   })(), "");
   ok("4L. UI-2: metadata logo DIPAKAI UI — path ditulis SEKALI di core.js, pemakaiannya hanya di transactions-shared.js, markup halaman tetap tidak menyebut nama berkas", /const PAYMENT_LOGO_DIR = "assets\/payment-methods\/";/.test(srcOf["core.js"]) && /img\.src = meta\.logo;/.test(srcOf["transactions-shared.js"]) && FILES.filter(f => f !== "core.js" && f !== "transactions-shared.js").every(f => !/\.logo\b|payment-methods\//.test(codeOnly(srcOf[f]))) && !/payment-methods\//.test(html.index + html.transactions));
   ok("4L2. UI-2: kesebelas aset ADA, berupa SVG lokal yang valid, tanpa rujukan/permintaan ke luar", await (async () => {
@@ -173,7 +174,8 @@ function call(w, fn, arg) {
     }));
     return hasil.every(Boolean);
   })());
-  ok("4i. R-1: katalog lengkap & metode custom BELUM dikerjakan", !/PAYMENT_CATALOG|financeData\.paymentMethods|"user:/.test(allJs) && !/Tambah metode pembayaran/.test((html.index + html.transactions).replace(/<!--[\s\S]*?-->/g, "")) && /id="method-more"[^>]*hidden/.test(html.index));
+  ok("4i. UI-2b (metode custom) BELUM dikerjakan: tidak ada katalog, tidak ada key \"user:\", slot tambah masih kosong & tersembunyi", !/PAYMENT_CATALOG|"user:/.test(allJs) && !/Tambah metode pembayaran/.test((html.index + html.transactions).replace(/<!--[\s\S]*?-->/g, "")) && /id="method-more"[^>]*hidden/.test(html.index));
+  ok("4i2. UI-2a: state metode HANYA berupa daftar yang dimatikan (bukan katalog metode buatan user), dan hanya core.js yang menyimpannya", /financeData\.paymentMethods = \{ disabled: \[\] \}|paymentMethods: \{ disabled: \[\] \}/.test(srcOf["core.js"]) && /const PAYMENT_METHODS_STORAGE_KEY = "financeData\.paymentMethods";/.test(srcOf["core.js"]) && FILES.filter(f => f !== "core.js").every(f => !/localStorage\.(?:set|get)Item\(\s*PAYMENT_METHODS_STORAGE_KEY/.test(srcOf[f])));
 
   /* ============ 5. TIDAK ADA EFEK SAMPING ============ */
   ok("5a. halaman tetap dimuat tanpa error konsol", r.errors.length === 0, r.errors.join(" | "));
@@ -381,7 +383,20 @@ function call(w, fn, arg) {
     return !!meta && !/💵|🏦|📱|💳|🪙|Cash|M-Banking|E-Wallet/.test(meta.textContent);
   })());
   const settingsSrc = await (await fetch(BASE + "js/settings.js")).text();
-  ok("7b. backup/import/CSV belum berubah (schema 2, tanpa method, CSV 7 kolom)", /const BACKUP_SCHEMA_VERSION = 2;/.test(settingsSrc) && !/method/.test(settingsSrc) && /const CSV_HEADER = \["tanggal", "jenis", "judul", "kategori", "kategori_nama", "jumlah", "waktu"\];/.test(settingsSrc));
+  ok("7b. backup/import/CSV belum berubah: schema 2, CSV 7 kolom, dan TIDAK SATU PUN fungsi backup/impor/CSV/reset menyebut metode", (() => {
+    // settings.js sekarang SAH mengurus metode (layar kelola UI-2a), jadi
+    // "tidak ada kata method di seluruh file" tidak lagi jadi bukti. Yang
+    // diperiksa sekarang isi fungsinya satu per satu — lebih ketat, bukan
+    // lebih longgar.
+    const FN = ["buildBackup", "buildTransactionsCsv", "exportBackupJson", "exportTransactionsCsv", "importTargetKeys",
+      "normalizeBudgetData", "validateBackup", "writeImportedData", "applyPendingImport", "applyDataReset",
+      "renderImportSummary", "getResetPlan"];
+    const bodies = FN.map((n) => (settingsSrc.match(new RegExp(`^(?:async )?function ${n}\\([\\s\\S]*?\\n\\}`, "m")) || [""])[0]);
+    const missing = FN.filter((n, i) => !bodies[i]);
+    return !missing.length && !/method/i.test(bodies.join("\n"))
+      && /const BACKUP_SCHEMA_VERSION = 2;/.test(settingsSrc)
+      && /const CSV_HEADER = \["tanggal", "jenis", "judul", "kategori", "kategori_nama", "jumlah", "waktu"\];/.test(settingsSrc);
+  })());
   ok("7c. filter/analitik belum mengenal metode", !/method/.test(await (await fetch(BASE + "js/transactions.js")).text()) && !/method/.test(await (await fetch(BASE + "js/analytics.js")).text()));
   ok("7d. tanpa error konsol sepanjang alur P-2", rr.errors.length === 0, rr.errors.join(" | "));
 

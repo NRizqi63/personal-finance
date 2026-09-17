@@ -117,6 +117,12 @@ const financeData = {
   // di sini — data contoh sempat ikut terhitung ke saldo dan ikut tersimpan
   // permanen saat user menyimpan transaksi pertamanya.
   transactions: [],
+
+  // UI-2a: metode pembayaran yang DIMATIKAN user. Yang disimpan sengaja yang
+  // mati, bukan yang aktif — alasannya di loadPaymentMethods(). Diisi dari
+  // localStorage saat halaman dibuka; user yang belum pernah mengatur apa pun
+  // tidak punya key ini sama sekali dan semua metode aktif.
+  paymentMethods: { disabled: [] },
 };
 
 // Kategori cadangan yang SELALU ada di form transaksi tapi tidak punya
@@ -245,6 +251,83 @@ function normalizePaymentMethod(raw) {
   return findPaymentMethod(raw) ? raw : PAYMENT_UNSET;
 }
 
+/** SATU-SATUNYA sumber daftar metode yang boleh muncul di selector transaksi.
+ * Grid tombol dan <select> tersembunyi keduanya membaca dari sini, supaya
+ * tidak mungkin keduanya berisi daftar yang berbeda. */
+function getActivePaymentMethods() {
+  return PAYMENT_METHODS.filter((method) => !financeData.paymentMethods.disabled.includes(method.key));
+}
+
+/** Apakah key ini metode bawaan yang sedang aktif? Key legacy dan key yang
+ * tidak dikenal selalu false — keduanya memang tidak pernah ditawarkan. */
+function isPaymentMethodActive(key) {
+  return PAYMENT_METHOD_KEYS.includes(key) && !financeData.paymentMethods.disabled.includes(key);
+}
+
+/** Satu-satunya jalan mengubah status aktif. Aturan "minimal satu metode
+ * harus aktif" ditegakkan DI SINI, bukan cuma disembunyikan di UI: false
+ * berarti permintaannya ditolak dan state tidak berubah sama sekali.
+ * Tidak menyimpan — pemanggil yang menyimpan dan me-rollback kalau gagal
+ * (pola yang sama dengan editor kategori di budget.js). */
+function setPaymentMethodActive(key, active) {
+  if (!PAYMENT_METHOD_KEYS.includes(key)) return false;
+  const disabled = financeData.paymentMethods.disabled;
+  const at = disabled.indexOf(key);
+  if (active) {
+    if (at !== -1) disabled.splice(at, 1);
+    return true;
+  }
+  if (at !== -1) return true; // sudah nonaktif
+  if (getActivePaymentMethods().length <= 1) return false; // metode terakhir
+  disabled.push(key);
+  return true;
+}
+
+/** Berapa transaksi yang memakai metode ini. Dipakai layar kelola untuk
+ * menjelaskan konsekuensi sebelum user mematikan sebuah metode — transaksinya
+ * sendiri tidak pernah disentuh. */
+function countTransactionsByMethod(key) {
+  return financeData.transactions.filter((tx) => tx.method === key).length;
+}
+
+/** Muat pilihan metode. Yang disimpan adalah PENYIMPANGAN dari bawaan (daftar
+ * yang dimatikan), bukan daftar yang aktif: kalau yang disimpan daftar aktif,
+ * metode bawaan yang ditambahkan di versi aplikasi berikutnya tidak akan
+ * pernah muncul untuk user lama karena daftarnya membeku di titik terakhir
+ * user menyimpan.
+ * Data rusak diabaikan seluruhnya (pola loadBudget): bukan objek, `disabled`
+ * bukan array, key yang bukan metode bawaan, duplikat, atau isi yang membuat
+ * SEMUA metode mati — semuanya ditolak dan aplikasi tetap memakai default. */
+function loadPaymentMethods() {
+  try {
+    const saved = localStorage.getItem(PAYMENT_METHODS_STORAGE_KEY);
+    if (!saved) return;
+    const parsed = JSON.parse(saved);
+    if (!parsed || typeof parsed !== "object" || !Array.isArray(parsed.disabled)) return;
+    const disabled = parsed.disabled.filter(
+      (key, i, list) => PAYMENT_METHOD_KEYS.includes(key) && list.indexOf(key) === i
+    );
+    if (disabled.length >= PAYMENT_METHOD_KEYS.length) return; // minimal satu aktif
+    financeData.paymentMethods.disabled = disabled;
+  } catch (err) {
+    // localStorage tidak tersedia / data korup — tetap pakai default.
+  }
+}
+
+/** Simpan pilihan metode. Sama seperti saver lain: false = gagal, pemanggil
+ * yang memutuskan (rollback + pesan error). */
+function savePaymentMethods() {
+  try {
+    localStorage.setItem(
+      PAYMENT_METHODS_STORAGE_KEY,
+      JSON.stringify({ disabled: financeData.paymentMethods.disabled })
+    );
+    return true;
+  } catch (err) {
+    return false;
+  }
+}
+
 // Pilihan emoji di popup tambah/edit kategori.
 const EMOJI_CHOICES = ["🍜", "☕", "⛽", "🚌", "🛍️", "👕", "🧾", "💡", "🏠", "📱", "🎬", "🎮", "💊", "🎓", "🐾", "✈️", "🎁", "💰"];
 
@@ -269,6 +352,10 @@ const SETTINGS_STORAGE_KEY = "financeData.settings";
 // ikut di sana akan hilang tanpa diminta. Tiga key di atas tidak diubah nama
 // maupun bentuknya.
 const GOALS_STORAGE_KEY = "financeData.goals";
+
+// Pilihan metode pembayaran juga key SENDIRI, dengan alasan yang sama seperti
+// target: reset budget/transaksi tidak boleh ikut menghapus pilihan user.
+const PAYMENT_METHODS_STORAGE_KEY = "financeData.paymentMethods";
 
 // Default pengaturan — sumber kebenaran untuk merge di loadSettings() dan
 // fallback di getUserName(). Dibekukan supaya tidak termodifikasi tak sengaja.
@@ -542,6 +629,7 @@ loadTransactions();
 loadBudget();
 loadSettings();
 loadGoals();
+loadPaymentMethods();
 
 const ICON_EDIT = `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9" /><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" /></svg>`;
 

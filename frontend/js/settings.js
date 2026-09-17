@@ -920,6 +920,140 @@ function setupSettingsData() {
  */
 const APP_VERSION = "V2.2";
 
+/** UI-2a — layar "Kelola Metode Pembayaran".
+ *
+ * Daftarnya dibangun dari PAYMENT_METHODS setiap kali modal dibuka, bukan
+ * disalin ke markup: satu sumber daftar, dan wadahnya tetap kosong pada
+ * halaman yang baru dimuat. Semua teks ditulis lewat textContent.
+ *
+ * Pola simpannya sama dengan editor kategori di budget.js: ubah state ->
+ * simpan -> kalau gagal kembalikan state APA ADANYA lalu beri tahu user.
+ * Metode bawaan tidak pernah dihapus, hanya dimatikan, jadi transaksi lama
+ * tidak pernah kehilangan referensinya. */
+function setupPaymentMethodManager() {
+  const overlay = document.getElementById("method-manage-overlay");
+  const openBtn = document.getElementById("btn-manage-methods");
+  if (!overlay || !openBtn) return; // bukan di halaman pengaturan
+  const list = document.getElementById("method-manage-list");
+  const count = document.getElementById("method-manage-count");
+  const status = document.getElementById("method-manage-status");
+  const modal = createModalController(overlay, { onClose: () => setStatus("", "success") });
+
+  const SAVE_FAILED = "Pilihan tidak bisa disimpan — penyimpanan browser penuh atau tidak tersedia. Coba lagi.";
+  const LAST_ACTIVE = "Minimal satu metode pembayaran harus tetap aktif.";
+
+  function setStatus(text, type) {
+    status.textContent = text;
+    status.dataset.type = type || "success";
+    status.hidden = !text;
+  }
+
+  /** Keterangan di bawah nama metode. Jumlah transaksi ditampilkan supaya user
+   * paham konsekuensinya SEBELUM mematikan: datanya tidak ke mana-mana. */
+  function describe(key) {
+    const used = countTransactionsByMethod(key);
+    if (isPaymentMethodActive(key)) {
+      return used ? `Dipakai ${used} transaksi` : "Belum dipakai transaksi";
+    }
+    return used ? `Nonaktif — ${used} transaksi lama aman` : "Nonaktif";
+  }
+
+  function buildRow(method, lockLastActive) {
+    const active = isPaymentMethodActive(method.key);
+    const row = document.createElement("label");
+    row.className = "settings-row settings-row-switch";
+    row.setAttribute("for", `method-toggle-${method.key}`);
+
+    const icon = document.createElement("span");
+    icon.className = "settings-row-icon";
+    icon.setAttribute("aria-hidden", "true");
+    icon.textContent = method.emoji;
+
+    const body = document.createElement("span");
+    body.className = "settings-row-body";
+    const title = document.createElement("span");
+    title.className = "settings-row-title";
+    title.textContent = method.name;
+    const desc = document.createElement("span");
+    desc.className = "settings-row-desc";
+    desc.textContent = describe(method.key);
+    body.append(title, desc);
+
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.className = "switch-input";
+    input.id = `method-toggle-${method.key}`;
+    input.setAttribute("role", "switch");
+    input.checked = active;
+    input.dataset.method = method.key;
+    // Metode terakhir yang aktif dikunci di sini SUPAYA TERLIHAT, bukan supaya
+    // aman: penjagaan sebenarnya ada di setPaymentMethodActive().
+    input.disabled = active && lockLastActive;
+
+    const track = document.createElement("span");
+    track.className = "switch-track";
+    track.setAttribute("aria-hidden", "true");
+    const thumb = document.createElement("span");
+    thumb.className = "switch-thumb";
+    track.appendChild(thumb);
+
+    const box = document.createElement("span");
+    box.className = "switch";
+    box.append(input, track);
+
+    row.append(icon, body, box);
+    return row;
+  }
+
+  function renderList() {
+    const active = getActivePaymentMethods().length;
+    list.textContent = "";
+    PAYMENT_METHODS.forEach((method) => list.appendChild(buildRow(method, active <= 1)));
+    count.textContent = `${active} dari ${PAYMENT_METHODS.length} metode aktif.`;
+  }
+
+  list.addEventListener("change", (e) => {
+    const input = e.target.closest(".switch-input[data-method]");
+    if (!input) return;
+    const key = input.dataset.method;
+    const method = PAYMENT_METHODS.find((item) => item.key === key);
+    if (!method) return;
+    const wanted = input.checked;
+    const before = financeData.paymentMethods.disabled.slice(); // untuk rollback
+
+    if (!setPaymentMethodActive(key, wanted)) {
+      renderList(); // permintaan ditolak: kembalikan tampilan ke keadaan nyata
+      setStatus(LAST_ACTIVE, "error");
+      return;
+    }
+    if (!savePaymentMethods()) {
+      financeData.paymentMethods.disabled = before;
+      renderList();
+      setStatus(SAVE_FAILED, "error");
+      return;
+    }
+    renderList();
+    // Daftar dibangun ulang, jadi fokus dikembalikan ke saklar yang barusan
+    // diubah — kalau tidak, fokus keyboard lompat ke awal modal.
+    const again = document.getElementById(`method-toggle-${key}`);
+    if (again && !again.disabled) again.focus();
+    setStatus(
+      wanted
+        ? `${method.name} aktif kembali.`
+        : `${method.name} dimatikan. Transaksi lama yang memakainya tidak berubah.`,
+      "success"
+    );
+  });
+
+  openBtn.addEventListener("click", () => {
+    setStatus("", "success");
+    renderList();
+    modal.open();
+  });
+  document.getElementById("method-manage-close").addEventListener("click", () => modal.close());
+  document.getElementById("btn-method-manage-done").addEventListener("click", () => modal.close());
+}
+
 function initSettingsPage() {
   const version = document.getElementById("settings-app-version");
   if (!version) return; // bukan di halaman pengaturan
@@ -930,6 +1064,7 @@ function initSettingsPage() {
   setupSettingsData();
   setupSettingsImport();
   setupSettingsReset();
+  setupPaymentMethodManager();
 
   // Pesan hasil operasi data (import/reset) dari sesi sebelum reload —
   // ditampilkan sekali lalu key-nya dihapus.
