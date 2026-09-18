@@ -66,7 +66,7 @@ const fire = (w, el, type) => el.dispatchEvent(new w.Event(type, { bubbles: true
   let r = await load("index.html"); let d = r.d, w = r.w;
   const ALL = w.eval("PAYMENT_METHOD_KEYS");
   ok("1a. tanpa key tersimpan: SEMUA metode bawaan aktif (user lama tidak kehilangan apa pun)", w.eval("getActivePaymentMethods().map(m => m.key).join()") === ALL.join(), w.eval("getActivePaymentMethods().length") + " aktif");
-  ok("1b. financeData.paymentMethods hanya menyimpan daftar yang DIMATIKAN", JSON.stringify(w.eval("financeData.paymentMethods")) === '{"disabled":[]}', JSON.stringify(w.eval("financeData.paymentMethods")));
+  ok("1b. financeData.paymentMethods = daftar yang DIMATIKAN + daftar metode buatan user, keduanya kosong untuk user baru", JSON.stringify(w.eval("financeData.paymentMethods")) === '{"disabled":[],"custom":[]}', JSON.stringify(w.eval("financeData.paymentMethods")));
   ok("1c. isPaymentMethodActive: true untuk semua bawaan, false untuk key legacy/asing/kosong", ALL.every(k => call(w, "isPaymentMethodActive", k).value === true) && ["debit", "mbanking", "qris", "", "__proto__", "constructor"].every(k => call(w, "isPaymentMethodActive", k).value === false));
   ok("1d. getActivePaymentMethods mengembalikan objek metode utuh & urutannya urutan kanonik", w.eval("getActivePaymentMethods().every(m => typeof m.key === 'string' && typeof m.name === 'string' && typeof m.logo === 'string')") === true && w.eval("getActivePaymentMethods().map(m => m.key).join()") === w.eval("PAYMENT_METHODS.map(m => m.key).join()"));
   ok("1e. setPaymentMethodActive menolak key yang bukan metode bawaan (legacy, asing, key bawaan Object)", ["debit", "qris", "__proto__", "toString", ""].every(k => call(w, "setPaymentMethodActive", k, false).value === false) && w.eval("financeData.paymentMethods.disabled.length") === 0);
@@ -100,8 +100,9 @@ const fire = (w, el, type) => el.dispatchEvent(new w.Event(type, { bubbles: true
   ok("2a. pilihan tersimpan dibaca saat halaman dibuka", w.eval("getActivePaymentMethods().length") === ALL.length - 2 && !w.eval("isPaymentMethodActive('ovo')") && !w.eval("isPaymentMethodActive('linkaja')"));
   ok("2b. savePaymentMethods menulis HANYA key-nya sendiri, bentuk { disabled: [...] }", (() => {
     w.eval('setPaymentMethodActive("dana", false); savePaymentMethods();');
-    const raw = w.localStorage.getItem(KEY);
-    return raw === '{"disabled":["ovo","linkaja","dana"]}' && w.localStorage.getItem("financeData.transactions") === null;
+    const raw = JSON.parse(w.localStorage.getItem(KEY) || "{}");
+    return raw.disabled.join() === "ovo,linkaja,dana" && Array.isArray(raw.custom) && raw.custom.length === 0
+      && Object.keys(raw).sort().join() === "custom,disabled" && w.localStorage.getItem("financeData.transactions") === null;
   })(), w.localStorage.getItem(KEY));
   r = await load("index.html", seedRaw('{"disabled":["ovo","tidak-ada","__proto__","ovo","debit"]}')); w = r.w;
   ok("2c. key sampah, key legacy, dan duplikat dibuang saat memuat", JSON.stringify(w.eval("financeData.paymentMethods.disabled")) === '["ovo"]' && w.eval("({}).polluted === undefined && Object.prototype.polluted === undefined"), JSON.stringify(w.eval("financeData.paymentMethods.disabled")));
@@ -213,14 +214,14 @@ const fire = (w, el, type) => el.dispatchEvent(new w.Event(type, { bubbles: true
   ok("5f. ringkasan jumlah aktif tampil", d.getElementById("method-manage-count").textContent === "11 dari 11 metode aktif.", d.getElementById("method-manage-count").textContent);
   // matikan satu
   toggle("gopay").checked = false; fire(w, toggle("gopay"), "change"); await wait(200);
-  ok("5g. mematikan metode langsung tersimpan (tanpa tombol Simpan)", w.localStorage.getItem(KEY) === '{"disabled":["gopay"]}', w.localStorage.getItem(KEY));
+  ok("5g. mematikan metode langsung tersimpan (tanpa tombol Simpan)", (() => { const raw = JSON.parse(w.localStorage.getItem(KEY) || "{}"); return raw.disabled.join() === "gopay" && raw.custom.length === 0; })(), w.localStorage.getItem(KEY));
   ok("5h. keterangannya berubah & menegaskan transaksi lama aman", rowOf("gopay").querySelector(".settings-row-desc").textContent === "Nonaktif — 2 transaksi lama aman");
   ok("5i. transaksi TIDAK disentuh sama sekali", stored(w).length === 2 && stored(w).every(tx => tx.method === "gopay"));
   ok("5j. ada konfirmasi tertulis untuk user", /GoPay dimatikan/.test(statusText()), statusText());
   ok("5k. fokus tetap di saklar yang barusan diubah (daftar dibangun ulang)", d.activeElement === toggle("gopay"));
   // nyalakan lagi
   toggle("gopay").checked = true; fire(w, toggle("gopay"), "change"); await wait(200);
-  ok("5l. ATURAN 4: metode bawaan bisa diaktifkan kembali", w.localStorage.getItem(KEY) === '{"disabled":[]}' && /GoPay aktif kembali/.test(statusText()));
+  ok("5l. ATURAN 4: metode bawaan bisa diaktifkan kembali", JSON.parse(w.localStorage.getItem(KEY) || "{}").disabled.length === 0 && /GoPay aktif kembali/.test(statusText()));
   ok("5m. tidak ada jalur HAPUS PERMANEN untuk metode bawaan (hanya saklar)", !d.querySelector("#method-manage-list button") && rows().every(row => !!row.querySelector(".switch-input")));
   // sisakan satu
   for (const k of ALL.filter(x => x !== "cash")) { const t = toggle(k); t.checked = false; fire(w, t, "change"); await wait(50); }
@@ -243,12 +244,12 @@ const fire = (w, el, type) => el.dispatchEvent(new w.Event(type, { bubbles: true
   ok("6d. tidak ada yang tertulis ke localStorage", w.localStorage.getItem(KEY) === null);
   w.localStorage.setItem = asli;
   d.getElementById("method-toggle-ovo").checked = false; fire(w, d.getElementById("method-toggle-ovo"), "change"); await wait(200);
-  ok("6e. setelah penyimpanan pulih, perubahan berikutnya tersimpan normal", w.localStorage.getItem(KEY) === '{"disabled":["ovo"]}');
+  ok("6e. setelah penyimpanan pulih, perubahan berikutnya tersimpan normal", JSON.parse(w.localStorage.getItem(KEY) || "{}").disabled.join() === "ovo");
 
   /* ============ 7. PAGAR TAHAP ============ */
   const codeOnly = (s) => s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|\s)\/\/.*$/gm, "$1");
-  ok("7a. UI-2b BELUM: tidak ada metode custom, katalog, maupun key \"user:\" di kode mana pun", !/PAYMENT_CATALOG|"user:|addCustomMethod|customMethods/.test(Object.values(srcOf).map(codeOnly).join("\n")));
-  ok("7b. state UI-2a HANYA daftar yang dimatikan (tidak ada daftar metode buatan user)", /paymentMethods: \{ disabled: \[\] \}/.test(srcOf["core.js"]) && !/deleted|softDelete|custom/i.test((srcOf["core.js"].match(/function loadPaymentMethods\(\)[\s\S]*?\n\}/) || [""])[0]));
+  ok("7a. UI-2b2 BELUM: tidak ada jalur HAPUS metode custom di kode mana pun", !/deleteCustomPaymentMethod|hapusCustom|method-delete|confirm-delete-method/.test(Object.values(srcOf).map(codeOnly).join("\n")));
+  ok("7b. UI-2b1: soft-delete hanya DIBACA dari data, tidak pernah ditulis UI", /paymentMethods: \{ disabled: \[\], custom: \[\] \}/.test(srcOf["core.js"]) && !/\.deleted = true/.test(Object.values(srcOf).join("\n")));
   ok("7c. hanya core.js yang menyentuh key storage-nya", /const PAYMENT_METHODS_STORAGE_KEY = "financeData\.paymentMethods";/.test(srcOf["core.js"]) && ["transactions-shared.js", "settings.js", "dashboard.js", "transactions.js", "analytics.js", "budget.js", "goals.js"].every(f => !/PAYMENT_METHODS_STORAGE_KEY/.test(srcOf[f])));
   ok("7d. P-3 belum: renderer baris transaksi belum menampilkan metode", !/getPaymentLabel|transaction-method/.test((srcOf["core.js"].match(/function renderTransactionItem\([\s\S]*?\n\}/) || [""])[0]));
   ok("7e. P-4 belum: backup schema 2, CSV 7 kolom, dan pilihan metode TIDAK ikut di-backup", /const BACKUP_SCHEMA_VERSION = 2;/.test(srcOf["settings.js"]) && /const CSV_HEADER = \["tanggal", "jenis", "judul", "kategori", "kategori_nama", "jumlah", "waktu"\];/.test(srcOf["settings.js"]) && !/paymentMethods/.test((srcOf["settings.js"].match(/function buildBackup\([\s\S]*?\n\}/) || [""])[0]));

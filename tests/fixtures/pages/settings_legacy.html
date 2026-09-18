@@ -295,10 +295,49 @@
       </div>
       <p class="modal-sub" id="method-manage-sub">Metode yang dimatikan tidak muncul saat menambah transaksi. Transaksi lama yang memakainya tetap tersimpan dan tetap tampil saat diedit.</p>
       <div class="settings-card" id="method-manage-list"></div>
+      <button type="button" class="btn btn--ghost btn--block" id="btn-add-method">+ Tambah metode pembayaran</button>
       <p class="settings-info" id="method-manage-count"></p>
       <p class="settings-feedback settings-feedback--inset" id="method-manage-status" role="status" aria-live="polite" hidden></p>
       <div class="modal-actions">
         <button type="button" class="btn btn--primary" id="btn-method-manage-done">Selesai</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: TAMBAH METODE PEMBAYARAN (UI-2b1, setupPaymentMethodManager()).
+       Dibuka DARI modal Kelola (tumpukan modal sudah didukung core.js). Hasil
+       pencarian sengaja kosong di markup: diisi dari PAYMENT_CATALOG saat
+       dibuka, seluruhnya lewat createElement + textContent karena namanya bisa
+       berasal dari ketikan user. -->
+  <div class="modal-overlay" id="method-add-overlay" hidden>
+    <div class="modal modal--form" role="dialog" aria-modal="true" aria-labelledby="method-add-title">
+      <div class="modal-header">
+        <h2 id="method-add-title">Tambah Metode Pembayaran</h2>
+        <button type="button" class="modal-close" id="method-add-close" aria-label="Tutup">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M18 6 6 18" />
+            <path d="m6 6 12 12" />
+          </svg>
+        </button>
+      </div>
+      <p class="modal-sub" id="method-add-sub">Cari bank atau e-wallet yang kamu pakai. Kalau tidak ada di daftar, ketik namanya lalu tambahkan sendiri.</p>
+      <div class="form-field">
+        <label for="method-search">Cari metode</label>
+        <input type="search" id="method-search" autocomplete="off" placeholder="Contoh: Seabank" />
+      </div>
+      <div class="settings-card" id="method-search-results"></div>
+      <div class="form-field">
+        <label for="method-add-group">Jenis</label>
+        <select id="method-add-group">
+          <option value="mbanking">Bank</option>
+          <option value="ewallet" selected>E-Wallet</option>
+          <option value="other">Lain</option>
+        </select>
+      </div>
+      <button type="button" class="btn btn--ghost btn--block" id="btn-method-add-manual" hidden></button>
+      <p class="settings-feedback settings-feedback--inset" id="method-add-status" role="status" aria-live="polite" hidden></p>
+      <div class="modal-actions">
+        <button type="button" class="btn btn--ghost" id="btn-method-add-cancel">Batal</button>
       </div>
     </div>
   </div>

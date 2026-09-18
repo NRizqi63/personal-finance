@@ -1,0 +1,407 @@
+<!doctype html>
+<meta charset="utf-8">
+<pre id="r">running…</pre>
+<script>
+/* UI-2b1 — Custom Payment Method (menambah metode buatan user).
+
+   1 : katalog (daftar saran, tidak pernah disimpan)
+   2 : slugifyPaymentName & bentuk key "user:"
+   3 : validasi nama (kosong, panjang, karakter, rapat spasi)
+   4 : duplikat & menghidupkan kembali entri yang sudah di-soft-delete
+   5 : batas 20 metode custom
+   6 : data rusak di localStorage & prototype pollution
+   7 : persistensi (simpan, muat ulang, bentuk payload)
+   8 : selector transaksi — grid, <select>, optgroup "Metode Saya"
+   9 : memakai metode custom di transaksi & saat mengedit transaksi lama
+  10 : aktif/nonaktif memakai mekanisme UI-2a + aturan minimal satu aktif
+  11 : layar tambah di Pengaturan (pencarian, manual, gagal simpan)
+  12 : keamanan — nama ber-payload tidak pernah jadi elemen
+  13 : pagar tahap — UI-2b2 (hapus) & P-3/P-4/P-5 belum dikerjakan
+
+   Metode custom TIDAK pernah dihapus oleh tahap ini; entri ber-`deleted: true`
+   hanya bisa datang dari data, dan diuji sebagai bahan bacaan saja. */
+const out = []; const ok = (n, c, x = "") => out.push(`${c ? "PASS" : "FAIL"} ${n}${x ? "  (" + x + ")" : ""}`);
+const wait = (ms) => new Promise(r => setTimeout(r, ms));
+const BASE = new URL("../../frontend/", location.href).href;
+const KEY = "financeData.paymentMethods";
+const XSS = '<img src=x onerror="top.__pwned=1">'.slice(0, 30); // dipotong ke batas nama
+const XSS_SHORT = '<b onmouseover=x>hai</b>';
+
+const pad = (n) => String(n).padStart(2, "0");
+const T = (() => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; })();
+
+let frame = null;
+async function load(page = "index.html", seed = () => {}) {
+  if (frame) frame.remove();
+  frame = document.createElement("iframe"); frame.width = 390; frame.height = 1600;
+  frame.src = BASE + "index.html"; document.body.appendChild(frame);
+  await new Promise(r => frame.onload = r);
+  try {
+    const w0 = frame.contentWindow;
+    w0.localStorage.clear(); w0.sessionStorage.clear();
+    w0.sessionStorage.setItem("checkinDismissed", "true");
+    seed(w0);
+  } catch (e) {}
+  frame.remove();
+  frame = document.createElement("iframe"); frame.width = 390; frame.height = 1600; frame.src = BASE + page;
+  document.body.appendChild(frame);
+  await new Promise(r => frame.onload = r); await wait(350);
+  const r = { d: frame.contentDocument, w: frame.contentWindow, errors: [] };
+  r.w.addEventListener("error", e => r.errors.push(e.message));
+  r.w.console.error = (...a) => r.errors.push("console.error " + a.join(" "));
+  return r;
+}
+const seedState = (state) => (w) => w.localStorage.setItem(KEY, JSON.stringify(state));
+const seedRaw = (raw) => (w) => w.localStorage.setItem(KEY, raw);
+const entry = (over = {}) => Object.assign({ key: "user:seabank", name: "Seabank", group: "mbanking", deleted: false }, over);
+const call = (w, fn, ...args) => { try { return { value: w.eval(`(${fn}).apply(null, ${JSON.stringify(args)})`) }; } catch (e) { return { threw: e.message }; } };
+const tiles = (d) => [...d.querySelectorAll("#method-grid .method-option[data-method]")];
+const shown = (d) => tiles(d).filter(t => !t.hidden).map(t => t.dataset.method);
+const options = (d) => [...d.getElementById("field-method").options].map(o => o.value);
+const stored = (w) => JSON.parse(w.localStorage.getItem("financeData.transactions") || "[]");
+const savedState = (w) => JSON.parse(w.localStorage.getItem(KEY) || "{}");
+const tap = async (el) => { el.focus(); el.click(); await wait(220); };
+const fire = (w, el, type) => el.dispatchEvent(new w.Event(type, { bubbles: true }));
+
+(async () => {
+  const srcOf = {};
+  for (const f of ["core.js", "transactions-shared.js", "settings.js", "dashboard.js", "transactions.js", "analytics.js", "budget.js", "goals.js"]) {
+    srcOf[f] = await (await fetch(BASE + "js/" + f)).text();
+  }
+  const html = { index: await (await fetch(BASE + "index.html")).text(), settings: await (await fetch(BASE + "settings.html")).text() };
+
+  /* ============ 1. KATALOG ============ */
+  let r = await load("index.html"); let d = r.d, w = r.w;
+  const KAT = w.eval("PAYMENT_CATALOG");
+  ok("1a. PAYMENT_CATALOG ada dan berukuran wajar (20 entri, bukan katalog ratusan bank)", Array.isArray(KAT) && KAT.length === 20, String(KAT.length));
+  ok("1b. tiap entri katalog = { name, group } bertipe benar, group dari daftar yang sah", KAT.every(item => typeof item.name === "string" && item.name.trim() && w.eval("PAYMENT_CUSTOM_GROUPS").includes(item.group)));
+  ok("1c. tidak ada nama katalog yang bentrok dengan metode bawaan/legacy", (() => {
+    const dipakai = w.eval("PAYMENT_METHODS.concat(PAYMENT_LEGACY_METHODS).map(m => m.name.toLowerCase())");
+    return KAT.every(item => !dipakai.includes(item.name.toLowerCase()));
+  })(), KAT.filter(i => w.eval("PAYMENT_METHODS.map(m=>m.name.toLowerCase())").includes(i.name.toLowerCase())).map(i => i.name).join());
+  ok("1d. tidak ada nama ganda di katalog", new Set(KAT.map(i => i.name.toLowerCase())).size === KAT.length);
+  ok("1e. katalog TIDAK ikut tersimpan saat menyimpan pilihan", (() => {
+    w.eval("savePaymentMethods()");
+    return !/PAYMENT_CATALOG|Seabank/.test(w.localStorage.getItem(KEY) || "");
+  })(), w.localStorage.getItem(KEY));
+
+  /* ============ 2. SLUG & KEY ============ */
+  const slug = (v) => call(w, "slugifyPaymentName", v).value;
+  ok("2a. slug dasar: huruf kecil, spasi jadi '-'", slug("Bank Jago") === "bank-jago" && slug("SEABANK") === "seabank");
+  ok("2b. karakter di luar [a-z0-9] dibuang, tidak menyisakan '-' ganda/ujung", slug("blu by BCA Digital!") === "blu-by-bca-digital" && slug("  i.saku  ") === "i-saku" && slug("A---B") === "a-b");
+  ok("2c. angka dipertahankan", slug("Bank 2 Digital") === "bank-2-digital");
+  ok("2d. nama tanpa huruf/angka menghasilkan \"\" (pemanggil yang menyiapkan cadangan)", slug("🏦🏦") === "" && slug("---") === "" && slug("") === "");
+  ok("2e. tidak melempar untuk nilai aneh", [null, undefined, 123, {}, []].every(v => !("threw" in call(w, "slugifyPaymentName", v))));
+  ok("2f. slug dipotong maksimal 32 karakter dan tidak berakhir '-'", (() => {
+    const s = slug("a".repeat(20) + " " + "b".repeat(30));
+    return s.length <= 32 && !s.endsWith("-");
+  })(), slug("a".repeat(20) + " " + "b".repeat(30)));
+  ok("2g. key baru = prefix \"user:\" + slug", (() => {
+    const hasil = call(w, "addCustomPaymentMethod", "Bank Jago", "mbanking").value;
+    return hasil.ok === true && hasil.key === "user:bank-jago";
+  })());
+  ok("2h. key custom TIDAK PERNAH sama dengan key bawaan/legacy", (() => {
+    const bawaan = w.eval("PAYMENT_METHOD_KEYS.concat(PAYMENT_LEGACY_METHODS.map(m => m.key))");
+    return w.eval("financeData.paymentMethods.custom.map(e => e.key)").every(k => !bawaan.includes(k) && k.startsWith("user:"));
+  })());
+  ok("2i. nama berbeda dengan slug sama diberi imbuhan -2, bukan menimpa", (() => {
+    const a = call(w, "addCustomPaymentMethod", "bank jago!", "ewallet").value; // slug sama
+    return a.ok === true && a.key === "user:bank-jago-2" && w.eval("financeData.paymentMethods.custom.length") === 2;
+  })(), w.eval("JSON.stringify(financeData.paymentMethods.custom.map(e=>e.key))"));
+  ok("2j. nama tanpa huruf/angka tetap dapat key yang sah", (() => {
+    const a = call(w, "addCustomPaymentMethod", "🏦🏦", "other").value;
+    return a.ok === true && /^user:metode(-\d+)?$/.test(a.key);
+  })());
+
+  /* ============ 3. VALIDASI NAMA ============ */
+  r = await load("index.html"); d = r.d; w = r.w;
+  const add = (nama, group) => call(w, "addCustomPaymentMethod", nama, group).value;
+  ok("3a. nama kosong / hanya spasi ditolak", add("", "other").reason === "kosong" && add("    ", "other").reason === "kosong");
+  ok("3b. bukan string ditolak sebagai karakter tidak didukung", [null, undefined, 42, {}, []].every(v => add(v, "other").ok === false));
+  ok("3c. panjang maksimal 30 diterapkan (30 lolos, 31 ditolak)", add("a".repeat(30), "other").ok === true && add("b".repeat(31), "other").reason === "panjang");
+  ok("3d. karakter kontrol ditolak", add("Bank\u0000X", "other").reason === "karakter" && add("Bank\u001bX", "other").reason === "karakter", JSON.stringify([add("Bank\u0000X", "other"), add("Bank\u001bX", "other")]));
+  ok("3e. tab & newline BUKAN karakter terlarang — dirapatkan jadi satu spasi", (() => {
+    const hasil = add("Bank\tJago\nBaru", "mbanking");
+    if (!hasil.ok) return false;
+    return w.eval(`findPaymentMethod(${JSON.stringify(hasil.key)}).name`) === "Bank Jago Baru";
+  })());
+  ok("3f. spasi tepi dibuang & spasi ganda dirapatkan", (() => {
+    const hasil = add("  Warung   Pak  Budi  ", "other");
+    return hasil.ok && w.eval(`findPaymentMethod(${JSON.stringify(hasil.key)}).name`) === "Warung Pak Budi";
+  })());
+  ok("3g. group tidak sah jatuh ke \"other\", bukan ditolak / bukan disimpan apa adanya", (() => {
+    const hasil = add("Metode Aneh", "bukan-group");
+    return hasil.ok && w.eval(`findPaymentMethod(${JSON.stringify(hasil.key)}).group`) === "other";
+  })());
+  ok("3h. emoji ikon mengikuti jenis (Bank 🏦 / E-Wallet 📱 / Lain 🧾)", (() => {
+    const a = add("Bank Uji", "mbanking"), b = add("Wallet Uji", "ewallet"), c = add("Lain Uji", "other");
+    const em = (k) => w.eval(`findPaymentMethod(${JSON.stringify(k)}).emoji`);
+    return em(a.key) === "\u{1F3E6}" && em(b.key) === "\u{1F4F1}" && em(c.key) === "\u{1F9FE}";
+  })());
+  ok("3i. metode custom tidak pernah punya logo (unggah logo di luar lingkup)", w.eval("financeData.paymentMethods.custom.every(e => findPaymentMethod(e.key).logo === '')"));
+  ok("3j. addCustomPaymentMethod TIDAK menyimpan sendiri (pemanggil yang menyimpan)", w.localStorage.getItem(KEY) === null, String(w.localStorage.getItem(KEY)));
+
+  /* ============ 4. DUPLIKAT & HIDUP KEMBALI ============ */
+  r = await load("index.html", seedState({ disabled: [], custom: [entry(), entry({ key: "user:lama", name: "Dompet Lama", group: "other", deleted: true })] }));
+  d = r.d; w = r.w;
+  const add2 = (nama, group) => call(w, "addCustomPaymentMethod", nama, group).value;
+  ok("4a. duplikat dengan metode BAWAAN ditolak (case-insensitive)", add2("Cash", "other").reason === "duplikat" && add2("gopay", "ewallet").reason === "duplikat" && add2("LiViN' By MaNdIrI", "mbanking").reason === "duplikat");
+  ok("4b. duplikat dengan metode LEGACY ditolak", add2("Debit", "other").reason === "duplikat" && add2("m-banking", "mbanking").reason === "duplikat");
+  ok("4c. duplikat dengan custom yang AKTIF ditolak", add2("Seabank", "mbanking").reason === "duplikat" && add2("  seabank  ", "ewallet").reason === "duplikat");
+  ok("4d. jumlah custom tidak bertambah oleh percobaan duplikat", w.eval("financeData.paymentMethods.custom.length") === 2);
+  ok("4e. nama sama dengan custom yang SUDAH DIHAPUS menghidupkan entri lama (key-nya tetap)", (() => {
+    const hasil = add2("Dompet Lama", "ewallet");
+    return hasil.ok === true && hasil.revived === true && hasil.key === "user:lama";
+  })());
+  ok("4f. entri yang dihidupkan tidak lagi berstatus dihapus & jumlahnya tetap 2", w.eval("financeData.paymentMethods.custom.find(e => e.key === 'user:lama').deleted") === false && w.eval("financeData.paymentMethods.custom.length") === 2);
+  ok("4g. jenis ikut diperbarui saat dihidupkan kembali", w.eval("findPaymentMethod('user:lama').group") === "ewallet");
+  ok("4h. transaksi lama yang memakai key itu langsung tersambung lagi", w.eval("isPaymentMethodActive('user:lama')") === true && w.eval("normalizePaymentMethod('user:lama')") === "user:lama");
+
+  /* ============ 5. BATAS 20 ============ */
+  r = await load("index.html"); w = r.w;
+  ok("5a. batasnya konstanta, bukan angka tersebar", w.eval("PAYMENT_CUSTOM_MAX") === 20);
+  ok("5b. 20 metode custom bisa ditambahkan", (() => {
+    for (let i = 1; i <= 20; i += 1) if (!call(w, "addCustomPaymentMethod", "Metode " + i, "other").value.ok) return false;
+    return w.eval("financeData.paymentMethods.custom.length") === 20;
+  })());
+  ok("5c. yang ke-21 ditolak dengan alasan \"penuh\"", call(w, "addCustomPaymentMethod", "Metode 21", "other").value.reason === "penuh" && w.eval("financeData.paymentMethods.custom.length") === 20);
+  ok("5d. penolakan tidak merusak daftar yang sudah ada", w.eval("getActivePaymentMethods().length") === 31 && w.eval("financeData.paymentMethods.custom.every(e => !e.deleted)"));
+
+  /* ============ 6. DATA RUSAK & PROTOTYPE ============ */
+  const RUSAK = [
+    ["custom bukan array", { disabled: [], custom: "bukan" }],
+    ["entri bukan objek", { disabled: [], custom: ["teks", 5, null] }],
+    ["key tanpa prefix", { disabled: [], custom: [entry({ key: "seabank" })] }],
+    ["key berhuruf besar", { disabled: [], custom: [entry({ key: "user:Seabank" })] }],
+    ["key berisi karakter aneh", { disabled: [], custom: [entry({ key: "user:se<bank" })] }],
+    ["nama kosong", { disabled: [], custom: [entry({ name: "   " })] }],
+    ["nama bukan string", { disabled: [], custom: [entry({ name: 42 })] }],
+    ["nama terlalu panjang", { disabled: [], custom: [entry({ name: "z".repeat(31) })] }],
+    ["nama berkarakter kontrol", { disabled: [], custom: [entry({ name: "Se\u0000bank" })] }],
+    ["group tidak dikenal", { disabled: [], custom: [entry({ group: "kripto" })] }],
+    ["group hilang", { disabled: [], custom: [{ key: "user:x", name: "X", deleted: false }] }],
+  ];
+  for (const [nama, state] of RUSAK) {
+    r = await load("index.html", seedState(state)); w = r.w;
+    ok(`6a. data rusak (${nama}) dilewati; aplikasi tetap jalan tanpa error`, w.eval("financeData.paymentMethods.custom.length") === 0 && w.eval("getActivePaymentMethods().length") === 11 && r.errors.length === 0, `custom=${w.eval("financeData.paymentMethods.custom.length")} aktif=${w.eval("getActivePaymentMethods().length")} err=${r.errors.join(" | ")}`);
+  }
+  r = await load("index.html", seedState({ disabled: [], custom: [entry(), entry({ name: "Lain" }), entry({ key: "user:beda", name: "Beda", group: "ewallet" })] })); w = r.w;
+  ok("6b. key ganda dilewati, entri sah tetap dipakai", w.eval("financeData.paymentMethods.custom.map(e => e.key).join()") === "user:seabank,user:beda");
+  r = await load("index.html", seedRaw('{"disabled":[],"custom":[{"key":"user:__proto__","name":"X","group":"other"},{"key":"user:ok","name":"Aman","group":"other"}]}')); w = r.w;
+  ok("6c. key yang meniru properti bawaan Object ditolak, prototype tetap bersih", w.eval("financeData.paymentMethods.custom.map(e => e.key).join()") === "user:ok" && w.eval("({}).polluted === undefined && Object.prototype.polluted === undefined && typeof {}.toString === 'function'"));
+  r = await load("index.html", seedRaw('{"disabled":["user:tidak-ada"],"custom":[]}')); w = r.w;
+  ok("6d. key custom di daftar nonaktif yang entrinya tidak ada dibuang", w.eval("financeData.paymentMethods.disabled.length") === 0);
+  r = await load("index.html", seedState({ disabled: [], custom: Array.from({ length: 25 }, (_, i) => entry({ key: "user:m" + i, name: "Metode " + i })) })); w = r.w;
+  ok("6e. data berisi lebih dari batas: hanya 20 pertama yang dipakai", w.eval("financeData.paymentMethods.custom.length") === 20);
+
+  /* ============ 7. PERSISTENSI ============ */
+  r = await load("index.html"); w = r.w;
+  ok("7a. payload tersimpan memuat DUA bidang: disabled & custom", (() => {
+    w.eval('addCustomPaymentMethod("Seabank", "mbanking"); savePaymentMethods();');
+    const raw = savedState(w);
+    return Object.keys(raw).sort().join() === "custom,disabled" && raw.custom.length === 1;
+  })(), w.localStorage.getItem(KEY));
+  ok("7b. entri tersimpan persis { key, name, group, deleted }", (() => {
+    const e = savedState(w).custom[0];
+    return Object.keys(e).sort().join() === "deleted,group,key,name" && e.key === "user:seabank" && e.name === "Seabank" && e.group === "mbanking" && e.deleted === false;
+  })(), JSON.stringify(savedState(w).custom[0]));
+  ok("7c. dibaca kembali utuh setelah halaman dimuat ulang", (() => {
+    w.location.reload();
+    return true;
+  })());
+  await wait(600);
+  w = frame.contentWindow;
+  ok("7d. setelah reload: metode custom masih ada dan aktif", w.eval("findPaymentMethod('user:seabank').name") === "Seabank" && w.eval("isPaymentMethodActive('user:seabank')") === true);
+  ok("7e. memuat TIDAK menulis ulang localStorage", (() => {
+    const before = w.localStorage.getItem(KEY);
+    return before === JSON.stringify({ disabled: [], custom: [{ key: "user:seabank", name: "Seabank", group: "mbanking", deleted: false }] });
+  })(), w.localStorage.getItem(KEY));
+
+  /* ============ 8. SELECTOR TRANSAKSI ============ */
+  const DUA = { disabled: [], custom: [entry(), entry({ key: "user:warung", name: "Warung Pak Budi", group: "other" })] };
+  for (const page of ["index.html", "transactions.html"]) {
+    r = await load(page, seedState(DUA)); d = r.d; w = r.w;
+    ok(`8a. ${page}: kedua metode custom muncul di grid, setelah 11 bawaan`, shown(d).join() === "cash,bca-mobile,brimo,livin,mybca,wondr,gopay,dana,ovo,shopeepay,linkaja,user:seabank,user:warung", shown(d).join());
+    ok(`8b. ${page}: tombol custom ditandai data-custom & tidak punya <img> logo`, (() => {
+      const custom = tiles(d).filter(t => t.dataset.custom);
+      return custom.length === 2 && custom.every(t => !t.querySelector("img")) && custom[0].querySelector(".method-logo").textContent === "\u{1F3E6}" && custom[1].querySelector(".method-logo").textContent === "\u{1F9FE}";
+    })());
+    ok(`8c. ${page}: tombol custom punya atribut aksesibilitas yang sama dengan bawaan`, tiles(d).filter(t => t.dataset.custom).every(t => t.getAttribute("role") === "radio" && t.hasAttribute("aria-checked") && t.type === "button"));
+    ok(`8d. ${page}: <option> ikut bertambah dan nilainya key custom`, options(d).join() === "cash,bca-mobile,brimo,livin,mybca,wondr,gopay,dana,ovo,shopeepay,linkaja,user:seabank,user:warung", options(d).join());
+    ok(`8e. ${page}: optgroup "Metode Saya" berisi TEPAT metode custom`, (() => {
+      const groups = [...d.querySelectorAll("#field-method optgroup")];
+      const saya = groups.find(g => g.label === "Metode Saya");
+      return groups.map(g => g.label).join("|") === "Cash|Mobile Banking|E-Wallet|Metode Saya"
+        && !!saya && [...saya.querySelectorAll("option")].map(o => o.value).join() === "user:seabank,user:warung";
+    })(), [...d.querySelectorAll("#field-method optgroup")].map(g => g.label).join("|"));
+    ok(`8f. ${page}: teks opsi custom = emoji + nama (sama seperti label aplikasi)`, [...d.querySelectorAll("#field-method optgroup[data-custom] option")].every(o => o.textContent === w.eval(`getPaymentLabel(${JSON.stringify(o.value)})`)));
+  }
+  // navigasi keyboard menyertakan custom
+  r = await load("index.html", seedState(DUA)); d = r.d; w = r.w;
+  await tap(d.querySelector('[data-action="add-transaction"]'));
+  const press = (el, key) => { const ev = new w.KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }); el.dispatchEvent(ev); return ev; };
+  d.querySelector('.method-option[data-method="linkaja"]').focus();
+  press(d.activeElement, "ArrowRight"); await wait(60);
+  ok("8g. panah dari metode bawaan terakhir masuk ke metode custom", d.activeElement.dataset.method === "user:seabank" && d.getElementById("field-method").value === "user:seabank");
+  press(d.activeElement, "End"); await wait(60);
+  ok("8h. End berhenti di metode custom terakhir", d.activeElement.dataset.method === "user:warung");
+  press(d.activeElement, "ArrowRight"); await wait(60);
+  ok("8i. wrap kembali ke metode pertama", d.activeElement.dataset.method === "cash");
+  ok("8j. hanya satu tab stop walaupun ada metode custom", tiles(d).filter(t => t.tabIndex === 0).length === 1);
+
+  /* ============ 9. DIPAKAI DI TRANSAKSI ============ */
+  const set = (id, v) => { const el = d.getElementById(id); el.value = v; fire(w, el, "input"); fire(w, el, "change"); };
+  await tap(d.querySelector('.method-option[data-method="user:warung"]'));
+  set("field-title", "Kopi"); set("field-amount", "15000"); set("field-date", T);
+  d.getElementById("field-category").value = "makanan";
+  d.getElementById("transaction-form").requestSubmit(); await wait(300);
+  ok("9a. transaksi baru tersimpan dengan key custom (bukan namanya)", stored(w)[0] && stored(w)[0].method === "user:warung", JSON.stringify(stored(w)[0] || {}));
+  ok("9b. yang disimpan key canonical, bukan label/emoji", !/🧾|Warung/.test(String(stored(w)[0].method)));
+  // edit transaksi yang metodenya custom & sudah dinonaktifkan
+  r = await load("transactions.html", (w0) => {
+    w0.localStorage.setItem(KEY, JSON.stringify({ disabled: ["user:seabank"], custom: DUA.custom }));
+    w0.localStorage.setItem("financeData.transactions", JSON.stringify([{ id: 1, title: "Lama", category: "makanan", type: "expense", amount: 5000, isoDate: T, time: "", method: "user:seabank" }]));
+  });
+  d = r.d; w = r.w;
+  await tap(d.querySelector('#all-transaction-list [data-action="edit"]'));
+  ok("9c. metode custom nonaktif tampil sebagai tombol non-aktif berlabel jelas", (() => {
+    const mati = d.querySelector("#method-grid .method-option.is-legacy");
+    return !!mati && mati.querySelector(".method-name").textContent.trim() === "Seabank — nonaktif" && mati.disabled;
+  })(), (d.querySelector("#method-grid .method-option.is-legacy") || {}).textContent);
+  d.getElementById("transaction-form").requestSubmit(); await wait(300);
+  ok("9d. menyimpan ulang MEMPERTAHANKAN metode custom yang nonaktif", stored(w)[0].method === "user:seabank");
+  // entri soft-deleted dari data
+  r = await load("transactions.html", (w0) => {
+    w0.localStorage.setItem(KEY, JSON.stringify({ disabled: [], custom: [entry({ deleted: true })] }));
+    w0.localStorage.setItem("financeData.transactions", JSON.stringify([{ id: 1, title: "Lama", category: "makanan", type: "expense", amount: 5000, isoDate: T, time: "", method: "user:seabank" }]));
+  });
+  d = r.d; w = r.w;
+  await tap(d.querySelector('#all-transaction-list [data-action="edit"]'));
+  ok("9e. metode custom yang SUDAH DIHAPUS berlabel \"— dihapus\" (beda dari \"nonaktif\")", (d.querySelector("#method-grid .method-option.is-legacy") || {}).textContent.includes("Seabank — dihapus"));
+  ok("9f. metode yang sudah dihapus tidak muncul di grid maupun <select>", !shown(d).includes("user:seabank") && !options(d).includes("user:seabank"));
+  d.getElementById("transaction-form").requestSubmit(); await wait(300);
+  ok("9g. menyimpan ulang tetap mempertahankan metodenya (transaksi lama aman)", stored(w)[0].method === "user:seabank");
+
+  /* ============ 10. AKTIF/NONAKTIF + MINIMAL SATU ============ */
+  r = await load("index.html", seedState(DUA)); w = r.w;
+  ok("10a. metode custom bisa dinonaktifkan lewat mekanisme yang sama", call(w, "setPaymentMethodActive", "user:seabank", false).value === true && w.eval("isPaymentMethodActive('user:seabank')") === false);
+  ok("10b. dan bisa diaktifkan kembali", call(w, "setPaymentMethodActive", "user:seabank", true).value === true && w.eval("isPaymentMethodActive('user:seabank')") === true);
+  ok("10c. metode custom yang sudah dihapus TIDAK bisa diaktifkan lewat pintu ini", (() => {
+    w.eval("financeData.paymentMethods.custom.find(e => e.key === 'user:warung').deleted = true");
+    return call(w, "setPaymentMethodActive", "user:warung", true).value === false;
+  })());
+  r = await load("index.html", seedState({ disabled: [], custom: [entry()] })); w = r.w;
+  ok("10d. ATURAN: metode terakhir tetap tidak bisa dimatikan walau yang tersisa metode custom", (() => {
+    w.eval("PAYMENT_METHOD_KEYS.forEach(k => setPaymentMethodActive(k, false))");
+    const sisa = w.eval("getActivePaymentMethods().map(m => m.key).join()");
+    const tolak = call(w, "setPaymentMethodActive", "user:seabank", false).value;
+    return sisa === "user:seabank" && tolak === false && w.eval("getActivePaymentMethods().length") === 1;
+  })());
+  r = await load("index.html", seedRaw(JSON.stringify({ disabled: ["user:seabank"].concat(["cash", "bca-mobile", "brimo", "livin", "mybca", "wondr", "gopay", "dana", "ovo", "shopeepay", "linkaja"]), custom: [entry()] }))); w = r.w;
+  ok("10e. data yang mematikan SEMUA metode ditolak SELURUHNYA — termasuk daftar custom-nya, jadi yang berlaku kembali ke 11 bawaan", w.eval("getActivePaymentMethods().length") === 11 && w.eval("financeData.paymentMethods.custom.length") === 0 && w.eval("financeData.paymentMethods.disabled.length") === 0, w.eval("getActivePaymentMethods().length") + " aktif");
+
+  /* ============ 11. LAYAR TAMBAH DI PENGATURAN ============ */
+  r = await load("settings.html"); d = r.d; w = r.w;
+  const rows = () => [...d.querySelectorAll("#method-manage-list .settings-row")];
+  const hasil = () => [...d.querySelectorAll("#method-search-results .settings-row")];
+  const judul = (row) => row.querySelector(".settings-row-title").textContent;
+  ok("11a. modal tambah ada, tertutup, dan daftarnya kosong saat halaman dibuka", d.getElementById("method-add-overlay").hidden === true && d.getElementById("method-search-results").children.length === 0);
+  await tap(d.getElementById("btn-manage-methods"));
+  ok("11b. tombol \"Tambah metode pembayaran\" ada di modal kelola", !!d.getElementById("btn-add-method") && d.getElementById("btn-add-method").textContent.includes("Tambah metode pembayaran"));
+  await tap(d.getElementById("btn-add-method"));
+  ok("11c. modal tambah terbuka DI ATAS modal kelola (keduanya terbuka)", !d.getElementById("method-add-overlay").hidden && !d.getElementById("method-manage-overlay").hidden);
+  ok("11d. tanpa kata kunci: menampilkan maksimal 8 saran", hasil().length === 8);
+  const search = d.getElementById("method-search");
+  search.value = "sea"; fire(w, search, "input"); await wait(120);
+  ok("11e. pencarian menyaring katalog", hasil().map(judul).join() === "Seabank", hasil().map(judul).join());
+  search.value = "SEA"; fire(w, search, "input"); await wait(120);
+  ok("11f. pencarian TIDAK peduli huruf besar/kecil", hasil().map(judul).join() === "Seabank");
+  search.value = "bank"; fire(w, search, "input"); await wait(120);
+  ok("11g. pencarian cocok di tengah nama", hasil().length > 1 && hasil().map(judul).every(n => /bank/i.test(n)));
+  search.value = "zzz"; fire(w, search, "input"); await wait(120);
+  ok("11h. tidak ada hasil BUKAN jalan buntu: tombol tambah manual muncul dengan nama yang diketik", hasil().length === 0 && !d.getElementById("btn-method-add-manual").hidden && d.getElementById("btn-method-add-manual").textContent === 'Tambahkan "zzz" sebagai metode saya');
+  search.value = "sea"; fire(w, search, "input"); await wait(120);
+  await tap(hasil()[0].querySelector("button[data-name]"));
+  ok("11i. memilih dari katalog menyimpan metode custom & menutup modal tambah", savedState(w).custom.length === 1 && savedState(w).custom[0].key === "user:seabank" && d.getElementById("method-add-overlay").hidden === true);
+  ok("11j. modal kelola langsung memperlihatkannya di bagian \"Metode Saya\"", rows().length === 12 && [...d.querySelectorAll("#method-manage-list h3")].some(h => h.textContent === "Metode Saya") && rows().some(row => judul(row) === "Seabank"));
+  ok("11k. hitungan ikut bertambah", d.getElementById("method-manage-count").textContent === "12 dari 12 metode aktif.", d.getElementById("method-manage-count").textContent);
+  ok("11l. ada konfirmasi tertulis untuk user", /Seabank ditambahkan/.test(d.getElementById("method-manage-status").textContent), d.getElementById("method-manage-status").textContent);
+  await tap(d.getElementById("btn-add-method"));
+  search.value = "sea"; fire(w, search, "input"); await wait(120);
+  ok("11m. entri katalog yang sudah dipakai ditandai & tombolnya dimatikan", hasil()[0].querySelector("button[data-name]").disabled === true && hasil()[0].querySelector(".settings-row-desc").textContent === "Sudah ada di daftarmu");
+  search.value = "Seabank"; fire(w, search, "input"); await wait(120);
+  await tap(d.getElementById("btn-method-add-manual"));
+  ok("11n. menambah nama duplikat lewat jalur manual ditolak dengan pesan", /sudah ada/i.test(d.getElementById("method-add-status").textContent) && savedState(w).custom.length === 1, d.getElementById("method-add-status").textContent);
+  search.value = "Warung Pak Budi"; fire(w, search, "input"); await wait(120);
+  d.getElementById("method-add-group").value = "other";
+  await tap(d.getElementById("btn-method-add-manual"));
+  ok("11o. nama manual + jenis tersimpan sesuai pilihan", (() => {
+    const e = savedState(w).custom[1];
+    return !!e && e.name === "Warung Pak Budi" && e.group === "other" && e.key === "user:warung-pak-budi";
+  })(), JSON.stringify(savedState(w).custom));
+  ok("11p. metode custom ikut punya saklar aktif/nonaktif di daftar kelola", !!d.getElementById("method-toggle-user:warung-pak-budi"));
+  // gagal simpan
+  await tap(d.getElementById("btn-add-method"));
+  const asli = w.localStorage.setItem.bind(w.localStorage);
+  w.localStorage.setItem = (k, v) => { if (k === KEY) throw new Error("QuotaExceeded"); return asli(k, v); };
+  search.value = "Bank Uji Gagal"; fire(w, search, "input"); await wait(120);
+  await tap(d.getElementById("btn-method-add-manual"));
+  ok("11q. gagal simpan: state DI-ROLLBACK, metode tidak jadi ditambahkan", w.eval("financeData.paymentMethods.custom.length") === 2 && savedState(w).custom.length === 2);
+  ok("11r. gagal simpan: user diberi tahu & modal tambah tetap terbuka", /tidak bisa disimpan/.test(d.getElementById("method-add-status").textContent) && !d.getElementById("method-add-overlay").hidden);
+  w.localStorage.setItem = asli;
+  ok("11s. tanpa error konsol sepanjang alur tambah", r.errors.length === 0, r.errors.join(" | "));
+
+  /* ============ 12. KEAMANAN RENDER NAMA ============ */
+  r = await load("settings.html", seedState({ disabled: [], custom: [entry({ key: "user:xss", name: XSS_SHORT, group: "other" })] }));
+  d = r.d; w = r.w;
+  await tap(d.getElementById("btn-manage-methods"));
+  const barisXss = rows().find(row => judul(row) === XSS_SHORT);
+  ok("12a. daftar kelola: nama ber-payload tampil sebagai TEKS apa adanya", !!barisXss, rows().map(judul).slice(-1).join());
+  ok("12b. daftar kelola: tidak ada elemen/handler yang lahir dari nama", d.querySelectorAll("#method-manage-list b, #method-manage-list img, #method-manage-list [onmouseover], #method-manage-list [onerror]").length === 0 && w.top.__pwned === undefined);
+  r = await load("index.html", seedState({ disabled: [], custom: [entry({ key: "user:xss", name: XSS_SHORT, group: "other" })] }));
+  d = r.d; w = r.w;
+  await tap(d.querySelector('[data-action="add-transaction"]'));
+  const tileXss = tiles(d).find(t => t.dataset.method === "user:xss");
+  ok("12c. grid transaksi: nama ber-payload jadi teks di .method-name", !!tileXss && tileXss.querySelector(".method-name").textContent === XSS_SHORT);
+  ok("12d. grid transaksi: tidak ada elemen/handler baru dari nama", d.querySelectorAll("#method-grid b, #method-grid [onmouseover], #method-grid [onerror]").length === 0 && w.top.__pwned === undefined);
+  ok("12e. <option>: payload jadi teks, bukan markup", (() => {
+    const opt = [...d.getElementById("field-method").options].find(o => o.value === "user:xss");
+    return !!opt && opt.textContent.includes(XSS_SHORT) && opt.children.length === 0;
+  })());
+  ok("12f. menyimpan transaksi dengan metode itu menyimpan KEY-nya, bukan namanya", (() => {
+    d.querySelector('.method-option[data-method="user:xss"]').click();
+    const el = (id, v) => { const f = d.getElementById(id); f.value = v; fire(w, f, "input"); fire(w, f, "change"); };
+    el("field-title", "Uji"); el("field-amount", "1000"); el("field-date", T);
+    d.getElementById("field-category").value = "makanan";
+    d.getElementById("transaction-form").requestSubmit();
+    return true;
+  })());
+  await wait(300);
+  ok("12g. tersimpan sebagai key, dan halaman tetap bersih", stored(w)[0].method === "user:xss" && w.top.__pwned === undefined && d.querySelectorAll("#transaction-list b").length === 0);
+  ok("12h. nama dengan tanda kutip & ampersand tidak merusak apa pun", (() => {
+    const hasil = call(w, "addCustomPaymentMethod", 'A&"B" <C>', "other").value;
+    return hasil.ok === true && w.eval(`findPaymentMethod(${JSON.stringify(hasil.key)}).name`) === 'A&"B" <C>';
+  })());
+  ok("12i. renderer metode TIDAK memakai innerHTML sama sekali", (() => {
+    const fn = ["buildCustomTile", "renderCustomMethods", "renderLegacyMethod"].map(n => (srcOf["transactions-shared.js"].match(new RegExp(`function ${n}\\([\\s\\S]*?\\n  \\}`)) || [""])[0]).join("\n");
+    return fn.length > 500 && !/innerHTML|insertAdjacentHTML|outerHTML/.test(fn);
+  })());
+  ok("12j. layar tambah/kelola di settings.js juga tanpa innerHTML", (() => {
+    const blok = srcOf["settings.js"].slice(srcOf["settings.js"].indexOf("function setupPaymentMethodManager("), srcOf["settings.js"].indexOf("function initSettingsPage("));
+    return blok.length > 3000 && !/innerHTML|insertAdjacentHTML|outerHTML|document\.write/.test(blok);
+  })());
+
+  /* ============ 13. PAGAR TAHAP ============ */
+  const codeOnly = (s) => s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|\s)\/\/.*$/gm, "$1");
+  const allJs = Object.values(srcOf).map(codeOnly).join("\n");
+  ok("13a. UI-2b2 BELUM: tidak ada jalur hapus metode custom", !/deleteCustomPaymentMethod|hapusCustom|method-delete|confirm-delete-method/.test(allJs));
+  ok("13b. UI-2b1 tidak pernah MENULIS soft-delete (hanya membacanya dari data)", !/\.deleted = true/.test(allJs));
+  ok("13c. UI-2c BELUM: slot di modal transaksi masih kosong & tersembunyi", /id="method-more"[^>]*hidden/.test(html.index) && !/method-more/.test(srcOf["transactions-shared.js"]));
+  ok("13d. P-3 belum: renderer baris transaksi belum menampilkan metode", !/getPaymentLabel|transaction-method/.test((srcOf["core.js"].match(/function renderTransactionItem\([\s\S]*?\n\}/) || [""])[0]));
+  ok("13e. P-4 belum: schema backup 2, CSV 7 kolom, metode custom tidak ikut backup", /const BACKUP_SCHEMA_VERSION = 2;/.test(srcOf["settings.js"]) && /const CSV_HEADER = \["tanggal", "jenis", "judul", "kategori", "kategori_nama", "jumlah", "waktu"\];/.test(srcOf["settings.js"]) && ["buildBackup", "validateBackup", "writeImportedData", "applyPendingImport"].every(n => !/paymentMethods|custom/.test((srcOf["settings.js"].match(new RegExp(`function ${n}\\([\\s\\S]*?\\n\\}`)) || [""])[0])));
+  ok("13f. P-5 belum: filter & analitik belum mengenal metode", !/method/.test(srcOf["transactions.js"]) && !/method/.test(srcOf["analytics.js"]));
+  ok("13g. katalog & helper custom hanya di core.js; settings.js memakainya, halaman lain tidak", /const PAYMENT_CATALOG = \[/.test(srcOf["core.js"]) && ["dashboard.js", "transactions.js", "analytics.js", "budget.js", "goals.js"].every(f => !/PAYMENT_CATALOG|addCustomPaymentMethod|customPaymentMethods/.test(srcOf[f])));
+
+  document.getElementById("r").textContent = out.join("\n") + `\n\nTOTAL PASS=${out.filter(l => l.startsWith("PASS")).length} FAIL=${out.filter(l => l.startsWith("FAIL")).length}`;
+})().catch(e => { document.getElementById("r").textContent = out.join("\n") + "\nEXCEPTION " + e.message + "\n" + e.stack; });
+</script>

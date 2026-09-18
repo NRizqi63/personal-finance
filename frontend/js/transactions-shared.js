@@ -190,11 +190,15 @@ function setupTransactionModal() {
     if (!key || isPaymentMethodActive(key)) return;
     const meta = findPaymentMethod(key);
     if (!meta) return;
-    // Dua sebab sebuah metode tidak bisa dipilih lagi, dan user berhak tahu
-    // bedanya: key generik versi pertama (tidak akan pernah kembali) vs metode
-    // bawaan yang SEDANG dimatikan user (bisa dinyalakan lagi di Pengaturan).
-    // Kelasnya tetap .is-legacy — satu gaya untuk "tidak bisa dipilih".
-    const reason = PAYMENT_METHOD_KEYS.includes(key) ? "nonaktif" : "tidak lagi tersedia";
+    // Tiga sebab sebuah metode tidak bisa dipilih lagi, dan user berhak tahu
+    // bedanya: key generik versi pertama (tidak akan pernah kembali), metode
+    // yang SEDANG dimatikan user (bisa dinyalakan lagi di Pengaturan), atau
+    // metode custom yang sudah dihapus. Kelasnya tetap .is-legacy — satu gaya
+    // untuk "tidak bisa dipilih".
+    const custom = findCustomPaymentMethod(key);
+    const reason = custom && custom.deleted ? "dihapus"
+      : (custom || PAYMENT_METHOD_KEYS.includes(key)) ? "nonaktif"
+      : "tidak lagi tersedia";
 
     const btn = document.createElement("button");
     btn.type = "button";
@@ -251,6 +255,60 @@ function setupTransactionModal() {
     fillMethodLogo(btn.querySelector(".method-logo"), findPaymentMethod(btn.dataset.method));
   }
 
+  /** UI-2b1: metode buatan user tidak punya markup statis, jadi tombol dan
+   * <option>-nya dibuat di sini. SELURUH teks lewat textContent / properti
+   * value — tidak pernah innerHTML — karena namanya berasal dari ketikan user.
+   * Metode custom tidak punya berkas logo, jadi slot logonya berisi emoji
+   * jenisnya (dari PAYMENT_GROUP_EMOJI). */
+  function buildCustomTile(method) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "method-option";
+    btn.dataset.method = method.key;
+    btn.dataset.group = method.group;
+    btn.dataset.custom = "true"; // penanda supaya mudah dibersihkan & diuji
+    btn.setAttribute("role", "radio");
+    btn.setAttribute("aria-checked", "false");
+    btn.tabIndex = -1;
+
+    const logo = document.createElement("span");
+    logo.className = "method-logo";
+    logo.setAttribute("aria-hidden", "true");
+    logo.textContent = method.emoji;
+
+    const name = document.createElement("span");
+    name.className = "method-name";
+    name.textContent = method.name;
+
+    btn.append(logo, name);
+    return btn;
+  }
+
+  /** Tombol & opsi custom dibangun ulang dari nol tiap kali dipanggil, jadi
+   * memanggilnya dua kali tidak pernah menggandakan apa pun. */
+  function renderCustomMethods(aktif) {
+    if (methodGrid) {
+      methodGrid.querySelectorAll(".method-option[data-custom]").forEach((el) => el.remove());
+    }
+    const grupLama = fieldMethod.querySelector("optgroup[data-custom]");
+    if (grupLama) grupLama.remove();
+
+    const custom = aktif.filter((method) => method.key.startsWith(PAYMENT_CUSTOM_PREFIX));
+    if (!custom.length) return;
+
+    const grup = document.createElement("optgroup");
+    grup.label = "Metode Saya";
+    grup.dataset.custom = "true";
+    custom.forEach((method) => {
+      if (methodGrid) methodGrid.appendChild(buildCustomTile(method));
+      const option = document.createElement("option");
+      option.value = method.key;
+      option.textContent = `${method.emoji} ${method.name}`;
+      grup.appendChild(option);
+    });
+    fieldMethod.appendChild(grup);
+  }
+
   /** UI-2a: samakan isi selector dengan daftar metode aktif. Grid dan <select>
    * dibangun dari SATU sumber (getActivePaymentMethods()), jadi tidak mungkin
    * keduanya berbeda isi. <option> metode nonaktif benar-benar DILEPAS, bukan
@@ -258,7 +316,9 @@ function setupTransactionModal() {
    * ke jalur selectedIndex === -1 yang sudah ada sejak P-2 — nilai lamanya
    * dipertahankan tanpa mekanisme baru. */
   function applyActiveMethods() {
-    const active = new Set(getActivePaymentMethods().map((method) => method.key));
+    const aktif = getActivePaymentMethods();
+    const active = new Set(aktif.map((method) => method.key));
+    renderCustomMethods(aktif); // sumber daftarnya sama persis dengan grid bawaan
     if (methodGrid) {
       methodGrid.querySelectorAll(".method-option[data-method]").forEach((btn) => {
         const on = active.has(btn.dataset.method);

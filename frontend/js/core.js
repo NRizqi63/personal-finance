@@ -122,7 +122,7 @@ const financeData = {
   // mati, bukan yang aktif — alasannya di loadPaymentMethods(). Diisi dari
   // localStorage saat halaman dibuka; user yang belum pernah mengatur apa pun
   // tidak punya key ini sama sekali dan semua metode aktif.
-  paymentMethods: { disabled: [] },
+  paymentMethods: { disabled: [], custom: [] },
 };
 
 // Kategori cadangan yang SELALU ada di form transaksi tapi tidak punya
@@ -225,9 +225,13 @@ const PAYMENT_UNSET = "";
  * tidak pernah cocok tanpa perlu guard tambahan. */
 function findPaymentMethod(key) {
   if (typeof key !== "string" || !key) return null;
-  return PAYMENT_METHODS.find((item) => item.key === key)
-    || PAYMENT_LEGACY_METHODS.find((item) => item.key === key)
-    || null;
+  const bawaan = PAYMENT_METHODS.find((item) => item.key === key)
+    || PAYMENT_LEGACY_METHODS.find((item) => item.key === key);
+  if (bawaan) return bawaan;
+  // Entri custom yang sudah di-soft-delete SENGAJA ikut ditemukan: transaksi
+  // lama yang memakainya harus tetap punya label.
+  const custom = findCustomPaymentMethod(key);
+  return custom ? customPaymentView(custom) : null;
 }
 
 /** Label TEKS siap tampil untuk sebuah key: "💵 Cash". Masih memakai emoji —
@@ -251,17 +255,156 @@ function normalizePaymentMethod(raw) {
   return findPaymentMethod(raw) ? raw : PAYMENT_UNSET;
 }
 
+// Katalog SARAN untuk layar "Tambah metode pembayaran". Isinya TIDAK pernah
+// disimpan: memilih satu entri sama saja dengan mengetik namanya sendiri —
+// keduanya menghasilkan satu metode custom ber-key "user:". Sengaja pendek
+// (20 entri, di luar 11 bawaan) supaya tidak berubah jadi katalog ratusan bank
+// yang harus dirawat.
+const PAYMENT_CATALOG = [
+  { name: "Seabank", group: "mbanking" },
+  { name: "Bank Jago", group: "mbanking" },
+  { name: "blu by BCA Digital", group: "mbanking" },
+  { name: "BSI Mobile", group: "mbanking" },
+  { name: "BTN Mobile", group: "mbanking" },
+  { name: "CIMB OCTO", group: "mbanking" },
+  { name: "Permata Mobile X", group: "mbanking" },
+  { name: "OCBC ONe", group: "mbanking" },
+  { name: "D-Bank PRO", group: "mbanking" },
+  { name: "Jenius", group: "mbanking" },
+  { name: "Allo Bank", group: "mbanking" },
+  { name: "Neo Bank", group: "mbanking" },
+  { name: "Muamalat DIN", group: "mbanking" },
+  { name: "LINE Bank", group: "mbanking" },
+  { name: "QRIS", group: "ewallet" },
+  { name: "Flip", group: "ewallet" },
+  { name: "AstraPay", group: "ewallet" },
+  { name: "i.saku", group: "ewallet" },
+  { name: "Sakuku", group: "ewallet" },
+  { name: "DOKU", group: "ewallet" },
+];
+
+// Awalan key metode buatan user. Ini yang menjamin key custom TIDAK PERNAH
+// bertabrakan dengan key bawaan — sekarang maupun bawaan yang ditambahkan di
+// versi aplikasi berikutnya.
+const PAYMENT_CUSTOM_PREFIX = "user:";
+
+// Batas jumlah metode custom yang aktif. Bukan batas teknis: selector transaksi
+// jadi tidak terbaca kalau daftarnya terlalu panjang.
+const PAYMENT_CUSTOM_MAX = 20;
+
+const PAYMENT_CUSTOM_GROUPS = ["mbanking", "ewallet", "other"];
+
+// Metode custom tidak punya berkas logo (unggah logo di luar lingkup), jadi
+// ikonnya diturunkan dari jenisnya.
+const PAYMENT_GROUP_EMOJI = { mbanking: "🏦", ewallet: "📱", other: "🧾" };
+
+const PAYMENT_NAME_MAX = 30;
+
+// Karakter kontrol yang tidak masuk akal ada di nama metode. Tab/newline TIDAK
+// termasuk: keduanya cuma dirapatkan jadi spasi biasa.
+const PAYMENT_NAME_FORBIDDEN = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/;
+
+// Bentuk key custom yang sah di localStorage: "user:" + slug.
+const PAYMENT_CUSTOM_KEY_PATTERN = /^user:[a-z0-9][a-z0-9-]{0,39}$/;
+
+/** Nama -> potongan key yang aman: huruf kecil, hanya [a-z0-9-]. Nama yang
+ * sama sekali tidak punya huruf/angka (mis. hanya emoji) menghasilkan ""; yang
+ * memanggil yang menyiapkan nama cadangan. */
+function slugifyPaymentName(name) {
+  return String(name === null || name === undefined ? "" : name)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 32)
+    .replace(/-+$/g, "");
+}
+
+/** Rapatkan spasi & buang spasi tepi. TIDAK membuang karakter berbahaya —
+ * nama tetap disimpan apa adanya (seperti nama kategori), keamanannya dijaga
+ * di sisi render yang selalu memakai textContent. */
+function normalizePaymentName(raw) {
+  return typeof raw === "string" ? raw.replace(/\s+/g, " ").trim() : "";
+}
+
+function customPaymentMethods() {
+  return financeData.paymentMethods.custom;
+}
+
+/** Entri custom (termasuk yang sudah di-soft-delete) untuk sebuah key. */
+function findCustomPaymentMethod(key) {
+  if (typeof key !== "string" || !key) return null;
+  return customPaymentMethods().find((item) => item.key === key) || null;
+}
+
+/** Entri custom disajikan dalam BENTUK YANG SAMA dengan entri PAYMENT_METHODS,
+ * supaya grid, <select>, dan tombol non-aktif tidak perlu tahu bedanya.
+ * logo: "" -> pengisi logo langsung berhenti dan emoji jenisnya yang dipakai. */
+function customPaymentView(entry) {
+  return {
+    key: entry.key,
+    name: entry.name,
+    emoji: PAYMENT_GROUP_EMOJI[entry.group] || PAYMENT_GROUP_EMOJI.other,
+    group: entry.group,
+    logo: "",
+  };
+}
+
+/** Tambah metode buatan user. TIDAK menyimpan — pemanggil yang menyimpan dan
+ * me-rollback kalau gagal (pola editor kategori di budget.js). Hasilnya objek,
+ * bukan boolean, supaya UI bisa memberi pesan yang tepat untuk tiap sebab.
+ * Nama yang sama dengan entri yang sudah di-soft-delete MENGHIDUPKAN entri itu
+ * kembali, bukan membuat key baru — transaksi lama langsung tersambung lagi. */
+function addCustomPaymentMethod(rawName, rawGroup) {
+  if (typeof rawName !== "string" || PAYMENT_NAME_FORBIDDEN.test(rawName)) return { ok: false, reason: "karakter" };
+  const name = normalizePaymentName(rawName);
+  if (!name) return { ok: false, reason: "kosong" };
+  if (name.length > PAYMENT_NAME_MAX) return { ok: false, reason: "panjang" };
+  const group = PAYMENT_CUSTOM_GROUPS.includes(rawGroup) ? rawGroup : "other";
+  const sama = (a, b) => a.toLowerCase() === b.toLowerCase();
+  if (PAYMENT_METHODS.some((m) => sama(m.name, name))) return { ok: false, reason: "duplikat" };
+  if (PAYMENT_LEGACY_METHODS.some((m) => sama(m.name, name))) return { ok: false, reason: "duplikat" };
+
+  const list = customPaymentMethods();
+  const kembar = list.find((item) => sama(item.name, name));
+  if (kembar && !kembar.deleted) return { ok: false, reason: "duplikat" };
+  if (kembar) {
+    kembar.deleted = false;
+    kembar.group = group;
+    return { ok: true, key: kembar.key, revived: true };
+  }
+  if (list.filter((item) => !item.deleted).length >= PAYMENT_CUSTOM_MAX) return { ok: false, reason: "penuh" };
+
+  const slug = slugifyPaymentName(name) || "metode";
+  let key = PAYMENT_CUSTOM_PREFIX + slug;
+  let n = 2;
+  while (list.some((item) => item.key === key)) {
+    key = `${PAYMENT_CUSTOM_PREFIX}${slug}-${n}`;
+    n += 1;
+  }
+  list.push({ key, name, group, deleted: false });
+  return { ok: true, key, revived: false };
+}
+
 /** SATU-SATUNYA sumber daftar metode yang boleh muncul di selector transaksi.
  * Grid tombol dan <select> tersembunyi keduanya membaca dari sini, supaya
  * tidak mungkin keduanya berisi daftar yang berbeda. */
 function getActivePaymentMethods() {
-  return PAYMENT_METHODS.filter((method) => !financeData.paymentMethods.disabled.includes(method.key));
+  const disabled = financeData.paymentMethods.disabled;
+  const bawaan = PAYMENT_METHODS.filter((method) => !disabled.includes(method.key));
+  const custom = customPaymentMethods()
+    .filter((item) => !item.deleted && !disabled.includes(item.key))
+    .map(customPaymentView);
+  return bawaan.concat(custom); // bawaan dulu, lalu urutan penambahan user
 }
 
 /** Apakah key ini metode bawaan yang sedang aktif? Key legacy dan key yang
  * tidak dikenal selalu false — keduanya memang tidak pernah ditawarkan. */
 function isPaymentMethodActive(key) {
-  return PAYMENT_METHOD_KEYS.includes(key) && !financeData.paymentMethods.disabled.includes(key);
+  if (typeof key !== "string" || !key) return false;
+  if (financeData.paymentMethods.disabled.includes(key)) return false;
+  if (PAYMENT_METHOD_KEYS.includes(key)) return true;
+  const custom = findCustomPaymentMethod(key);
+  return !!custom && !custom.deleted;
 }
 
 /** Satu-satunya jalan mengubah status aktif. Aturan "minimal satu metode
@@ -270,7 +413,9 @@ function isPaymentMethodActive(key) {
  * Tidak menyimpan — pemanggil yang menyimpan dan me-rollback kalau gagal
  * (pola yang sama dengan editor kategori di budget.js). */
 function setPaymentMethodActive(key, active) {
-  if (!PAYMENT_METHOD_KEYS.includes(key)) return false;
+  const custom = findCustomPaymentMethod(key);
+  // Metode yang sudah dihapus tidak bisa dinyalakan lewat pintu ini.
+  if (!PAYMENT_METHOD_KEYS.includes(key) && !(custom && !custom.deleted)) return false;
   const disabled = financeData.paymentMethods.disabled;
   const at = disabled.indexOf(key);
   if (active) {
@@ -304,11 +449,35 @@ function loadPaymentMethods() {
     if (!saved) return;
     const parsed = JSON.parse(saved);
     if (!parsed || typeof parsed !== "object" || !Array.isArray(parsed.disabled)) return;
+
+    // Metode custom dibaca DULU: daftar yang dimatikan hanya boleh memuat key
+    // yang benar-benar ada. Entri rusak dilewati satu per satu (pola kategori
+    // di loadBudget), bukan membatalkan seluruh data.
+    const custom = [];
+    if (Array.isArray(parsed.custom)) {
+      parsed.custom.forEach((entry) => {
+        if (!entry || typeof entry !== "object") return;
+        if (!PAYMENT_CUSTOM_KEY_PATTERN.test(entry.key)) return;
+        if (custom.some((item) => item.key === entry.key)) return;
+        if (typeof entry.name !== "string" || PAYMENT_NAME_FORBIDDEN.test(entry.name)) return;
+        const name = normalizePaymentName(entry.name);
+        if (!name || name.length > PAYMENT_NAME_MAX) return;
+        if (!PAYMENT_CUSTOM_GROUPS.includes(entry.group)) return;
+        const deleted = entry.deleted === true;
+        if (!deleted && custom.filter((item) => !item.deleted).length >= PAYMENT_CUSTOM_MAX) return;
+        custom.push({ key: entry.key, name, group: entry.group, deleted });
+      });
+    }
+
+    const dikenal = PAYMENT_METHOD_KEYS.concat(custom.map((item) => item.key));
     const disabled = parsed.disabled.filter(
-      (key, i, list) => PAYMENT_METHOD_KEYS.includes(key) && list.indexOf(key) === i
+      (key, i, list) => dikenal.includes(key) && list.indexOf(key) === i
     );
-    if (disabled.length >= PAYMENT_METHOD_KEYS.length) return; // minimal satu aktif
+    const aktif = dikenal.filter((key) => !disabled.includes(key)).length
+      - custom.filter((item) => item.deleted && !disabled.includes(item.key)).length;
+    if (aktif < 1) return; // data yang mematikan SEMUA metode ditolak seluruhnya
     financeData.paymentMethods.disabled = disabled;
+    financeData.paymentMethods.custom = custom;
   } catch (err) {
     // localStorage tidak tersedia / data korup — tetap pakai default.
   }
@@ -320,7 +489,10 @@ function savePaymentMethods() {
   try {
     localStorage.setItem(
       PAYMENT_METHODS_STORAGE_KEY,
-      JSON.stringify({ disabled: financeData.paymentMethods.disabled })
+      JSON.stringify({
+        disabled: financeData.paymentMethods.disabled,
+        custom: financeData.paymentMethods.custom,
+      })
     );
     return true;
   } catch (err) {

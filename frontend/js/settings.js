@@ -1005,18 +1005,38 @@ function setupPaymentMethodManager() {
     return row;
   }
 
+  /** UI-2b1: metode buatan user ikut di daftar yang sama, di bawah judul
+   * "Metode Saya". Entri yang sudah dihapus tidak ditampilkan — yang bisa
+   * dilihat user hanya yang masih berlaku. */
+  function customRows() {
+    return customPaymentMethods().filter((entry) => !entry.deleted).map(customPaymentView);
+  }
+
+  function buildSubheading(text) {
+    const judul = document.createElement("h3");
+    judul.className = "section-title settings-subtitle";
+    judul.textContent = text;
+    return judul;
+  }
+
   function renderList() {
     const active = getActivePaymentMethods().length;
+    const custom = customRows();
     list.textContent = "";
     PAYMENT_METHODS.forEach((method) => list.appendChild(buildRow(method, active <= 1)));
-    count.textContent = `${active} dari ${PAYMENT_METHODS.length} metode aktif.`;
+    if (custom.length) {
+      list.appendChild(buildSubheading("Metode Saya"));
+      custom.forEach((method) => list.appendChild(buildRow(method, active <= 1)));
+    }
+    const total = PAYMENT_METHODS.length + custom.length;
+    count.textContent = `${active} dari ${total} metode aktif.`;
   }
 
   list.addEventListener("change", (e) => {
     const input = e.target.closest(".switch-input[data-method]");
     if (!input) return;
     const key = input.dataset.method;
-    const method = PAYMENT_METHODS.find((item) => item.key === key);
+    const method = findPaymentMethod(key); // bawaan maupun custom
     if (!method) return;
     const wanted = input.checked;
     const before = financeData.paymentMethods.disabled.slice(); // untuk rollback
@@ -1044,6 +1064,131 @@ function setupPaymentMethodManager() {
       "success"
     );
   });
+
+  /* ---------- UI-2b1: tambah metode buatan user ---------- */
+  const addOverlay = document.getElementById("method-add-overlay");
+  const search = document.getElementById("method-search");
+  const results = document.getElementById("method-search-results");
+  const groupField = document.getElementById("method-add-group");
+  const manualBtn = document.getElementById("btn-method-add-manual");
+  const addStatus = document.getElementById("method-add-status");
+  const addModal = createModalController(addOverlay, { onClose: () => setAddStatus("", "success") });
+
+  const ALASAN = {
+    kosong: "Nama metode tidak boleh kosong.",
+    panjang: `Nama metode maksimal ${PAYMENT_NAME_MAX} karakter.`,
+    karakter: "Nama metode memuat karakter yang tidak didukung.",
+    duplikat: "Sudah ada metode dengan nama itu.",
+    penuh: `Maksimal ${PAYMENT_CUSTOM_MAX} metode buatan sendiri. Matikan atau hapus yang tidak dipakai dulu.`,
+  };
+
+  function setAddStatus(text, type) {
+    addStatus.textContent = text;
+    addStatus.dataset.type = type || "success";
+    addStatus.hidden = !text;
+  }
+
+  /** Nama yang SUDAH dipakai — dipakai untuk menandai entri katalog yang tidak
+   * perlu ditambahkan lagi. Termasuk nama bawaan supaya "Cash" tidak muncul
+   * sebagai saran yang pasti ditolak. */
+  function namaTerpakai(nama) {
+    const sama = (a) => a.toLowerCase() === nama.toLowerCase();
+    return PAYMENT_METHODS.some((m) => sama(m.name))
+      || customPaymentMethods().some((entry) => !entry.deleted && sama(entry.name));
+  }
+
+  /** Satu baris hasil pencarian. Pola markup-nya sama dengan baris "Export
+   * JSON" di halaman ini: teks + tombol aksi di kanan, jadi tidak ada gaya
+   * baru. Nama ditulis lewat textContent. */
+  function buildResultRow(item) {
+    const row = document.createElement("div");
+    row.className = "settings-row settings-row--action";
+
+    const icon = document.createElement("span");
+    icon.className = "settings-row-icon";
+    icon.setAttribute("aria-hidden", "true");
+    icon.textContent = PAYMENT_GROUP_EMOJI[item.group] || PAYMENT_GROUP_EMOJI.other;
+
+    const body = document.createElement("span");
+    body.className = "settings-row-body";
+    const title = document.createElement("span");
+    title.className = "settings-row-title";
+    title.textContent = item.name;
+    const desc = document.createElement("span");
+    desc.className = "settings-row-desc";
+    const dipakai = namaTerpakai(item.name);
+    desc.textContent = dipakai ? "Sudah ada di daftarmu" : (item.group === "mbanking" ? "Bank" : "E-Wallet");
+    body.append(title, desc);
+
+    const pick = document.createElement("button");
+    pick.type = "button";
+    pick.className = "btn btn--ghost btn--xs settings-row-action";
+    pick.textContent = dipakai ? "Sudah ada" : "Pilih";
+    pick.disabled = dipakai;
+    pick.dataset.name = item.name;
+    pick.dataset.group = item.group;
+
+    row.append(icon, body, pick);
+    return row;
+  }
+
+  function renderResults() {
+    const q = normalizePaymentName(search.value);
+    const cocok = q
+      ? PAYMENT_CATALOG.filter((item) => item.name.toLowerCase().includes(q.toLowerCase()))
+      : PAYMENT_CATALOG;
+    results.textContent = "";
+    cocok.slice(0, 8).forEach((item) => results.appendChild(buildResultRow(item)));
+    // Tidak ketemu bukan jalan buntu: nama ketikan user selalu bisa dipakai.
+    manualBtn.hidden = !q;
+    if (q) manualBtn.textContent = `Tambahkan "${q}" sebagai metode saya`;
+  }
+
+  /** Satu pintu untuk katalog maupun ketikan manual: keduanya menghasilkan
+   * metode custom yang sama. Gagal simpan -> state dikembalikan utuh. */
+  function tambahMetode(nama, group) {
+    const sebelum = {
+      disabled: financeData.paymentMethods.disabled.slice(),
+      custom: financeData.paymentMethods.custom.map((entry) => ({ ...entry })),
+    };
+    const hasil = addCustomPaymentMethod(nama, group);
+    if (!hasil.ok) {
+      setAddStatus(ALASAN[hasil.reason] || "Metode tidak bisa ditambahkan.", "error");
+      return;
+    }
+    if (!savePaymentMethods()) {
+      financeData.paymentMethods.disabled = sebelum.disabled;
+      financeData.paymentMethods.custom = sebelum.custom;
+      setAddStatus(SAVE_FAILED, "error");
+      return;
+    }
+    const meta = findPaymentMethod(hasil.key);
+    addModal.close();
+    renderList();
+    setStatus(
+      hasil.revived
+        ? `${meta.name} dipakai lagi. Transaksi lamanya tersambung kembali.`
+        : `${meta.name} ditambahkan. Sekarang bisa dipilih saat menambah transaksi.`,
+      "success"
+    );
+  }
+
+  results.addEventListener("click", (e) => {
+    const pick = e.target.closest("button[data-name]");
+    if (!pick || pick.disabled) return;
+    tambahMetode(pick.dataset.name, pick.dataset.group);
+  });
+  search.addEventListener("input", renderResults);
+  manualBtn.addEventListener("click", () => tambahMetode(search.value, groupField.value));
+  document.getElementById("btn-add-method").addEventListener("click", () => {
+    search.value = "";
+    groupField.value = "ewallet";
+    setAddStatus("", "success");
+    renderResults();
+    addModal.open();
+  });
+  document.getElementById("method-add-close").addEventListener("click", () => addModal.close());
+  document.getElementById("btn-method-add-cancel").addEventListener("click", () => addModal.close());
 
   openBtn.addEventListener("click", () => {
     setStatus("", "success");
