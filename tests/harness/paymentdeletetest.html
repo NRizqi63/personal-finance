@@ -304,6 +304,75 @@ const delText = (id) => d.getElementById(id).textContent;
   ok("13h. P-5 belum: filter & analitik belum mengenal metode", !/method/.test(srcOf["transactions.js"]) && !/method/.test(srcOf["analytics.js"]));
   ok("13i. tanpa error konsol di seluruh alur", r.errors.length === 0, r.errors.join(" | "));
 
+  /* ============ 14. TOMBOL HAPUS UNTUK SEMUA METODE CUSTOM ============ */
+  // Satu keadaan dipakai berulang: dua metode custom (satu aktif, satu
+  // nonaktif) + dua metode custom lain untuk menguji dua mode penghapusan.
+  const AKTIF_PAKAI = { key: "user:aktif-pakai", name: "Aktif Dipakai", group: "mbanking", deleted: false };
+  const AKTIF_KOSONG = { key: "user:aktif-kosong", name: "Aktif Kosong", group: "ewallet", deleted: false };
+  const MATI_PAKAI = { key: "user:mati-pakai", name: "Mati Dipakai", group: "other", deleted: false };
+  const MATI_KOSONG = { key: "user:mati-kosong", name: "Mati Kosong", group: "other", deleted: false };
+  const EMPAT = [AKTIF_PAKAI, AKTIF_KOSONG, MATI_PAKAI, MATI_KOSONG];
+  const MATI = ["user:mati-pakai", "user:mati-kosong"];
+  const TX4 = [tx(1, "user:aktif-pakai"), tx(2, "user:mati-pakai")];
+
+  r = await load("settings.html", seedAll(EMPAT, TX4, MATI));
+  await openKelola();
+  ok("14a. keempat metode custom tampil — yang AKTIF maupun yang NONAKTIF", rows().length === 15 && EMPAT.every(e => !!rowOf(e.key)), String(rows().length));
+  ok("14b. metode custom AKTIF punya tombol Hapus", !!delBtn("user:aktif-pakai") && !!delBtn("user:aktif-kosong"));
+  ok("14c. metode custom NONAKTIF juga punya tombol Hapus", !!delBtn("user:mati-pakai") && !!delBtn("user:mati-kosong"));
+  ok("14d. saklar mencerminkan status aktif/nonaktifnya", rowOf("user:aktif-pakai").querySelector(".switch-input").checked === true && rowOf("user:mati-pakai").querySelector(".switch-input").checked === false);
+  ok("14e. SEMUA metode bawaan tetap TANPA tombol Hapus — yang aktif maupun yang dimatikan", w.eval("PAYMENT_METHOD_KEYS").every(k => !delBtn(k)) && !d.querySelector("#method-manage-list button[data-delete]:not([data-delete^='user:'])"));
+  ok("14f. tombol hapusnya punya nama aksesibel masing-masing", delBtn("user:mati-kosong").getAttribute("aria-label") === "Hapus Mati Kosong");
+
+  // --- AKTIF + sudah dipakai transaksi -> soft delete ---
+  delBtn("user:aktif-pakai").click(); await wait(250);
+  ok("14g. AKTIF + dipakai: konfirmasi menawarkan mode sembunyikan", /1 transaksi memakai metode ini/.test(delText("method-delete-sub")) && d.getElementById("btn-method-delete-confirm").textContent === "Sembunyikan Metode");
+  await tap(d.getElementById("btn-method-delete-confirm"));
+  ok("14h. AKTIF + dipakai -> SOFT delete: entri tetap ada, ditandai deleted", (() => {
+    const e = saved().custom.find(x => x.key === "user:aktif-pakai");
+    return !!e && e.deleted === true && saved().custom.length === 4;
+  })(), rawSaved());
+  ok("14i. transaksinya tidak berubah sama sekali", storedTx().length === 2 && storedTx()[0].method === "user:aktif-pakai");
+
+  // --- AKTIF + belum dipakai -> permanent delete ---
+  delBtn("user:aktif-kosong").click(); await wait(250);
+  ok("14j. AKTIF + belum dipakai: konfirmasi menawarkan hapus permanen", /dihapus permanen/.test(delText("method-delete-sub")) && d.getElementById("btn-method-delete-confirm").textContent === "Hapus Permanen");
+  await tap(d.getElementById("btn-method-delete-confirm"));
+  ok("14k. AKTIF + belum dipakai -> entrinya BENAR-BENAR hilang dari data", !saved().custom.some(x => x.key === "user:aktif-kosong") && saved().custom.length === 3);
+
+  // --- NONAKTIF + sudah dipakai -> soft delete ---
+  delBtn("user:mati-pakai").click(); await wait(250);
+  ok("14l. NONAKTIF + dipakai: modenya tetap sembunyikan (aturan dari DATA, bukan dari status aktif)", d.getElementById("btn-method-delete-confirm").textContent === "Sembunyikan Metode");
+  await tap(d.getElementById("btn-method-delete-confirm"));
+  ok("14m. NONAKTIF + dipakai -> SOFT delete & transaksi lamanya aman", (() => {
+    const e = saved().custom.find(x => x.key === "user:mati-pakai");
+    return !!e && e.deleted === true && storedTx().some(t => t.method === "user:mati-pakai");
+  })());
+  ok("14n. key-nya ikut dibersihkan dari daftar nonaktif", !saved().disabled.includes("user:mati-pakai"));
+
+  // --- NONAKTIF + belum dipakai -> permanent delete ---
+  delBtn("user:mati-kosong").click(); await wait(250);
+  await tap(d.getElementById("btn-method-delete-confirm"));
+  ok("14o. NONAKTIF + belum dipakai -> hapus permanen", !saved().custom.some(x => x.key === "user:mati-kosong") && saved().disabled.length === 0);
+  ok("14p. daftar kelola kembali ke 11 bawaan (dua entri soft-deleted tidak ditampilkan)", rows().length === 11 && w.eval("financeData.paymentMethods.custom.length") === 2);
+  ok("14q. metode bawaan sama sekali tidak terpengaruh", w.eval("getActivePaymentMethods().map(m => m.key).join()") === w.eval("PAYMENT_METHOD_KEYS").join());
+
+  // --- metode aktif TERAKHIR tidak boleh dihapus ---
+  r = await load("settings.html", seedAll([AKTIF_KOSONG], [], w.eval("PAYMENT_METHOD_KEYS")));
+  await openKelola();
+  ok("14r. dengan satu-satunya metode aktif berupa custom, tombol Hapusnya TETAP ada", w.eval("getActivePaymentMethods().map(m => m.key).join()") === "user:aktif-kosong" && !!delBtn("user:aktif-kosong"));
+  delBtn("user:aktif-kosong").click(); await wait(250);
+  await tap(d.getElementById("btn-method-delete-confirm"));
+  ok("14s. tapi aksinya DITOLAK: metode aktif terakhir tidak bisa dihapus", /Minimal satu metode/.test(delText("method-delete-status")) && delOpen() === true);
+  ok("14t. penolakan tidak mengubah data sedikit pun", w.eval("financeData.paymentMethods.custom.length") === 1 && w.eval("financeData.paymentMethods.custom[0].deleted") === false && w.eval("getActivePaymentMethods().length") === 1);
+  ok("14u. setelah satu metode bawaan dinyalakan lagi, penghapusan yang sama berhasil", (() => {
+    w.eval("setPaymentMethodActive('cash', true); savePaymentMethods();");
+    return true;
+  })());
+  await tap(d.getElementById("btn-method-delete-confirm"));
+  ok("14v. metode custom itu akhirnya terhapus & metode bawaan tetap utuh", !saved().custom.length && w.eval("getActivePaymentMethods().map(m => m.key).join()") === "cash");
+  ok("14w. tanpa error konsol sepanjang bagian ini", r.errors.length === 0, r.errors.join(" | "));
+
   document.getElementById("r").textContent = out.join("\n") + `\n\nTOTAL PASS=${out.filter(l => l.startsWith("PASS")).length} FAIL=${out.filter(l => l.startsWith("FAIL")).length}`;
 })().catch(e => { document.getElementById("r").textContent = out.join("\n") + "\nEXCEPTION " + e.message + "\n" + e.stack; });
 </script>
