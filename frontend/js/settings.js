@@ -1002,6 +1002,20 @@ function setupPaymentMethodManager() {
     box.append(input, track);
 
     row.append(icon, body, box);
+
+    // UI-2b2: hanya metode buatan user yang punya tombol hapus. Metode bawaan
+    // tidak pernah dapat tombol ini — satu-satunya jalan mengatur bawaan tetap
+    // saklar aktif/nonaktif. Tombol di dalam <label> tidak ikut men-toggle
+    // saklarnya (klik pada elemen interaktif tidak diteruskan label).
+    if (method.key.startsWith(PAYMENT_CUSTOM_PREFIX)) {
+      const hapus = document.createElement("button");
+      hapus.type = "button";
+      hapus.className = "btn btn--ghost btn--xs settings-row-action";
+      hapus.textContent = "Hapus";
+      hapus.dataset.delete = method.key;
+      hapus.setAttribute("aria-label", `Hapus ${method.name}`);
+      row.appendChild(hapus);
+    }
     return row;
   }
 
@@ -1189,6 +1203,80 @@ function setupPaymentMethodManager() {
   });
   document.getElementById("method-add-close").addEventListener("click", () => addModal.close());
   document.getElementById("btn-method-add-cancel").addEventListener("click", () => addModal.close());
+
+  /* ---------- UI-2b2: hapus metode buatan user ---------- */
+  const delOverlay = document.getElementById("method-delete-overlay");
+  const delTitle = document.getElementById("method-delete-title");
+  const delSub = document.getElementById("method-delete-sub");
+  const delStatus = document.getElementById("method-delete-status");
+  const delConfirm = document.getElementById("btn-method-delete-confirm");
+  // Pilihan yang menunggu konfirmasi. Selama ini masih terisi, TIDAK ADA data
+  // yang berubah — membatalkan cukup mengosongkannya.
+  let pendingDelete = null;
+  const delModal = createModalController(delOverlay, {
+    onClose: () => { pendingDelete = null; setDelStatus("", "success"); },
+  });
+
+  function setDelStatus(text, type) {
+    delStatus.textContent = text;
+    delStatus.dataset.type = type || "success";
+    delStatus.hidden = !text;
+  }
+
+  /** Buka konfirmasi. Isinya menjelaskan APA YANG AKAN TERJADI pada mode yang
+   * berlaku untuk metode itu, supaya user tidak menebak: dipakai transaksi =
+   * disembunyikan, belum dipakai = benar-benar hilang. */
+  function mintaHapus(key) {
+    const meta = findPaymentMethod(key);
+    if (!meta) return;
+    const used = countTransactionsByMethod(key);
+    pendingDelete = key;
+    delTitle.textContent = `Hapus ${meta.name}?`;
+    delSub.textContent = used
+      ? `${used} transaksi memakai metode ini. Metodenya disembunyikan dari daftar dan tidak bisa dipilih lagi, tapi transaksi itu tetap tersimpan dan tetap menampilkan metodenya saat dibuka.`
+      : "Belum ada transaksi yang memakainya, jadi metode ini dihapus permanen dari daftarmu.";
+    delConfirm.textContent = used ? "Sembunyikan Metode" : "Hapus Permanen";
+    setDelStatus("", "success");
+    delModal.open();
+  }
+
+  list.addEventListener("click", (e) => {
+    const tombol = e.target.closest("button[data-delete]");
+    if (!tombol) return;
+    mintaHapus(tombol.dataset.delete);
+  });
+
+  delConfirm.addEventListener("click", () => {
+    if (!pendingDelete) return;
+    const key = pendingDelete;
+    const meta = findPaymentMethod(key);
+    const sebelum = {
+      disabled: financeData.paymentMethods.disabled.slice(),
+      custom: financeData.paymentMethods.custom.map((entry) => ({ ...entry })),
+    };
+    const hasil = deleteCustomPaymentMethod(key);
+    if (!hasil.ok) {
+      setDelStatus(hasil.reason === "terakhir" ? LAST_ACTIVE : "Metode ini tidak bisa dihapus.", "error");
+      return; // konfirmasi tetap terbuka
+    }
+    if (!savePaymentMethods()) {
+      financeData.paymentMethods.disabled = sebelum.disabled;
+      financeData.paymentMethods.custom = sebelum.custom;
+      setDelStatus(SAVE_FAILED, "error");
+      return;
+    }
+    pendingDelete = null;
+    delModal.close();
+    renderList();
+    setStatus(
+      hasil.mode === "permanen"
+        ? `${meta.name} dihapus.`
+        : `${meta.name} dihapus dari daftar. ${hasil.used} transaksi lama yang memakainya tidak berubah.`,
+      "success"
+    );
+  });
+  document.getElementById("method-delete-close").addEventListener("click", () => delModal.close());
+  document.getElementById("btn-method-delete-cancel").addEventListener("click", () => delModal.close());
 
   openBtn.addEventListener("click", () => {
     setStatus("", "success");

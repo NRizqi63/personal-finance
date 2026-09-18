@@ -342,6 +342,29 @@
     </div>
   </div>
 
+  <!-- MODAL: KONFIRMASI HAPUS METODE (UI-2b2). Dibuka DARI modal Kelola.
+       Tidak ada data yang berubah sampai tombol aksi di modal ini ditekan;
+       menutup/membatalkan modal membuang pilihan tanpa menyentuh apa pun. -->
+  <div class="modal-overlay" id="method-delete-overlay" hidden>
+    <div class="modal modal--form modal--confirm" role="dialog" aria-modal="true" aria-labelledby="method-delete-title">
+      <div class="modal-header">
+        <h2 id="method-delete-title">Hapus Metode Pembayaran</h2>
+        <button type="button" class="modal-close" id="method-delete-close" aria-label="Tutup">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M18 6 6 18" />
+            <path d="m6 6 12 12" />
+          </svg>
+        </button>
+      </div>
+      <p class="modal-sub" id="method-delete-sub"></p>
+      <p class="settings-feedback settings-feedback--inset" id="method-delete-status" role="status" aria-live="polite" hidden></p>
+      <div class="modal-actions">
+        <button type="button" class="btn btn--ghost" id="btn-method-delete-cancel">Batal</button>
+        <button type="button" class="btn btn--danger" id="btn-method-delete-confirm">Hapus</button>
+      </div>
+    </div>
+  </div>
+
   <!-- MODAL: KONFIRMASI RESET (dipakai ketiga jenis reset, isinya diisi
        setupSettingsReset() lewat textContent). Tidak ada data yang berubah
        sampai tombol aksi di modal ini ditekan. -->

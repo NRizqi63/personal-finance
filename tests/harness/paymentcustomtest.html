@@ -394,8 +394,11 @@ const fire = (w, el, type) => el.dispatchEvent(new w.Event(type, { bubbles: true
   /* ============ 13. PAGAR TAHAP ============ */
   const codeOnly = (s) => s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|\s)\/\/.*$/gm, "$1");
   const allJs = Object.values(srcOf).map(codeOnly).join("\n");
-  ok("13a. UI-2b2 BELUM: tidak ada jalur hapus metode custom", !/deleteCustomPaymentMethod|hapusCustom|method-delete|confirm-delete-method/.test(allJs));
-  ok("13b. UI-2b1 tidak pernah MENULIS soft-delete (hanya membacanya dari data)", !/\.deleted = true/.test(allJs));
+  ok("13a. UI-2b2: jalur hapus ada, dan HANYA di core.js (aturan) + settings.js (UI)", /function deleteCustomPaymentMethod\(/.test(srcOf["core.js"]) && /deleteCustomPaymentMethod\(/.test(srcOf["settings.js"]) && ["transactions-shared.js", "dashboard.js", "transactions.js", "analytics.js", "budget.js", "goals.js"].every(f => !/deleteCustomPaymentMethod/.test(srcOf[f])));
+  ok("13b. penambahan metode TIDAK PERNAH menulis soft-delete — .deleted = true hanya ada di jalur hapus", (() => {
+    const tambah = (srcOf["core.js"].match(/function addCustomPaymentMethod\([\s\S]*?\n\}/) || [""])[0];
+    return !/\.deleted = true/.test(tambah) && (allJs.match(/\.deleted = true/g) || []).length === 1;
+  })());
   ok("13c. UI-2c BELUM: slot di modal transaksi masih kosong & tersembunyi", /id="method-more"[^>]*hidden/.test(html.index) && !/method-more/.test(srcOf["transactions-shared.js"]));
   ok("13d. P-3 belum: renderer baris transaksi belum menampilkan metode", !/getPaymentLabel|transaction-method/.test((srcOf["core.js"].match(/function renderTransactionItem\([\s\S]*?\n\}/) || [""])[0]));
   ok("13e. P-4 belum: schema backup 2, CSV 7 kolom, metode custom tidak ikut backup", /const BACKUP_SCHEMA_VERSION = 2;/.test(srcOf["settings.js"]) && /const CSV_HEADER = \["tanggal", "jenis", "judul", "kategori", "kategori_nama", "jumlah", "waktu"\];/.test(srcOf["settings.js"]) && ["buildBackup", "validateBackup", "writeImportedData", "applyPendingImport"].every(n => !/paymentMethods|custom/.test((srcOf["settings.js"].match(new RegExp(`function ${n}\\([\\s\\S]*?\\n\\}`)) || [""])[0])));

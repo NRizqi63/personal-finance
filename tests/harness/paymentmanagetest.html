@@ -222,7 +222,7 @@ const fire = (w, el, type) => el.dispatchEvent(new w.Event(type, { bubbles: true
   // nyalakan lagi
   toggle("gopay").checked = true; fire(w, toggle("gopay"), "change"); await wait(200);
   ok("5l. ATURAN 4: metode bawaan bisa diaktifkan kembali", JSON.parse(w.localStorage.getItem(KEY) || "{}").disabled.length === 0 && /GoPay aktif kembali/.test(statusText()));
-  ok("5m. tidak ada jalur HAPUS PERMANEN untuk metode bawaan (hanya saklar)", !d.querySelector("#method-manage-list button") && rows().every(row => !!row.querySelector(".switch-input")));
+  ok("5m. tidak ada jalur HAPUS untuk metode bawaan (hanya saklar); tombol hapus hanya milik metode buatan user", rows().every(row => !!row.querySelector(".switch-input")) && rows().filter(row => !row.getAttribute("for").startsWith("method-toggle-user:")).every(row => !row.querySelector("button")) && !d.querySelector("#method-manage-list button[data-delete]"));
   // sisakan satu
   for (const k of ALL.filter(x => x !== "cash")) { const t = toggle(k); t.checked = false; fire(w, t, "change"); await wait(50); }
   ok("5n. tersisa satu metode aktif", w.eval("getActivePaymentMethods().map(m => m.key).join()") === "cash");
@@ -248,8 +248,13 @@ const fire = (w, el, type) => el.dispatchEvent(new w.Event(type, { bubbles: true
 
   /* ============ 7. PAGAR TAHAP ============ */
   const codeOnly = (s) => s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|\s)\/\/.*$/gm, "$1");
-  ok("7a. UI-2b2 BELUM: tidak ada jalur HAPUS metode custom di kode mana pun", !/deleteCustomPaymentMethod|hapusCustom|method-delete|confirm-delete-method/.test(Object.values(srcOf).map(codeOnly).join("\n")));
-  ok("7b. UI-2b1: soft-delete hanya DIBACA dari data, tidak pernah ditulis UI", /paymentMethods: \{ disabled: \[\], custom: \[\] \}/.test(srcOf["core.js"]) && !/\.deleted = true/.test(Object.values(srcOf).join("\n")));
+  ok("7a. UI-2b2: jalur hapus metode custom HANYA ada di core.js (aturan) + settings.js (UI) — halaman lain tidak tahu apa-apa", /function deleteCustomPaymentMethod\(/.test(srcOf["core.js"]) && /deleteCustomPaymentMethod\(/.test(srcOf["settings.js"]) && ["transactions-shared.js", "dashboard.js", "transactions.js", "analytics.js", "budget.js", "goals.js"].every(f => !/deleteCustomPaymentMethod/.test(srcOf[f])));
+  ok("7b. ATURAN: soft-delete (.deleted = true) ditulis TEPAT SEKALI di seluruh kode, dan hanya di dalam deleteCustomPaymentMethod", (() => {
+    const semua = Object.values(srcOf).join("\n");
+    const jumlah = (semua.match(/\.deleted = true/g) || []).length;
+    const fn = (srcOf["core.js"].match(/function deleteCustomPaymentMethod\([\s\S]*?\n\}/) || [""])[0];
+    return jumlah === 1 && /\.deleted = true/.test(fn) && /paymentMethods: \{ disabled: \[\], custom: \[\] \}/.test(srcOf["core.js"]);
+  })());
   ok("7c. hanya core.js yang menyentuh key storage-nya", /const PAYMENT_METHODS_STORAGE_KEY = "financeData\.paymentMethods";/.test(srcOf["core.js"]) && ["transactions-shared.js", "settings.js", "dashboard.js", "transactions.js", "analytics.js", "budget.js", "goals.js"].every(f => !/PAYMENT_METHODS_STORAGE_KEY/.test(srcOf[f])));
   ok("7d. P-3 belum: renderer baris transaksi belum menampilkan metode", !/getPaymentLabel|transaction-method/.test((srcOf["core.js"].match(/function renderTransactionItem\([\s\S]*?\n\}/) || [""])[0]));
   ok("7e. P-4 belum: backup schema 2, CSV 7 kolom, dan pilihan metode TIDAK ikut di-backup", /const BACKUP_SCHEMA_VERSION = 2;/.test(srcOf["settings.js"]) && /const CSV_HEADER = \["tanggal", "jenis", "judul", "kategori", "kategori_nama", "jumlah", "waktu"\];/.test(srcOf["settings.js"]) && !/paymentMethods/.test((srcOf["settings.js"].match(/function buildBackup\([\s\S]*?\n\}/) || [""])[0]));

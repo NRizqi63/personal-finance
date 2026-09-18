@@ -385,6 +385,41 @@ function addCustomPaymentMethod(rawName, rawGroup) {
   return { ok: true, key, revived: false };
 }
 
+/** UI-2b2: hapus metode buatan user. Modenya dipilih dari DATA, bukan dari
+ * tombol mana yang ditekan:
+ *   - belum pernah dipakai transaksi -> DIHAPUS PERMANEN (entri dibuang)
+ *   - sudah dipakai                  -> SOFT DELETE (deleted = true), supaya
+ *     transaksi lama tetap punya label dan key-nya tidak pernah menggantung.
+ * Jadi metode yang masih direferensikan transaksi TIDAK PERNAH bisa hilang
+ * permanen, berapa kali pun tombol hapus ditekan.
+ *
+ * Key-nya sekalian dibersihkan dari daftar nonaktif: entri yang dihapus tidak
+ * perlu status nonaktif lagi, dan kalau nanti dihidupkan kembali lewat nama
+ * yang sama (addCustomPaymentMethod) ia langsung aktif — bukan diam-diam
+ * nonaktif karena sisa status lama.
+ *
+ * Aturan "minimal satu metode aktif" ikut ditegakkan di sini, bukan cuma di
+ * UI. TIDAK menyimpan: pemanggil yang menyimpan dan me-rollback kalau gagal
+ * (pola yang sama dengan addCustomPaymentMethod dan editor kategori). */
+function deleteCustomPaymentMethod(key) {
+  const entry = findCustomPaymentMethod(key);
+  if (!entry || entry.deleted) return { ok: false, reason: "bukan-custom" };
+  if (isPaymentMethodActive(key) && getActivePaymentMethods().length <= 1) return { ok: false, reason: "terakhir" };
+
+  const used = countTransactionsByMethod(key);
+  const disabled = financeData.paymentMethods.disabled;
+  const at = disabled.indexOf(key);
+  if (at !== -1) disabled.splice(at, 1);
+
+  if (used > 0) {
+    entry.deleted = true;
+    return { ok: true, mode: "soft", used };
+  }
+  const list = customPaymentMethods();
+  list.splice(list.indexOf(entry), 1);
+  return { ok: true, mode: "permanen", used: 0 };
+}
+
 /** SATU-SATUNYA sumber daftar metode yang boleh muncul di selector transaksi.
  * Grid tombol dan <select> tersembunyi keduanya membaca dari sini, supaya
  * tidak mungkin keduanya berisi daftar yang berbeda. */

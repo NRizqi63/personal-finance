@@ -1,0 +1,309 @@
+<!doctype html>
+<meta charset="utf-8">
+<pre id="r">running…</pre>
+<script>
+/* UI-2b2 — menghapus metode pembayaran buatan user.
+
+   1 : aturan di core.js (dua mode, dipilih dari DATA)
+   2 : metode bawaan & legacy tidak punya jalur hapus sama sekali
+   3 : aturan minimal satu metode aktif ikut berlaku saat menghapus
+   4 : modal konfirmasi — isi, mode, dan tombol aksinya
+   5 : BATAL / tutup tidak mengubah apa pun
+   6 : hapus permanen (belum pernah dipakai transaksi)
+   7 : soft delete (sudah dipakai transaksi) & keamanan transaksi lama
+   8 : yang dihapus tidak muncul sebagai metode aktif di selector
+   9 : gagal simpan -> state di-rollback utuh
+  10 : data rusak & prototype pollution lewat jalur hapus
+  11 : XSS — nama ber-payload di konfirmasi & daftar
+  12 : persistensi localStorage
+  13 : pagar tahap — UI-2c/P-3/P-4/P-5 tetap belum tersentuh
+
+   Metode yang MASIH dipakai transaksi tidak pernah bisa hilang permanen;
+   itu aturan, bukan kebetulan, dan diuji dari dua sisi (core + UI). */
+const out = []; const ok = (n, c, x = "") => out.push(`${c ? "PASS" : "FAIL"} ${n}${x ? "  (" + x + ")" : ""}`);
+const wait = (ms) => new Promise(r => setTimeout(r, ms));
+const BASE = new URL("../../frontend/", location.href).href;
+const KEY = "financeData.paymentMethods";
+const XSS = '<b onmouseover=x>hai</b>';
+
+const pad = (n) => String(n).padStart(2, "0");
+const T = (() => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; })();
+const SEA = { key: "user:seabank", name: "Seabank", group: "mbanking", deleted: false };
+const WARUNG = { key: "user:warung", name: "Warung Pak Budi", group: "other", deleted: false };
+const tx = (id, method) => ({ id, title: "Tx" + id, category: "makanan", type: "expense", amount: 1000 * id, isoDate: T, time: "", method });
+
+let frame = null;
+let d = null, w = null;
+async function load(page = "settings.html", seed = () => {}) {
+  if (frame) frame.remove();
+  frame = document.createElement("iframe"); frame.width = 390; frame.height = 1600;
+  frame.src = BASE + "settings.html"; document.body.appendChild(frame);
+  await new Promise(r => frame.onload = r);
+  try {
+    const w0 = frame.contentWindow;
+    w0.localStorage.clear(); w0.sessionStorage.clear();
+    w0.sessionStorage.setItem("checkinDismissed", "true");
+    seed(w0);
+  } catch (e) {}
+  frame.remove();
+  frame = document.createElement("iframe"); frame.width = 390; frame.height = 1600; frame.src = BASE + page;
+  document.body.appendChild(frame);
+  await new Promise(r => frame.onload = r); await wait(350);
+  const r = { d: frame.contentDocument, w: frame.contentWindow, errors: [] };
+  r.w.addEventListener("error", e => r.errors.push(e.message));
+  r.w.console.error = (...a) => r.errors.push("console.error " + a.join(" "));
+  d = r.d; w = r.w;
+  return r;
+}
+const seedAll = (custom, transactions = [], disabled = []) => (w0) => {
+  w0.localStorage.setItem(KEY, JSON.stringify({ disabled, custom }));
+  if (transactions.length) w0.localStorage.setItem("financeData.transactions", JSON.stringify(transactions));
+};
+const call = (w0, fn, ...args) => { try { return { value: w0.eval(`(${fn}).apply(null, ${JSON.stringify(args)})`) }; } catch (e) { return { threw: e.message }; } };
+const rows = () => [...d.querySelectorAll("#method-manage-list .settings-row")];
+const rowOf = (key) => rows().find(row => row.getAttribute("for") === "method-toggle-" + key);
+const delBtn = (key) => { const row = rowOf(key); return row ? row.querySelector("button[data-delete]") : null; };
+const saved = () => JSON.parse(w.localStorage.getItem(KEY) || "{}");
+const storedTx = () => JSON.parse(w.localStorage.getItem("financeData.transactions") || "[]");
+const rawSaved = () => w.localStorage.getItem(KEY);
+const tap = async (el) => { el.focus(); el.click(); await wait(230); };
+const openKelola = async () => { await tap(d.getElementById("btn-manage-methods")); };
+const delOpen = () => !d.getElementById("method-delete-overlay").hidden;
+const delText = (id) => d.getElementById(id).textContent;
+
+(async () => {
+  const srcOf = {};
+  for (const f of ["core.js", "transactions-shared.js", "settings.js", "dashboard.js", "transactions.js", "analytics.js", "budget.js", "goals.js"]) {
+    srcOf[f] = await (await fetch(BASE + "js/" + f)).text();
+  }
+  const html = { index: await (await fetch(BASE + "index.html")).text(), transactions: await (await fetch(BASE + "transactions.html")).text() };
+
+  /* ============ 1. ATURAN DI CORE ============ */
+  let r = await load("index.html", seedAll([SEA, WARUNG], [tx(1, "user:seabank"), tx(2, "user:seabank")]));
+  const del = (key) => call(w, "deleteCustomPaymentMethod", key).value;
+  ok("1a. metode custom TANPA transaksi -> mode permanen", (() => {
+    const hasil = del("user:warung");
+    return hasil.ok === true && hasil.mode === "permanen" && hasil.used === 0;
+  })());
+  ok("1b. hapus permanen benar-benar membuang entrinya dari data", w.eval("financeData.paymentMethods.custom.map(e => e.key).join()") === "user:seabank");
+  ok("1c. metode custom DENGAN transaksi -> mode soft, jumlah pemakaian dilaporkan", (() => {
+    const hasil = del("user:seabank");
+    return hasil.ok === true && hasil.mode === "soft" && hasil.used === 2;
+  })());
+  ok("1d. soft delete MEMPERTAHANKAN entrinya, hanya menandai deleted", (() => {
+    const e = w.eval("JSON.stringify(financeData.paymentMethods.custom[0])");
+    return JSON.parse(e).key === "user:seabank" && JSON.parse(e).deleted === true && JSON.parse(e).name === "Seabank";
+  })(), w.eval("JSON.stringify(financeData.paymentMethods.custom)"));
+  ok("1e. transaksi TIDAK disentuh oleh penghapusan", w.eval("financeData.transactions.length") === 2 && w.eval("financeData.transactions.every(t => t.method === 'user:seabank')"));
+  ok("1f. menghapus entri yang sudah dihapus ditolak (tidak ada penghapusan ganda)", del("user:seabank").ok === false && del("user:seabank").reason === "bukan-custom");
+  ok("1g. deleteCustomPaymentMethod TIDAK menyimpan sendiri", w.localStorage.getItem(KEY) === JSON.stringify({ disabled: [], custom: [SEA, WARUNG] }), String(w.localStorage.getItem(KEY)));
+  r = await load("index.html", seedAll([SEA], [], ["user:seabank"]));
+  ok("1h. metode custom yang sedang NONAKTIF tetap bisa dihapus", del("user:seabank").ok === true);
+  ok("1i. key-nya sekalian dibersihkan dari daftar nonaktif (tidak meninggalkan sisa)", w.eval("financeData.paymentMethods.disabled.length") === 0);
+  r = await load("index.html", seedAll([SEA], [tx(1, "user:seabank")], ["user:seabank"]));
+  ok("1j. soft delete pada metode nonaktif juga membersihkan sisa status itu", (() => {
+    const hasil = del("user:seabank");
+    return hasil.mode === "soft" && w.eval("financeData.paymentMethods.disabled.length") === 0 && w.eval("financeData.paymentMethods.custom[0].deleted") === true;
+  })());
+  ok("1k. nama yang sama bisa dihidupkan kembali setelah soft delete, dan langsung AKTIF", (() => {
+    const hidup = call(w, "addCustomPaymentMethod", "Seabank", "mbanking").value;
+    return hidup.ok === true && hidup.revived === true && w.eval("isPaymentMethodActive('user:seabank')") === true;
+  })());
+
+  /* ============ 2. BAWAAN & LEGACY TIDAK BISA DIHAPUS ============ */
+  r = await load("index.html", seedAll([SEA]));
+  ok("2a. metode BAWAAN ditolak jalur hapus", w.eval("PAYMENT_METHOD_KEYS").every(k => del(k).ok === false && del(k).reason === "bukan-custom"));
+  ok("2b. key legacy & key asing juga ditolak", ["debit", "mbanking", "qris", "", "__proto__", "constructor", "toString"].every(k => del(k).ok === false));
+  ok("2c. penolakan tidak mengubah apa pun", w.eval("PAYMENT_METHODS.length") === 11 && w.eval("financeData.paymentMethods.custom.length") === 1 && w.eval("getActivePaymentMethods().length") === 12);
+  ok("2d. deleteCustomPaymentMethod tidak pernah melempar", ["", null, undefined, 42, {}, [], "user:tidak-ada"].every(v => !("threw" in call(w, "deleteCustomPaymentMethod", v))));
+  ok("2e. prototype tetap bersih setelah dipanggil dengan key jahat", w.eval("({}).polluted === undefined && Object.prototype.polluted === undefined && typeof {}.toString === 'function'"));
+
+  /* ============ 3. MINIMAL SATU METODE AKTIF ============ */
+  r = await load("index.html", seedAll([SEA]));
+  ok("3a. menghapus custom saat ia SATU-SATUNYA yang aktif ditolak", (() => {
+    w.eval("PAYMENT_METHOD_KEYS.forEach(k => setPaymentMethodActive(k, false))");
+    const sisa = w.eval("getActivePaymentMethods().map(m => m.key).join()");
+    const hasil = del("user:seabank");
+    return sisa === "user:seabank" && hasil.ok === false && hasil.reason === "terakhir";
+  })());
+  ok("3b. penolakan itu tidak merusak data (entri & transaksi utuh)", w.eval("financeData.paymentMethods.custom.length") === 1 && w.eval("financeData.paymentMethods.custom[0].deleted") === false && w.eval("getActivePaymentMethods().length") === 1);
+  ok("3c. setelah satu metode bawaan dinyalakan lagi, penghapusan diizinkan", (() => {
+    w.eval("setPaymentMethodActive('cash', true)");
+    return del("user:seabank").ok === true;
+  })());
+
+  /* ============ 4. MODAL KONFIRMASI ============ */
+  r = await load("settings.html", seedAll([SEA, WARUNG], [tx(1, "user:seabank"), tx(2, "user:seabank")]));
+  ok("4a. modal konfirmasi ADA di halaman, tertutup, dan isinya kosong saat dimuat", !!d.getElementById("method-delete-overlay") && !delOpen() && delText("method-delete-sub") === "");
+  await openKelola();
+  ok("4b. hanya baris metode buatan user yang punya tombol Hapus", !!delBtn("user:seabank") && !!delBtn("user:warung") && w.eval("PAYMENT_METHOD_KEYS").every(k => !delBtn(k)));
+  ok("4c. tombol Hapus punya nama aksesibel yang menyebut metodenya", delBtn("user:seabank").getAttribute("aria-label") === "Hapus Seabank");
+  ok("4d. menekan Hapus tidak langsung menghapus — hanya membuka konfirmasi", (() => {
+    delBtn("user:warung").click();
+    return true;
+  })());
+  await wait(250);
+  ok("4e. konfirmasi terbuka DI ATAS modal kelola (keduanya terbuka)", delOpen() && !d.getElementById("method-manage-overlay").hidden);
+  ok("4f. data belum berubah sama sekali saat konfirmasi terbuka", w.eval("financeData.paymentMethods.custom.length") === 2 && rawSaved() === JSON.stringify({ disabled: [], custom: [SEA, WARUNG] }));
+  ok("4g. judul menyebut nama metodenya", delText("method-delete-title") === "Hapus Warung Pak Budi?");
+  ok("4h. mode PERMANEN dijelaskan apa adanya & tombolnya diberi label sesuai", /dihapus permanen/.test(delText("method-delete-sub")) && d.getElementById("btn-method-delete-confirm").textContent === "Hapus Permanen");
+  await tap(d.getElementById("btn-method-delete-cancel"));
+  await openKelola();
+  delBtn("user:seabank").click(); await wait(250);
+  ok("4i. mode SOFT menyebut jumlah transaksi & menjanjikan transaksinya aman", /2 transaksi memakai metode ini/.test(delText("method-delete-sub")) && /tetap tersimpan/.test(delText("method-delete-sub")));
+  ok("4j. tombol aksinya berbeda untuk mode soft (bukan \"permanen\")", d.getElementById("btn-method-delete-confirm").textContent === "Sembunyikan Metode");
+  ok("4k. tombol tutup & Batal tersedia", !!d.getElementById("method-delete-close") && !!d.getElementById("btn-method-delete-cancel"));
+
+  /* ============ 5. BATAL TIDAK MENGUBAH APA PUN ============ */
+  await tap(d.getElementById("btn-method-delete-cancel"));
+  ok("5a. Batal menutup konfirmasi", !delOpen());
+  ok("5b. Batal: data di memori & localStorage sama persis seperti sebelumnya", w.eval("financeData.paymentMethods.custom.length") === 2 && w.eval("financeData.paymentMethods.custom.every(e => !e.deleted)") && rawSaved() === JSON.stringify({ disabled: [], custom: [SEA, WARUNG] }));
+  ok("5c. Batal: daftar kelola tetap menampilkan kedua metode", rows().length === 13 && !!rowOf("user:seabank") && !!rowOf("user:warung"));
+  delBtn("user:seabank").click(); await wait(250);
+  await tap(d.getElementById("method-delete-close"));
+  ok("5d. menutup lewat tombol X juga tidak mengubah apa pun", !delOpen() && w.eval("financeData.paymentMethods.custom.length") === 2 && rawSaved() === JSON.stringify({ disabled: [], custom: [SEA, WARUNG] }));
+  delBtn("user:seabank").click(); await wait(250);
+  d.getElementById("method-delete-overlay").dispatchEvent(new w.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  await wait(400);
+  ok("5e. Escape menutup konfirmasi tanpa menghapus (pilihan dibuang)", !delOpen() && w.eval("financeData.paymentMethods.custom.length") === 2);
+  ok("5f. setelah dibatalkan, menekan tombol konfirmasi tidak menghapus apa pun (pilihan sudah kosong)", (() => {
+    d.getElementById("btn-method-delete-confirm").click();
+    return w.eval("financeData.paymentMethods.custom.length") === 2 && w.eval("financeData.paymentMethods.custom.every(e => !e.deleted)");
+  })());
+
+  /* ============ 6. HAPUS PERMANEN ============ */
+  await openKelola();
+  delBtn("user:warung").click(); await wait(250);
+  await tap(d.getElementById("btn-method-delete-confirm"));
+  ok("6a. konfirmasi tertutup setelah dihapus", !delOpen());
+  ok("6b. entri hilang dari data & localStorage", saved().custom.map(e => e.key).join() === "user:seabank" && w.eval("financeData.paymentMethods.custom.length") === 1);
+  ok("6c. daftar kelola berkurang satu baris", rows().length === 12 && !rowOf("user:warung"));
+  ok("6d. user diberi tahu", /Warung Pak Budi dihapus/.test(d.getElementById("method-manage-status").textContent), d.getElementById("method-manage-status").textContent);
+  ok("6e. metode bawaan & transaksi tidak terpengaruh", w.eval("getActivePaymentMethods().filter(m => !m.key.startsWith('user:')).length") === 11 && storedTx().length === 2);
+
+  /* ============ 7. SOFT DELETE & TRANSAKSI LAMA ============ */
+  delBtn("user:seabank").click(); await wait(250);
+  await tap(d.getElementById("btn-method-delete-confirm"));
+  ok("7a. entri TETAP ADA di localStorage, hanya ditandai deleted", (() => {
+    const e = saved().custom[0];
+    return saved().custom.length === 1 && e.key === "user:seabank" && e.deleted === true && e.name === "Seabank" && e.group === "mbanking";
+  })(), rawSaved());
+  ok("7b. transaksi lama utuh: jumlah & method-nya tidak berubah", storedTx().length === 2 && storedTx().every(t => t.method === "user:seabank"));
+  ok("7c. pesannya menyebut transaksi lama tetap aman", /2 transaksi lama yang memakainya tidak berubah/.test(d.getElementById("method-manage-status").textContent), d.getElementById("method-manage-status").textContent);
+  ok("7d. metode yang dihapus tidak lagi muncul di daftar kelola", rows().length === 11 && !rowOf("user:seabank"));
+  ok("7e. tapi key-nya tetap bisa dikenali aplikasi (untuk transaksi lama/recovery)", w.eval("findPaymentMethod('user:seabank').name") === "Seabank" && w.eval("normalizePaymentMethod('user:seabank')") === "user:seabank");
+  ok("7f. dan TIDAK dianggap aktif", w.eval("isPaymentMethodActive('user:seabank')") === false && !w.eval("getActivePaymentMethods().map(m => m.key)").includes("user:seabank"));
+
+  /* ============ 8. SELECTOR TRANSAKSI ============ */
+  const SETELAH = [{ key: "user:seabank", name: "Seabank", group: "mbanking", deleted: true }, WARUNG];
+  for (const page of ["index.html", "transactions.html"]) {
+    r = await load(page, seedAll(SETELAH, [tx(1, "user:seabank")]));
+    const tiles = [...d.querySelectorAll("#method-grid .method-option[data-method]")].filter(t => !t.hidden).map(t => t.dataset.method);
+    const opts = [...d.getElementById("field-method").options].map(o => o.value);
+    ok(`8a. ${page}: metode yang dihapus TIDAK muncul di grid`, !tiles.includes("user:seabank") && tiles.includes("user:warung"), tiles.filter(k => k.startsWith("user:")).join());
+    ok(`8b. ${page}: dan tidak ada di <select>`, !opts.includes("user:seabank") && opts.includes("user:warung"));
+    ok(`8c. ${page}: optgroup "Metode Saya" hanya berisi yang masih berlaku`, (() => {
+      const g = [...d.querySelectorAll("#field-method optgroup")].find(x => x.label === "Metode Saya");
+      return !!g && [...g.querySelectorAll("option")].map(o => o.value).join() === "user:warung";
+    })());
+  }
+  r = await load("transactions.html", seedAll(SETELAH, [tx(1, "user:seabank")]));
+  await tap(d.querySelector('#all-transaction-list [data-action="edit"]'));
+  ok("8d. mengedit transaksi lama menampilkan tombol non-aktif berlabel \"— dihapus\"", (() => {
+    const mati = d.querySelector("#method-grid .method-option.is-legacy");
+    return !!mati && mati.querySelector(".method-name").textContent.trim() === "Seabank — dihapus" && mati.disabled && !mati.dataset.method;
+  })(), (d.querySelector("#method-grid .method-option.is-legacy") || {}).textContent);
+  d.getElementById("transaction-form").requestSubmit(); await wait(300);
+  ok("8e. menyimpan ulang MEMPERTAHANKAN metode yang sudah dihapus", storedTx()[0].method === "user:seabank");
+  await tap(d.querySelector('#all-transaction-list [data-action="edit"]'));
+  await tap(d.querySelector('.method-option[data-method="user:warung"]'));
+  d.getElementById("transaction-form").requestSubmit(); await wait(300);
+  ok("8f. user tetap bisa memindahkannya ke metode lain", storedTx()[0].method === "user:warung");
+
+  /* ============ 9. GAGAL SIMPAN -> ROLLBACK ============ */
+  r = await load("settings.html", seedAll([SEA, WARUNG], [tx(1, "user:seabank")]));
+  await openKelola();
+  const asli = w.localStorage.setItem.bind(w.localStorage);
+  w.localStorage.setItem = (k, v) => { if (k === KEY) throw new Error("QuotaExceeded"); return asli(k, v); };
+  delBtn("user:warung").click(); await wait(250);
+  await tap(d.getElementById("btn-method-delete-confirm"));
+  ok("9a. gagal simpan (mode permanen): entri DIKEMBALIKAN utuh", w.eval("financeData.paymentMethods.custom.length") === 2 && w.eval("financeData.paymentMethods.custom.map(e => e.key).join()") === "user:seabank,user:warung");
+  ok("9b. urutan & isi entri persis seperti semula", w.eval("JSON.stringify(financeData.paymentMethods.custom)") === JSON.stringify([SEA, WARUNG]));
+  ok("9c. localStorage tidak berubah", rawSaved() === JSON.stringify({ disabled: [], custom: [SEA, WARUNG] }));
+  ok("9d. konfirmasi tetap terbuka dengan pesan error yang tidak hilang sendiri", delOpen() && /tidak bisa disimpan/.test(delText("method-delete-status")) && d.getElementById("method-delete-status").dataset.type === "error", delText("method-delete-status"));
+  delBtn("user:seabank"); // daftar belum dibangun ulang: pastikan barisnya masih ada
+  ok("9e. daftar kelola masih menampilkan kedua metode", !d.getElementById("method-manage-overlay").hidden);
+  w.localStorage.setItem = asli;
+  await tap(d.getElementById("btn-method-delete-confirm"));
+  ok("9f. setelah penyimpanan pulih, penghapusan yang sama berhasil", saved().custom.map(e => e.key).join() === "user:seabank" && !delOpen());
+  // gagal simpan pada mode soft
+  r = await load("settings.html", seedAll([SEA], [tx(1, "user:seabank")]));
+  await openKelola();
+  const asli2 = w.localStorage.setItem.bind(w.localStorage);
+  w.localStorage.setItem = (k, v) => { if (k === KEY) throw new Error("QuotaExceeded"); return asli2(k, v); };
+  delBtn("user:seabank").click(); await wait(250);
+  await tap(d.getElementById("btn-method-delete-confirm"));
+  ok("9g. gagal simpan (mode soft): status deleted DIKEMBALIKAN ke false", w.eval("financeData.paymentMethods.custom[0].deleted") === false && w.eval("isPaymentMethodActive('user:seabank')") === true);
+  ok("9h. transaksi tetap utuh setelah kegagalan", storedTx().length === 1 && storedTx()[0].method === "user:seabank");
+  w.localStorage.setItem = asli2;
+
+  /* ============ 10. DATA RUSAK LEWAT JALUR HAPUS ============ */
+  r = await load("index.html", seedAll([SEA]));
+  ok("10a. menghapus key yang tidak ada ditolak tanpa efek samping", del("user:tidak-ada").ok === false && w.eval("financeData.paymentMethods.custom.length") === 1);
+  ok("10b. key ber-prefix benar tapi tidak terdaftar juga ditolak", del("user:__proto__").ok === false && w.eval("({}).polluted === undefined"));
+  r = await load("index.html", seedAll([{ key: "user:x", name: "X", group: "other", deleted: true }], [tx(1, "user:x")]));
+  ok("10c. entri yang sudah deleted di DATA tidak bisa dihapus lagi", del("user:x").ok === false && w.eval("financeData.paymentMethods.custom.length") === 1);
+  ok("10d. entri deleted tidak ikut dihitung sebagai metode aktif", w.eval("getActivePaymentMethods().length") === 11 && w.eval("isPaymentMethodActive('user:x')") === false);
+  ok("10e. tapi labelnya tetap tersedia untuk transaksi lama", w.eval("findPaymentMethod('user:x').name") === "X");
+
+  /* ============ 11. XSS ============ */
+  const JAHAT = { key: "user:jahat", name: XSS, group: "other", deleted: false };
+  r = await load("settings.html", seedAll([JAHAT], [tx(1, "user:jahat")]));
+  await openKelola();
+  ok("11a. nama ber-payload tampil sebagai teks di daftar kelola", rows().some(row => row.querySelector(".settings-row-title").textContent === XSS));
+  ok("11b. tombol hapusnya memakai nama itu di aria-label, bukan sebagai markup", delBtn("user:jahat").getAttribute("aria-label") === `Hapus ${XSS}` && d.querySelectorAll("#method-manage-list b, #method-manage-list [onmouseover]").length === 0);
+  delBtn("user:jahat").click(); await wait(250);
+  ok("11c. judul konfirmasi memuat nama itu sebagai TEKS", delText("method-delete-title") === `Hapus ${XSS}?` && d.querySelectorAll("#method-delete-overlay b, #method-delete-overlay [onmouseover]").length === 0);
+  ok("11d. tidak ada kode yang tereksekusi", w.top.__pwned === undefined && w.__pwned === undefined);
+  await tap(d.getElementById("btn-method-delete-confirm"));
+  ok("11e. setelah dihapus, pesan statusnya juga teks biasa", d.getElementById("method-manage-status").textContent.includes(XSS) && d.querySelectorAll("#method-manage-status b").length === 0);
+  ok("11f. jalur hapus di settings.js tidak memakai innerHTML", (() => {
+    const blok = srcOf["settings.js"].slice(srcOf["settings.js"].indexOf("/* ---------- UI-2b2"), srcOf["settings.js"].indexOf("function initSettingsPage("));
+    return blok.length > 800 && !/innerHTML|insertAdjacentHTML|outerHTML|document\.write/.test(blok);
+  })());
+
+  /* ============ 12. PERSISTENSI ============ */
+  r = await load("settings.html", seedAll([SEA, WARUNG], [tx(1, "user:seabank")]));
+  await openKelola();
+  delBtn("user:seabank").click(); await wait(250);
+  await tap(d.getElementById("btn-method-delete-confirm"));
+  ok("12a. hasil soft delete langsung tertulis ke localStorage", saved().custom.find(e => e.key === "user:seabank").deleted === true);
+  ok("12b. bentuk payload tetap { disabled, custom } (tidak ada bidang baru)", Object.keys(saved()).sort().join() === "custom,disabled");
+  w.location.reload(); await wait(700);
+  w = frame.contentWindow; d = frame.contentDocument;
+  ok("12c. setelah reload: status terhapus bertahan", w.eval("financeData.paymentMethods.custom.find(e => e.key === 'user:seabank').deleted") === true && w.eval("isPaymentMethodActive('user:seabank')") === false);
+  ok("12d. setelah reload: metode custom lain tetap aktif", w.eval("isPaymentMethodActive('user:warung')") === true);
+  ok("12e. memuat ulang tidak menulis ulang localStorage", Object.keys(saved()).sort().join() === "custom,disabled" && saved().custom.length === 2);
+
+  /* ============ 13. PAGAR TAHAP ============ */
+  const codeOnly = (s) => s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|\s)\/\/.*$/gm, "$1");
+  ok("13a. jalur hapus HANYA di core.js (aturan) + settings.js (UI)", /function deleteCustomPaymentMethod\(/.test(srcOf["core.js"]) && /deleteCustomPaymentMethod\(/.test(srcOf["settings.js"]) && ["transactions-shared.js", "dashboard.js", "transactions.js", "analytics.js", "budget.js", "goals.js"].every(f => !/deleteCustomPaymentMethod/.test(srcOf[f])));
+  ok("13b. ATURAN: .deleted = true ditulis TEPAT SEKALI, di dalam deleteCustomPaymentMethod", (() => {
+    const semua = Object.values(srcOf).join("\n");
+    const fn = (srcOf["core.js"].match(/function deleteCustomPaymentMethod\([\s\S]*?\n\}/) || [""])[0];
+    return (semua.match(/\.deleted = true/g) || []).length === 1 && /\.deleted = true/.test(fn);
+  })());
+  ok("13c. penghapusan tidak pernah menyentuh array transaksi", (() => {
+    const fn = (srcOf["core.js"].match(/function deleteCustomPaymentMethod\([\s\S]*?\n\}/) || [""])[0];
+    return fn.length > 300 && !/financeData\.transactions\s*(?:=|\.push|\.splice|\.filter\s*\([^)]*\)\s*;)/.test(fn) && /countTransactionsByMethod\(/.test(fn);
+  })());
+  ok("13d. UI-2c BELUM: slot di modal transaksi masih kosong & tersembunyi", /id="method-more"[^>]*hidden/.test(html.index) && /id="method-more"[^>]*hidden/.test(html.transactions) && !/method-more/.test(srcOf["transactions-shared.js"]));
+  ok("13e. halaman transaksi tidak tahu apa-apa soal penghapusan", !/method-delete|deleteCustom/.test(html.index + html.transactions));
+  ok("13f. P-3 belum: renderer baris transaksi belum menampilkan metode", !/getPaymentLabel|transaction-method/.test((srcOf["core.js"].match(/function renderTransactionItem\([\s\S]*?\n\}/) || [""])[0]));
+  ok("13g. P-4 belum: schema backup 2, CSV 7 kolom, metode tidak ikut backup/reset", /const BACKUP_SCHEMA_VERSION = 2;/.test(srcOf["settings.js"]) && /const CSV_HEADER = \["tanggal", "jenis", "judul", "kategori", "kategori_nama", "jumlah", "waktu"\];/.test(srcOf["settings.js"]) && ["buildBackup", "validateBackup", "writeImportedData", "applyDataReset"].every(n => !/paymentMethods/.test((srcOf["settings.js"].match(new RegExp(`function ${n}\\([\\s\\S]*?\\n\\}`)) || [""])[0])));
+  ok("13h. P-5 belum: filter & analitik belum mengenal metode", !/method/.test(srcOf["transactions.js"]) && !/method/.test(srcOf["analytics.js"]));
+  ok("13i. tanpa error konsol di seluruh alur", r.errors.length === 0, r.errors.join(" | "));
+
+  document.getElementById("r").textContent = out.join("\n") + `\n\nTOTAL PASS=${out.filter(l => l.startsWith("PASS")).length} FAIL=${out.filter(l => l.startsWith("FAIL")).length}`;
+})().catch(e => { document.getElementById("r").textContent = out.join("\n") + "\nEXCEPTION " + e.message + "\n" + e.stack; });
+</script>
