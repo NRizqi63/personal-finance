@@ -1708,9 +1708,13 @@ a:focus-visible {
 
 /* Slot aksi di bawah grid (tahap custom: "Tambah metode pembayaran").
    Kosong & hidden sampai tahap itu dikerjakan. */
+/* UI-2c: slot ini sekarang berisi tombol entry point + panel tambah metode,
+   jadi isinya ditumpuk ke bawah, bukan disejajarkan. */
 .method-more {
   display: flex;
-  justify-content: flex-start;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
 }
 
 /* Pilihan cepat nominal budget bulanan: chip pil 36px, aktif = hijau lembut. */

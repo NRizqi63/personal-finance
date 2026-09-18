@@ -51,6 +51,11 @@ async function open(url, { tx = TX, width = 390 } = {}) {
 // UI-1: isi #method-grid dilepas dari perbandingan (komponen pasca-refactor;
 // app.js beku tidak mengatur state aktifnya). Wadahnya tetap dibandingkan.
 const stripMethodGrid = (h) => h.replace(/(<div class="method-grid"[^>]*>)[\s\S]*?(<\/div>)/g, "$1[grid metode]$2");
+// UI-2c: isi #method-more (tombol entry point + panel tambah metode) juga
+// komponen pasca-refactor — app.js beku membiarkan slot itu kosong. Karena
+// isinya bersarang, potongannya diambil sampai penanda stabil berikutnya
+// (<select id="field-method">), bukan sampai </div> pertama.
+const stripMethodMore = (h) => h.replace(/<div class="method-more"[\s\S]*?<select id="field-method"/g, '<div class="method-more">[slot tambah metode]</div><select id="field-method"');
 const stripMethod = (raw) => {
   if (raw === null) return raw;
   try {
@@ -68,7 +73,7 @@ const items = (d) => [...d.querySelectorAll("#all-transaction-list .transaction-
 const editOf = (d, id) => d.querySelector(`#all-transaction-list [data-action="edit"][data-id="${id}"]`);
 const delOf = (d, id) => d.querySelector(`#all-transaction-list [data-action="delete"][data-id="${id}"]`);
 const activeOf = (d) => { const e = d.activeElement; if (!e || e === d.body || e.disabled) return "body"; return e.id || e.dataset.id || e.dataset.date || e.getAttribute("aria-label") || e.className; };
-const norm = (h) => stripMethodGrid(h.replace(/\s+/g, " ").replace(/<script src="[^"]*"><\/script>/g, "").replace(/<!--[\s\S]*?-->/g, "").replace(/ is-open"/g, '"').replace(/ no-transition"/g, '"').replace(/style="left: [\d.]+px; width: [\d.]+px;"/g, "").trim()); // .is-open/.no-transition/inline indikator = rAF (artefak timing headless)
+const norm = (h) => stripMethodMore(stripMethodGrid(h.replace(/\s+/g, " ").replace(/<script src="[^"]*"><\/script>/g, "").replace(/<!--[\s\S]*?-->/g, "").replace(/ is-open"/g, '"').replace(/ no-transition"/g, '"').replace(/style="left: [\d.]+px; width: [\d.]+px;"/g, "").trim())); // .is-open/.no-transition/inline indikator = rAF (artefak timing headless)
 
 (async () => {
   const coreSrc = await (await fetch(FRONT + "js/core.js")).text();

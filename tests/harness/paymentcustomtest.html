@@ -399,7 +399,7 @@ const fire = (w, el, type) => el.dispatchEvent(new w.Event(type, { bubbles: true
     const tambah = (srcOf["core.js"].match(/function addCustomPaymentMethod\([\s\S]*?\n\}/) || [""])[0];
     return !/\.deleted = true/.test(tambah) && (allJs.match(/\.deleted = true/g) || []).length === 1;
   })());
-  ok("13c. UI-2c BELUM: slot di modal transaksi masih kosong & tersembunyi", /id="method-more"[^>]*hidden/.test(html.index) && !/method-more/.test(srcOf["transactions-shared.js"]));
+  ok("13c. UI-2c: slot diisi dari JS — markup halaman tetap kosong & hidden, dan penambahan dari modal transaksi memakai addCustomPaymentMethod yang sama", /<div class="method-more" id="method-more" hidden><\/div>/.test(html.index.replace(/\s+/g, " ")) && /addCustomPaymentMethod\(/.test(srcOf["transactions-shared.js"]) && !/function addCustomPaymentMethod/.test(srcOf["transactions-shared.js"]));
   ok("13d. P-3 belum: renderer baris transaksi belum menampilkan metode", !/getPaymentLabel|transaction-method/.test((srcOf["core.js"].match(/function renderTransactionItem\([\s\S]*?\n\}/) || [""])[0]));
   ok("13e. P-4 belum: schema backup 2, CSV 7 kolom, metode custom tidak ikut backup", /const BACKUP_SCHEMA_VERSION = 2;/.test(srcOf["settings.js"]) && /const CSV_HEADER = \["tanggal", "jenis", "judul", "kategori", "kategori_nama", "jumlah", "waktu"\];/.test(srcOf["settings.js"]) && ["buildBackup", "validateBackup", "writeImportedData", "applyPendingImport"].every(n => !/paymentMethods|custom/.test((srcOf["settings.js"].match(new RegExp(`function ${n}\\([\\s\\S]*?\\n\\}`)) || [""])[0])));
   ok("13f. P-5 belum: filter & analitik belum mengenal metode", !/method/.test(srcOf["transactions.js"]) && !/method/.test(srcOf["analytics.js"]));

@@ -297,7 +297,7 @@ const delText = (id) => d.getElementById(id).textContent;
     const fn = (srcOf["core.js"].match(/function deleteCustomPaymentMethod\([\s\S]*?\n\}/) || [""])[0];
     return fn.length > 300 && !/financeData\.transactions\s*(?:=|\.push|\.splice|\.filter\s*\([^)]*\)\s*;)/.test(fn) && /countTransactionsByMethod\(/.test(fn);
   })());
-  ok("13d. UI-2c BELUM: slot di modal transaksi masih kosong & tersembunyi", /id="method-more"[^>]*hidden/.test(html.index) && /id="method-more"[^>]*hidden/.test(html.transactions) && !/method-more/.test(srcOf["transactions-shared.js"]));
+  ok("13d. UI-2c: entry point tambah metode ada, tapi TIDAK ADA jalur hapus metode dari modal transaksi", /methodMore\.append\(/.test(srcOf["transactions-shared.js"]) && !/deleteCustomPaymentMethod|method-delete/.test(srcOf["transactions-shared.js"]));
   ok("13e. halaman transaksi tidak tahu apa-apa soal penghapusan", !/method-delete|deleteCustom/.test(html.index + html.transactions));
   ok("13f. P-3 belum: renderer baris transaksi belum menampilkan metode", !/getPaymentLabel|transaction-method/.test((srcOf["core.js"].match(/function renderTransactionItem\([\s\S]*?\n\}/) || [""])[0]));
   ok("13g. P-4 belum: schema backup 2, CSV 7 kolom, metode tidak ikut backup/reset", /const BACKUP_SCHEMA_VERSION = 2;/.test(srcOf["settings.js"]) && /const CSV_HEADER = \["tanggal", "jenis", "judul", "kategori", "kategori_nama", "jumlah", "waktu"\];/.test(srcOf["settings.js"]) && ["buildBackup", "validateBackup", "writeImportedData", "applyDataReset"].every(n => !/paymentMethods/.test((srcOf["settings.js"].match(new RegExp(`function ${n}\\([\\s\\S]*?\\n\\}`)) || [""])[0])));

@@ -185,7 +185,13 @@ function call(w, fn, arg) {
     }));
     return hasil.every(Boolean);
   })());
-  ok("4i. UI-2c BELUM: slot \"Tambah metode\" di MODAL TRANSAKSI masih kosong & tersembunyi (pintu masuknya hanya dari Pengaturan)", !/Tambah metode pembayaran/.test((html.index + html.transactions).replace(/<!--[\s\S]*?-->/g, "")) && /id="method-more"[^>]*hidden/.test(html.index) && /id="method-more"[^>]*hidden/.test(html.transactions) && !/method-more/.test(srcOf["transactions-shared.js"]));
+  ok("4i. UI-2c: slot \"Tambah metode\" diisi DARI JS — markup kedua halaman tetap kosong & hidden, dan modal transaksi tetap tanpa jalur hapus metode", (() => {
+    const rapat = (s) => s.replace(/<!--[\s\S]*?-->/g, "").replace(/\s+/g, " ");
+    const kosongDiMarkup = (s) => /<div class="method-more" id="method-more" hidden><\/div>/.test(rapat(s));
+    return kosongDiMarkup(html.index) && kosongDiMarkup(html.transactions)
+      && /methodMore\.append\(/.test(srcOf["transactions-shared.js"])
+      && !/deleteCustomPaymentMethod/.test(srcOf["transactions-shared.js"]);
+  })());
   ok("4i2. UI-2b1: state metode = daftar yang dimatikan + daftar metode buatan user, dan hanya core.js yang menyimpannya", /paymentMethods: \{ disabled: \[\], custom: \[\] \}/.test(srcOf["core.js"]) && /const PAYMENT_METHODS_STORAGE_KEY = "financeData\.paymentMethods";/.test(srcOf["core.js"]) && FILES.filter(f => f !== "core.js").every(f => !/localStorage\.(?:set|get)Item\(\s*PAYMENT_METHODS_STORAGE_KEY/.test(srcOf[f])));
   ok("4i3. UI-2b1: katalog HANYA daftar saran — tidak pernah ikut disimpan", /const PAYMENT_CATALOG = \[/.test(srcOf["core.js"]) && !/PAYMENT_CATALOG/.test((srcOf["core.js"].match(/function savePaymentMethods\(\)[\s\S]*?\n\}/) || [""])[0]) && !/PAYMENT_CATALOG/.test((srcOf["core.js"].match(/function loadPaymentMethods\(\)[\s\S]*?\n\}/) || [""])[0]));
   ok("4i4. UI-2b2: penghapusan metode custom TIDAK menyentuh halaman transaksi sama sekali (jalurnya hanya lewat Pengaturan)", !/deleteCustomPaymentMethod|method-delete/.test(srcOf["transactions-shared.js"]) && !/Hapus metode|method-delete/.test(html.index + html.transactions) && /function deleteCustomPaymentMethod\(/.test(srcOf["core.js"]));
@@ -242,7 +248,14 @@ function call(w, fn, arg) {
     ok(`6a5d. ${page}: tidak ada <img> lain di form selain slot logo yang sah`, strayImgs(dp).length === 0);
     ok(`6a6. ${page}: grup dipakai sebagai data (data-group), bukan teks di tombol`, tilesOf(dp).every((t, i) => t.dataset.group === list[i].group) && !/Mobile Banking|E-Wallet/.test(dp.getElementById("method-grid").textContent));
     ok(`6a7. ${page}: roving tabindex — hanya SATU tombol yang bisa dicapai Tab`, tilesOf(dp).filter(t => t.tabIndex === 0).length === 1);
-    ok(`6a8. ${page}: slot "Tambah metode pembayaran" disiapkan & masih tersembunyi`, (() => { const more = dp.getElementById("method-more"); return !!more && more.hidden && more.children.length === 0; })());
+    ok(`6a8. ${page}: UI-2c — slot terisi tombol entry point + panel yang TERTUTUP, dan tombolnya type=button (ada di dalam <form> transaksi)`, (() => {
+      const more = dp.getElementById("method-more");
+      if (!more || more.hidden) return false;
+      const btn = more.querySelector("#method-more-open");
+      const panel = more.querySelector("#method-more-form");
+      return !!btn && btn.type === "button" && btn.getAttribute("aria-expanded") === "false"
+        && !!panel && panel.hidden === true;
+    })(), (dp.getElementById("method-more") || {}).innerHTML ? "terisi" : "kosong");
     ok(`6b. ${page}: R-2 — opsi form PERSIS 11 metode aktif, urutan sama dengan PAYMENT_METHODS`, optionsOf(dp).map(o => o.value).join() === list.map(m => m.key).join(), optionsOf(dp).map(o => o.value).join());
     ok(`6b2. ${page}: tidak ada satu pun key legacy yang masih jadi pilihan aktif`, LEGACY.every(k => !optionsOf(dp).some(o => o.value === k)) && !optionsOf(dp).some(o => ["debit", "kredit", "lainnya", "paylater"].includes(o.value)));
     ok(`6b3. ${page}: tiga optgroup (Cash, Mobile Banking, E-Wallet) dengan isi 1/5/5 sesuai group di konstanta`, (() => {

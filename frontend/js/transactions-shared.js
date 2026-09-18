@@ -347,9 +347,162 @@ function setupTransactionModal() {
     });
   }
 
+
+  /* ---------- UI-2c: tambah metode langsung dari modal transaksi ---------- */
+  const methodMore = document.getElementById("method-more");
+  const ADD_REASON = {
+    kosong: "Isi nama metodenya dulu.",
+    panjang: `Nama metode maksimal ${PAYMENT_NAME_MAX} karakter.`,
+    karakter: "Nama metode memuat karakter yang tidak didukung.",
+    duplikat: "Sudah ada metode dengan nama itu.",
+    penuh: `Maksimal ${PAYMENT_CUSTOM_MAX} metode buatan sendiri. Matikan atau hapus yang tidak dipakai lewat Pengaturan.`,
+  };
+  const ADD_SAVE_FAILED = "Metode tidak bisa disimpan — penyimpanan browser penuh atau tidak tersedia. Coba lagi.";
+  let addOpenBtn = null;
+  let addPanel = null;
+  let addName = null;
+  let addGroup = null;
+  let addStatus = null;
+
+  function setAddStatus(text) {
+    if (!addStatus) return;
+    addStatus.textContent = text;
+    addStatus.dataset.type = "error"; // panel ini hanya memberi kabar saat gagal
+    addStatus.hidden = !text;
+  }
+
+  /** Isi slot #method-more: satu tombol + panel kecil yang tersembunyi.
+   * Semuanya dibuat lewat DOM API; tidak ada innerHTML di jalur ini karena
+   * nama metode berasal dari ketikan user. */
+  function buildAddPanel() {
+    if (!methodMore) return;
+
+    addOpenBtn = document.createElement("button");
+    addOpenBtn.type = "button"; // WAJIB: elemen ini ada di dalam <form> transaksi
+    addOpenBtn.className = "btn btn--ghost btn--xs";
+    addOpenBtn.id = "method-more-open";
+    addOpenBtn.textContent = "+ Tambah metode";
+    addOpenBtn.setAttribute("aria-expanded", "false");
+    addOpenBtn.setAttribute("aria-controls", "method-more-form");
+
+    addPanel = document.createElement("div");
+    addPanel.id = "method-more-form";
+    addPanel.hidden = true;
+
+    const nameField = document.createElement("div");
+    nameField.className = "form-field";
+    const nameLabel = document.createElement("label");
+    nameLabel.setAttribute("for", "method-new-name");
+    nameLabel.textContent = "Nama metode";
+    addName = document.createElement("input");
+    addName.type = "text";
+    addName.id = "method-new-name";
+    addName.maxLength = PAYMENT_NAME_MAX;
+    addName.autocomplete = "off";
+    addName.placeholder = "Contoh: Seabank";
+    nameField.append(nameLabel, addName);
+
+    const groupField = document.createElement("div");
+    groupField.className = "form-field";
+    const groupLabel = document.createElement("label");
+    groupLabel.setAttribute("for", "method-new-group");
+    groupLabel.textContent = "Jenis";
+    addGroup = document.createElement("select");
+    addGroup.id = "method-new-group";
+    [["mbanking", "Bank"], ["ewallet", "E-Wallet"], ["other", "Lain"]].forEach(([value, label]) => {
+      const option = document.createElement("option");
+      option.value = value;
+      option.textContent = label;
+      addGroup.appendChild(option);
+    });
+    addGroup.value = "ewallet";
+    groupField.append(groupLabel, addGroup);
+
+    addStatus = document.createElement("p");
+    addStatus.className = "settings-feedback";
+    addStatus.id = "method-new-status";
+    addStatus.setAttribute("role", "status");
+    addStatus.setAttribute("aria-live", "polite");
+    addStatus.hidden = true;
+
+    const actions = document.createElement("div");
+    actions.className = "modal-actions";
+    const cancelBtn = document.createElement("button");
+    cancelBtn.type = "button";
+    cancelBtn.className = "btn btn--ghost btn--sm";
+    cancelBtn.id = "method-new-cancel";
+    cancelBtn.textContent = "Batal";
+    const saveBtn = document.createElement("button");
+    saveBtn.type = "button"; // bukan submit: form ini milik transaksi
+    saveBtn.className = "btn btn--primary btn--sm";
+    saveBtn.id = "method-new-save";
+    saveBtn.textContent = "Tambah";
+    actions.append(cancelBtn, saveBtn);
+
+    addPanel.append(nameField, groupField, addStatus, actions);
+    methodMore.append(addOpenBtn, addPanel);
+    methodMore.hidden = false;
+
+    addOpenBtn.addEventListener("click", () => (addPanel.hidden ? openAddPanel() : closeAddPanel()));
+    cancelBtn.addEventListener("click", () => closeAddPanel());
+    saveBtn.addEventListener("click", submitNewMethod);
+  }
+
+  function openAddPanel() {
+    if (!addPanel) return;
+    addName.value = "";
+    addGroup.value = "ewallet";
+    setAddStatus("");
+    addPanel.hidden = false;
+    addOpenBtn.setAttribute("aria-expanded", "true");
+    addName.focus();
+  }
+
+  /** Menutup panel TIDAK menyentuh isian transaksi sama sekali — judul,
+   * nominal, kategori, tanggal, dan metode yang sudah dipilih tetap apa
+   * adanya. Itu sebabnya panel ini tidak pernah memanggil resetForm(). */
+  function closeAddPanel(options) {
+    if (!addPanel) return;
+    addPanel.hidden = true;
+    addOpenBtn.setAttribute("aria-expanded", "false");
+    addName.value = "";
+    setAddStatus("");
+    if (!options || options.focusBack !== false) addOpenBtn.focus();
+  }
+
+  /** Satu-satunya jalan menambah metode dari sini. Aturannya milik core
+   * (addCustomPaymentMethod): nama kosong/panjang/duplikat/batas 20 dan
+   * menghidupkan kembali entri yang sudah dihapus semuanya diputuskan di sana,
+   * jadi perilakunya persis sama dengan layar tambah di Pengaturan. */
+  function submitNewMethod() {
+    if (!addPanel || addPanel.hidden) return;
+    const sebelum = {
+      disabled: financeData.paymentMethods.disabled.slice(),
+      custom: financeData.paymentMethods.custom.map((entry) => ({ ...entry })),
+    };
+    const hasil = addCustomPaymentMethod(addName.value, addGroup.value);
+    if (!hasil.ok) {
+      setAddStatus(ADD_REASON[hasil.reason] || "Metode tidak bisa ditambahkan.");
+      addName.focus();
+      return;
+    }
+    if (!savePaymentMethods()) {
+      financeData.paymentMethods.disabled = sebelum.disabled;
+      financeData.paymentMethods.custom = sebelum.custom;
+      setAddStatus(ADD_SAVE_FAILED);
+      return; // panel tetap terbuka, isian transaksi tidak tersentuh
+    }
+    applyActiveMethods(); // tombol & <option>-nya muncul tanpa memuat ulang halaman
+    setMethod(hasil.key); // langsung terpilih supaya user tidak mencarinya lagi
+    closeAddPanel({ focusBack: false });
+    const tile = methodGrid && methodGrid.querySelector(`.method-option[data-method="${hasil.key}"]`);
+    if (tile) tile.focus();
+  }
+
   if (methodGrid) {
     applyActiveMethods();
     methodButtons().forEach(upgradeMethodLogo);
+    buildAddPanel();
 
     methodGrid.addEventListener("click", (e) => {
       const btn = e.target.closest(".method-option");
@@ -563,6 +716,7 @@ function setupTransactionModal() {
     fieldMethod.value = firstActive ? firstActive.key : PAYMENT_UNSET;
     renderLegacyMethod(PAYMENT_UNSET);
     syncMethodGrid();
+    closeAddPanel({ focusBack: false }); // panel tidak pernah tertinggal terbuka
     populateCategoryOptions();
     setSelectedType("expense", { animate: false });
     // Tanggal LOKAL (toIsoDate), bukan toISOString() yang berbasis UTC: di
@@ -649,6 +803,16 @@ function setupTransactionModal() {
 
   form.addEventListener("submit", (e) => {
     e.preventDefault();
+
+    // UI-2c: kolom nama metode berada DI DALAM form transaksi, jadi Enter di
+    // sana memicu submit implisit (tanpa e.submitter). Selama panel tambah
+    // terbuka dan fokus ada di kolom itu, Enter berarti "Tambah metode".
+    // Ditangani di sini, bukan lewat listener keydown baru, supaya jumlah
+    // listener keydown aplikasi tidak bertambah.
+    if (addPanel && !addPanel.hidden && !e.submitter && document.activeElement === addName) {
+      submitNewMethod();
+      return;
+    }
 
     // Validasi per field dengan pesan sendiri (pola yang sama dengan form
     // kategori & profil). Tanpa ini, kasus seperti judul berisi spasi atau
